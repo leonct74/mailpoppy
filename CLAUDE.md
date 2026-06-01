@@ -37,10 +37,12 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
 - ✅ Planning complete (`DESIGN.md`).
 - ✅ **Phase 0 de-risk PASSED** (2026-06-01) — inbound→S3 and outbound→Gmail-inbox proven live
   on a real domain in `eu-west-1`; SPF/DKIM/DMARC all pass. See `phase0-derisk.md`.
-- 🚧 **Phase 1 (setup wizard) in progress.** Monorepo scaffold is in place (npm install +
-  typechecks pass). The provisioning sidecar (`apps/desktop/node-sidecar/src/provisioning.ts`)
-  translates the proven Phase 0 sequence to AWS SDK v3. Wizard UI, CDK backend (`infra`), and
-  Lambdas are stubbed and being fleshed out.
+- 🚧 **Phase 1 (setup wizard) functional.** Monorepo installs + typechecks. The wizard runs
+  the full loop live: **Step 0 readiness gate** (`provisioning.ts::checkReadiness` — credentials
+  + per-service permission probes + optional CLI detection) → preflight → provision → DKIM poll
+  → in-app deliverability test. **The AWS CLI is NOT required** (the SDK reads `~/.aws`/SSO
+  directly); Step 0 only gates on resolvable creds + permissions so setup never fails midway.
+  CDK backend (`infra`) + Lambdas are still stubbed.
 
 ## Architecture (concise)
 

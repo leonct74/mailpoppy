@@ -9,6 +9,7 @@
  * template (cdk synth → cloudformation:CreateStack). These direct calls cover
  * the core mail wiring and the health/verification UX of the Phase 1 wizard.
  */
+import { spawnSync } from "node:child_process";
 import { fromIni } from "@aws-sdk/credential-providers";
 import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 import {
@@ -23,6 +24,7 @@ import {
   SESv2Client,
   CreateEmailIdentityCommand,
   GetEmailIdentityCommand,
+  ListEmailIdentitiesCommand,
   SendEmailCommand,
 } from "@aws-sdk/client-sesv2";
 import {
@@ -30,8 +32,14 @@ import {
   CreateReceiptRuleSetCommand,
   CreateReceiptRuleCommand,
   SetActiveReceiptRuleSetCommand,
+  DescribeActiveReceiptRuleSetCommand,
 } from "@aws-sdk/client-ses";
-import { S3Client, CreateBucketCommand, PutBucketPolicyCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  CreateBucketCommand,
+  PutBucketPolicyCommand,
+  ListBucketsCommand,
+} from "@aws-sdk/client-s3";
 
 export interface AwsContext {
   region: string;
@@ -237,4 +245,72 @@ export async function sendTest(
     }),
   );
   return out.MessageId ?? "";
+}
+
+// ---- Environment readiness (run BEFORE provisioning, so setup never fails midway) ----
+
+export interface Readiness {
+  cli: { installed: boolean; version?: string };
+  credentials: { ok: boolean; arn?: string; account?: string; error?: string };
+  permissions: Record<"route53" | "ses" | "sesv2" | "s3", "ok" | "denied" | "error">;
+  ready: boolean;
+}
+
+/** Detect the AWS CLI. Optional — the SDK reads ~/.aws directly — but it sharpens guidance. */
+function detectCli(): { installed: boolean; version?: string } {
+  try {
+    const r = spawnSync("aws", ["--version"], { encoding: "utf8" });
+    if (r.error) return { installed: false };
+    const line = (r.stdout || r.stderr || "").trim().split("\n")[0] ?? "";
+    return { installed: true, version: line || undefined };
+  } catch {
+    return { installed: false };
+  }
+}
+
+function classifyError(e: unknown): "denied" | "error" {
+  const name = (e as { name?: string }).name ?? "";
+  return /AccessDenied|UnauthorizedOperation|NotAuthorized/i.test(name) ? "denied" : "error";
+}
+
+async function probe(send: Promise<unknown>): Promise<"ok" | "denied" | "error"> {
+  try {
+    await send;
+    return "ok";
+  } catch (e) {
+    return classifyError(e);
+  }
+}
+
+/**
+ * Confirms the admin's environment can actually provision: credentials resolve and the
+ * identity can reach each required service. Surfaces a clear "what to fix" instead of
+ * failing partway through provisioning. (Read probes are a strong proxy; a full
+ * write-permission check via iam:SimulatePrincipalPolicy is a later enhancement.)
+ */
+export async function checkReadiness(ctx: AwsContext): Promise<Readiness> {
+  const cli = detectCli();
+  const c = clients(ctx);
+
+  const credentials: Readiness["credentials"] = { ok: false };
+  try {
+    const id = await c.sts.send(new GetCallerIdentityCommand({}));
+    credentials.ok = true;
+    credentials.arn = id.Arn;
+    credentials.account = id.Account;
+  } catch (e) {
+    credentials.error = (e as Error).message ?? String(e);
+  }
+
+  const permissions: Readiness["permissions"] = credentials.ok
+    ? {
+        route53: await probe(c.route53.send(new ListHostedZonesByNameCommand({ MaxItems: 1 }))),
+        ses: await probe(c.ses.send(new DescribeActiveReceiptRuleSetCommand({}))),
+        sesv2: await probe(c.sesv2.send(new ListEmailIdentitiesCommand({ PageSize: 1 }))),
+        s3: await probe(c.s3.send(new ListBucketsCommand({}))),
+      }
+    : { route53: "error", ses: "error", sesv2: "error", s3: "error" };
+
+  const ready = credentials.ok && Object.values(permissions).every((v) => v === "ok");
+  return { cli, credentials, permissions, ready };
 }

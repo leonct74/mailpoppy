@@ -34,6 +34,10 @@ const ctx = (): prov.AwsContext => ({
 
 app.get("/health", async () => ({ ok: true }));
 
+// Step 0: is this environment able to provision at all? (credentials + per-service
+// permission probes + optional CLI detection). Run before anything mutating.
+app.get("/aws/readiness", async () => prov.checkReadiness(ctx()));
+
 // Read-only: confirm credentials + that the domain's zone exists (wizard step 1).
 app.get("/aws/preflight/:domain", async (req) => {
   const domain = (req.params as { domain: string }).domain;
