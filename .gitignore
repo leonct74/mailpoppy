@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.DS_Store
+# tauri
+apps/desktop/src-tauri/target/
+# cdk
+infra/cdk.out/
+# env / secrets
+.env
+.env.*

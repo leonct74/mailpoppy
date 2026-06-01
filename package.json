@@ -1,0 +1,20 @@
+{
+  "name": "mailpoppy",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Host email for your own domains inside your own AWS account.",
+  "workspaces": [
+    "packages/*",
+    "apps/desktop",
+    "apps/desktop/node-sidecar",
+    "infra",
+    "lambdas"
+  ],
+  "scripts": {
+    "typecheck": "tsc -b packages/core packages/api-client",
+    "desktop": "npm run dev -w @mailpoppy/desktop",
+    "sidecar": "npm run dev -w @mailpoppy/desktop-sidecar",
+    "synth": "npm run synth -w @mailpoppy/infra"
+  },
+  "engines": { "node": ">=20" }
+}
