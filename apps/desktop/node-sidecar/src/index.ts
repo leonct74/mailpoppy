@@ -69,6 +69,22 @@ app.get("/provision/:domain/status", async (req) => {
   return prov.getIdentityStatus(ctx(), domain);
 });
 
+// Send the in-app deliverability self-test (mirrors Phase 0 step 7). Requires the
+// domain's DKIM to be verified first (the UI gates this behind the status poll).
+app.post("/provision/:domain/test", async (req, reply) => {
+  const domain = (req.params as { domain: string }).domain;
+  const to = (req.body as { to?: string } | undefined)?.to;
+  if (!to) return reply.code(400).send({ ok: false, error: "missing 'to' recipient" });
+  const messageId = await prov.sendTest(ctx(), {
+    from: `hello@${domain}`,
+    to,
+    subject: "Mailpoppy deliverability test",
+    text: "If you can read this in your inbox (not spam), Mailpoppy sending works. Check 'Show original' for SPF/DKIM/DMARC = PASS.",
+    html: "<p>If you can read this in your <b>inbox</b> (not spam), Mailpoppy sending works.</p><p>Open <b>Show original</b> and confirm <b>SPF=PASS, DKIM=PASS, DMARC=PASS</b>.</p>",
+  });
+  return { ok: true, messageId };
+});
+
 const port = Number(process.env.PORT ?? 8787);
 app
   .listen({ port, host: "127.0.0.1" })
