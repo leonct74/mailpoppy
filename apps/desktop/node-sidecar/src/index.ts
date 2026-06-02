@@ -5,6 +5,7 @@
  */
 import Fastify from "fastify";
 import * as prov from "./provisioning";
+import { readLedger } from "./ledger";
 
 const app = Fastify({ logger: true });
 
@@ -66,6 +67,16 @@ app.post("/provision/:domain", async (req) => {
   await prov.createMailBucket(c, { bucket, accountId });
   await prov.createReceiptPipeline(c, { ruleSet: "mailpoppy", domain, bucket });
   return { ok: true, domain, bucket, zoneId, dkimTokens, changeId };
+});
+
+// Read-only: the resource transparency inventory (DESIGN §14.1) — the deployed
+// stack's resources straight from CloudFormation, plus the local provisioning
+// ledger of out-of-stack mutations (Route53/SES identity/rule-set activation).
+app.get("/aws/inventory/:stackName", async (req) => {
+  const stackName = (req.params as { stackName: string }).stackName;
+  const c = ctx();
+  const [stack, ledger] = await Promise.all([prov.listStackResources(c, stackName), readLedger()]);
+  return { stackName, region: c.region, stackExists: stack.stackExists, resources: stack.resources, ledger };
 });
 
 app.get("/provision/:domain/status", async (req) => {

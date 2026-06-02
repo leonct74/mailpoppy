@@ -40,6 +40,11 @@ import {
   PutBucketPolicyCommand,
   ListBucketsCommand,
 } from "@aws-sdk/client-s3";
+import {
+  CloudFormationClient,
+  DescribeStackResourcesCommand,
+} from "@aws-sdk/client-cloudformation";
+import { record } from "./ledger";
 
 export interface AwsContext {
   region: string;
@@ -56,6 +61,7 @@ function clients(ctx: AwsContext) {
     sesv2: new SESv2Client(base),
     ses: new SESClient(base),
     s3: new S3Client(base),
+    cloudformation: new CloudFormationClient(base),
   };
 }
 
@@ -81,6 +87,9 @@ export async function createIdentityGetDkimTokens(ctx: AwsContext, domain: strin
   const { sesv2 } = clients(ctx);
   try {
     const out = await sesv2.send(new CreateEmailIdentityCommand({ EmailIdentity: domain }));
+    await record([
+      { action: "created", service: "SES", resourceType: "EmailIdentity", name: domain, region: ctx.region },
+    ]);
     return out.DkimAttributes?.Tokens ?? [];
   } catch (e) {
     if ((e as { name?: string }).name === "AlreadyExistsException") {
@@ -158,6 +167,18 @@ export async function applyDnsRecords(
       ChangeBatch: { Comment: "Mailpoppy provisioning", Changes: changes },
     }),
   );
+
+  // Record each DNS record we wrote (these live outside the CloudFormation stack).
+  await record(
+    changes.map((ch) => ({
+      action: "created" as const,
+      service: "Route53",
+      resourceType: `${ch.ResourceRecordSet?.Type} record`,
+      name: ch.ResourceRecordSet?.Name ?? domain,
+      region: ctx.region,
+      detail: `zone ${zoneId}`,
+    })),
+  );
   return out.ChangeInfo?.Id ?? "";
 }
 
@@ -193,6 +214,9 @@ export async function createMailBucket(
     ],
   };
   await s3.send(new PutBucketPolicyCommand({ Bucket: bucket, Policy: JSON.stringify(policy) }));
+  await record([
+    { action: "created", service: "S3", resourceType: "Bucket", name: bucket, region: ctx.region },
+  ]);
 }
 
 /** Step 4: receipt rule set + rule (store to S3) + activate. */
@@ -216,6 +240,46 @@ export async function createReceiptPipeline(
     }),
   );
   await ses.send(new SetActiveReceiptRuleSetCommand({ RuleSetName: ruleSet }));
+  await record([
+    { action: "created", service: "SES", resourceType: "ReceiptRuleSet", name: ruleSet, region: ctx.region },
+    { action: "created", service: "SES", resourceType: "ActiveReceiptRuleSet", name: ruleSet, region: ctx.region, detail: "set active" },
+  ]);
+}
+
+// ---- Resource inventory (DESIGN §14.1 — transparency) ----
+
+export interface StackResource {
+  logicalId: string;
+  physicalId: string;
+  type: string; // CloudFormation type, e.g. "AWS::Lambda::Function"
+  status: string;
+}
+
+/**
+ * The authoritative inventory of everything in the deployed backend stack, read
+ * straight from CloudFormation (no drift — the app cannot hide a stack resource).
+ * Returns stackExists=false (not an error) when the stack hasn't been deployed.
+ */
+export async function listStackResources(
+  ctx: AwsContext,
+  stackName: string,
+): Promise<{ stackExists: boolean; resources: StackResource[] }> {
+  const { cloudformation } = clients(ctx);
+  try {
+    const out = await cloudformation.send(new DescribeStackResourcesCommand({ StackName: stackName }));
+    const resources = (out.StackResources ?? []).map((r) => ({
+      logicalId: r.LogicalResourceId ?? "",
+      physicalId: r.PhysicalResourceId ?? "",
+      type: r.ResourceType ?? "",
+      status: r.ResourceStatus ?? "",
+    }));
+    return { stackExists: true, resources };
+  } catch (e) {
+    if (/does not exist|ValidationError/i.test((e as Error).message ?? "")) {
+      return { stackExists: false, resources: [] };
+    }
+    throw e;
+  }
 }
 
 /** Poll DKIM/identity verification (the gate before sending). */

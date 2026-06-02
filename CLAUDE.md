@@ -70,6 +70,14 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   connect → login → live `MailClient` with the Cognito JWT.** Auth/views are dependency-injected
   so they're unit-tested with mocks (no live Cognito needed).
   **Backend not yet deployed to live AWS** → the inbox runs on demo data until a deploy exists.
+- 🚧 **Resource transparency view built** (DESIGN §14.1): `views/ResourcesView.tsx` ("What
+  Mailpoppy did to your account") — the deployed stack's resources grouped by service with
+  region-aware **console deep-links**, plus a created/deleted **change log** for out-of-stack
+  mutations; empty state when no stack. Backed by the sidecar `GET /aws/inventory/:stackName`
+  (CloudFormation `DescribeStackResources` + the append-only `node-sidecar/src/ledger.ts`
+  `~/.mailpoppy/provisioning-ledger.json`). Provisioning mutators record ledger entries
+  (best-effort). Pure helpers in `lib/resources.ts` (`serviceFor`/`awsConsoleUrl`/`groupByService`)
+  are unit-tested; the view is tested with an injected mock loader. 3rd App tab: **AWS Resources**.
 
 ## Architecture (concise)
 
