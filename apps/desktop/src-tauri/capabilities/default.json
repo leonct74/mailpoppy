@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core capability for the main window. The sidecar is spawned from Rust (not over IPC), so no shell permissions are exposed to the webview.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

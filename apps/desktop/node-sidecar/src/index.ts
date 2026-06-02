@@ -9,11 +9,18 @@ import { readLedger } from "./ledger";
 
 const app = Fastify({ logger: true });
 
-// CORS for browser dev (Vite on :1420). The sidecar binds 127.0.0.1 only, but we
-// still scope CORS to known dev origins rather than reflecting any origin — a random
-// web page must not be able to drive AWS provisioning via the user's browser.
-// Add the Tauri origin here once the shell is wired (e.g. "tauri://localhost").
-const ALLOWED_ORIGINS = new Set(["http://localhost:1420", "http://127.0.0.1:1420"]);
+// CORS allowlist. The sidecar binds 127.0.0.1 only, but we still scope CORS to
+// known origins rather than reflecting any origin — a random web page must not be
+// able to drive AWS provisioning via the user's browser.
+//   - http://localhost:1420 / 127.0.0.1:1420 → Vite dev server
+//   - tauri://localhost                       → packaged macOS/Linux webview
+//   - https://tauri.localhost                 → packaged Windows (WebView2) webview
+const ALLOWED_ORIGINS = new Set([
+  "http://localhost:1420",
+  "http://127.0.0.1:1420",
+  "tauri://localhost",
+  "https://tauri.localhost",
+]);
 app.addHook("onRequest", async (req, reply) => {
   const origin = req.headers.origin;
   if (origin && ALLOWED_ORIGINS.has(origin)) {

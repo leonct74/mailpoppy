@@ -487,6 +487,17 @@ reuses the read-pane sanitizer) — fulfils the original "write well-formatted /
 `/send` passes them to SESv2 (`Message.Attachments`) and stores each to S3 so the Sent copy's
 attachments are downloadable via the same endpoint. **Phase 3 is now feature-complete.**
 
+**Desktop shell packaged (✅ 2026-06-02).** The React frontend + Node provisioning sidecar are now
+wrapped in a real **Tauri v2** shell (`apps/desktop/src-tauri/`). The Rust core stays thin: on
+launch it spawns the sidecar (shipped as a Tauri `externalBin`) and kills it on exit
+(`src/lib.rs`). The sidecar is compiled into a **single self-contained executable** so end users
+need no Node install — esbuild bundles it, then Node 22 SEA injects the bundle into the runtime
+(macOS: thin the universal Node to the target arch with `lipo`, then ad-hoc `codesign`); see
+`node-sidecar/scripts/build-sidecar.mjs`. `npm run tauri:build` produces `Mailpoppy.app` +
+`Mailpoppy_<ver>_aarch64.dmg`. **Verified end-to-end**: launching the bundled `.app` spawns the
+embedded sidecar, which answers `/health` on `127.0.0.1:8787`; quitting the app tears the sidecar
+down with no orphan. (Windows/Linux triples + signing/notarization are Phase 5.)
+
 **Phase 4 — Migrate existing WorkMail data (deadline-driven).** WorkMail speaks IMAP → pull a
 user's existing mail into their S3 + index before the Mar 2027 cutoff.
 

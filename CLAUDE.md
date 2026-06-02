@@ -101,6 +101,18 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   `~/.mailpoppy/provisioning-ledger.json`). Provisioning mutators record ledger entries
   (best-effort). Pure helpers in `lib/resources.ts` (`serviceFor`/`awsConsoleUrl`/`groupByService`)
   are unit-tested; the view is tested with an injected mock loader. 3rd App tab: **AWS Resources**.
+- ✅ **Desktop shell packaged (Tauri v2)** — `apps/desktop/src-tauri/`: thin Rust core
+  (`src/lib.rs`) spawns the provisioning sidecar (a Tauri `externalBin`) on launch and kills it on
+  exit; `tauri.conf.json` wires devUrl `:1420` / frontendDist `../dist` / `externalBin`
+  `binaries/mailpoppy-sidecar`. The sidecar ships as a **single self-contained executable**
+  (`node-sidecar/scripts/build-sidecar.mjs`: esbuild bundle → Node 22 SEA → `lipo`-thin to the
+  target arch on macOS → ad-hoc `codesign`) so end users need no Node. `npm run tauri:build` →
+  `Mailpoppy.app` + `Mailpoppy_0.1.0_aarch64.dmg`. **Verified live (2026-06-02)**: launching the
+  bundled `.app` spawns the embedded sidecar → `/health` 200 on `127.0.0.1:8787`; quitting kills
+  the sidecar (no orphan). The CORS allowlist now includes `tauri://localhost` +
+  `https://tauri.localhost`. The sidecar binary is git-ignored (per-platform build artifact).
+  **Build it with `npm run build:sidecar` (or `tauri:build`) — never commit it.** Windows/Linux
+  targets + signing/notarization are Phase 5.
 
 ## Architecture (concise)
 
