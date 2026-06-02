@@ -49,6 +49,15 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   daily `janitor`; bounce/complaint `suppression`. Tenant isolation + verdict/spam routing live
   as pure, unit-tested functions in `@mailpoppy/core` (`mailbox.ts`). `npm run synth` emits a
   valid CloudFormation template; `npm run typecheck` + `npm run test` are green.
+- ✅ **Phase 2 backend PROVEN LIVE end-to-end** (2026-06-02) on `ollydigital.com` / `eu-west-1`
+  (account 675546221165). `cdk deploy` stood up the full stack (47 resources); a test email →
+  SES receiving (MX) → S3 `.eml` → `inbound-processor` → a correct DynamoDB inbox row
+  (`pk=ollydigital.com#demo@ollydigital.com`, `folder=inbox`, `spam=PASS dkim=PASS`, parsed
+  subject/from/to, `unread=true`). **The live run caught a real bug** the unit tests/synth didn't:
+  the DocumentClient rejected `undefined` optional fields → fixed with
+  `marshallOptions.removeUndefinedValues=true` on all four Lambdas (commit `a896f07`). The test
+  stack was **fully torn down afterward** (stack destroyed; RETAINed bucket/tables/UserPool
+  deleted; MX+DKIM+SES identity removed; active rule set cleared — account verified clean).
 - 🚧 **Desktop inbox UI** (`apps/desktop/src/views/InboxView.tsx`): folder nav, read pane
   (safe text rendering), read/unread/star, trash/restore, compose→send. It depends on a
   `MailClient` interface (`apps/desktop/src/lib/mailClient.ts`) implemented by the shared

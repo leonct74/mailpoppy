@@ -463,8 +463,12 @@ bounce/complaint `suppression`. Shared mailbox logic + verdict/spam-policy routi
 *Desktop inbox UI added same day:* `apps/desktop/src/views/InboxView.tsx` (folder nav, read
 pane, read/unread/star, trash/restore, compose→send) runs against a `MailClient` interface —
 the shared `api-client` when a backend is deployed, or an in-memory demo client offline — so the
-same view will serve desktop and React Native. **Backend not yet deployed live**; the inbox runs
-on demo data until then.
+same view will serve desktop and React Native.
+✅ **Proven live end-to-end (2026-06-02)** on `ollydigital.com`/`eu-west-1`: `cdk deploy` (47
+resources) → test email → SES→S3→`inbound-processor`→a correct DynamoDB inbox row
+(`folder=inbox`, `spam=PASS dkim=PASS`, parsed headers, `unread`). The live run caught a real
+DynamoDB-marshalling bug (fixed: `removeUndefinedValues`). Test stack fully torn down afterward;
+account verified clean. The desktop inbox still defaults to demo data (no persistent deployment).
 
 **Phase 3 — Send mail.** Compose UI → SES with threading headers + attachments; Sent copy;
 bounce/complaint → suppression. *(Send path + Sent-copy + suppression Lambda already implemented
