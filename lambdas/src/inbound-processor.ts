@@ -28,7 +28,11 @@ import {
  * See DESIGN §8 / §9.1.
  */
 const s3 = new S3Client({});
-const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+// removeUndefinedValues: optional MessageMeta fields (from.name, attachments, …)
+// are often undefined; without this the DocumentClient throws on marshalling.
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
+  marshallOptions: { removeUndefinedValues: true },
+});
 
 const INDEX_TABLE = process.env.INDEX_TABLE ?? "";
 const MAIL_BUCKET = process.env.MAIL_BUCKET ?? "";

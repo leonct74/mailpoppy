@@ -10,7 +10,9 @@ import { DEFAULT_POLICY, type DeploymentPolicy, type MessageMeta } from "@mailpo
  * (DESIGN §10), more flexible than raw S3 lifecycle (never / per-domain windows).
  */
 const s3 = new S3Client({});
-const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
+  marshallOptions: { removeUndefinedValues: true },
+});
 
 const INDEX_TABLE = process.env.INDEX_TABLE ?? "";
 const MAIL_BUCKET = process.env.MAIL_BUCKET ?? "";

@@ -33,7 +33,9 @@ import {
  * Routes: GET /messages · GET /messages/{id}/raw · PATCH /messages/{id}/flags
  *        · POST /messages/{id}/move · POST /send
  */
-const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
+  marshallOptions: { removeUndefinedValues: true },
+});
 const s3 = new S3Client({});
 const ses = new SESv2Client({});
 

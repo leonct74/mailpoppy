@@ -9,7 +9,9 @@ import { normalizeAddress } from "@mailpoppy/core";
  * these recipients — mandatory once sending, or AWS throttles/suspends the
  * account (DESIGN §9.2 / §13). The access-API send path consults this list.
  */
-const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
+  marshallOptions: { removeUndefinedValues: true },
+});
 const SETTINGS_TABLE = process.env.SETTINGS_TABLE ?? "";
 
 interface SesNotification {
