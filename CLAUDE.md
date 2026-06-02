@@ -165,6 +165,13 @@ solo admin needs zero config.
   the Phase 2 CDK deploy path.
 - **Safe HTML rendering** in the client: sanitize; block remote images/trackers by default.
 - Never store or transmit customer mail to the vendor side.
+- **Resource transparency (REQUIRED — DESIGN §14.1):** the app MUST show the admin exactly what
+  Mailpoppy created/changed/deleted in *their* account — by service + resource name/ARN — with
+  a created/deleted timeline and console deep-links. *No surprise resources.* Source it from
+  **CloudFormation** (`DescribeStackResources` = authoritative stack inventory, no drift) plus a
+  local append-only **provisioning ledger** for out-of-stack mutations the sidecar makes
+  directly (Route53 records, SES identity, `SetActiveReceiptRuleSet`). Any code path that creates
+  or deletes an AWS resource MUST record it so the inventory stays complete and reconcilable.
 
 ## Working agreements (live AWS work)
 

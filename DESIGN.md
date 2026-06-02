@@ -338,6 +338,46 @@ This is the **highest, never-ending risk** — bigger than any AWS plumbing.
 - **Mobile (later):** React Native (Expo); auth via Cognito; **new-mail push** via inbound
   Lambda → SNS → APNs/FCM. Reuses the shared `core` + `api-client` packages.
 
+### 14.1 Resource transparency & audit ledger (REQUIRED — trust feature)
+
+Because Mailpoppy operates **inside the admin's own AWS account**, the admin must be able to see
+**exactly what Mailpoppy created, changed, or deleted** — by AWS service and by resource
+name/ARN — so they stay fully in control and can independently verify everything in their own
+console. This is a **non-negotiable product requirement**, not a nice-to-have: *no surprise
+resources, ever.*
+
+The app ships a dedicated **"AWS resources" view** ("What Mailpoppy did to your account") that
+shows, grouped by service (Route53 / SES / S3 / Lambda / DynamoDB / Cognito / API Gateway /
+SNS / EventBridge / IAM):
+
+- **Every resource**, with its **logical name, physical name/ARN, type, region, status**, and
+  **when it was created** (and, after a teardown, **when it was deleted** — or **RETAINed**, with
+  the reason, e.g. "kept to protect your mail data").
+- A **created vs. deleted** timeline (append-only) so the admin can audit the full history of
+  Mailpoppy's actions, including upgrades (§15) and uninstall.
+- A **deep link to the AWS console** for each resource (region-aware) so the admin can verify
+  it first-hand and inspect/cost/delete it themselves if they ever want to.
+- A **reconciliation check**: the view must be complete and reconcilable — if Mailpoppy created
+  something, it appears here; if the admin sees something here, it provably came from Mailpoppy.
+
+**How it's sourced (authoritative, not hand-maintained):**
+
+- **CloudFormation is the source of truth for the deployed stack.** Everything in the backend is
+  one CFN stack (§15), so `cloudformation:DescribeStackResources` / `ListStackResources` returns
+  the authoritative, always-current inventory (logical id, physical id, type, status) with zero
+  drift. The view renders that list directly — Mailpoppy cannot "hide" a stack resource.
+- **A local append-only provisioning ledger** records the few **out-of-stack** mutations the
+  provisioning sidecar makes directly (Route53 MX/SPF/DKIM/DMARC records, the SES domain
+  identity, the `SetActiveReceiptRuleSet` activation): `{action: created|deleted, service,
+  resourceType, name/ARN, region, timestamp, actor}`. Shown alongside the CFN inventory so the
+  *complete* footprint is one screen.
+- On **uninstall/teardown** the same view reports what was deleted and what was deliberately
+  **retained** (S3 mail bucket, DynamoDB tables, Cognito pool carry `RemovalPolicy.RETAIN` to
+  protect data), with the exact names so the admin can finish cleanup by hand if they choose.
+
+This view backstops the §6 trust story (it's *their* cloud) and the §13 deliverability/DNS work
+(they can see precisely which DNS records were written).
+
 ---
 
 ## 15. Deployed-backend upgrade strategy
@@ -409,8 +449,9 @@ realities up front.
 
 **Phase 1 — Setup/migration wizard (the wedge; shippable alone).** Tauri desktop app takes the
 admin's AWS profile and one-click provisions the full stack (Route53/SES/S3/Lambda/DynamoDB/
-Cognito/IAM) via CDK. Health/verification dashboard + sandbox-exit guidance. *"Escape WorkMail
-— move to your own AWS in minutes."*
+Cognito/IAM) via CDK. Health/verification dashboard + sandbox-exit guidance + the **resource
+inventory view (§14.1)** so the admin sees exactly what was created in their account. *"Escape
+WorkMail — move to your own AWS in minutes."*
 
 **Phase 2 — Read mail.** Inbound Lambda (MIME → DynamoDB index). Client: inbox list, read,
 render (safe HTML), attachments, read/unread, folders, basic search.
@@ -433,7 +474,9 @@ in the Phase 2 backend; Phase 3 adds the compose UI + attachments.)*
 user's existing mail into their S3 + index before the Mar 2027 cutoff.
 
 **Phase 5 — Deliverability & hardening.** DMARC report ingestion; reputation monitoring; act on
-spam/virus verdicts; aliases/catch-all; allow/block lists; policy panels; multi-domain.
+spam/virus verdicts; aliases/catch-all; allow/block lists; policy panels; the full
+created/deleted **resource audit ledger (§14.1)** with console deep-links and teardown
+reconciliation; multi-domain.
 
 **Phase 6 — Mobile.** Flutter/React Native client; Cognito auth; SNS → APNs/FCM push.
 
