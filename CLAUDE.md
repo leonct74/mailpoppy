@@ -59,7 +59,8 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   stack was **fully torn down afterward** (stack destroyed; RETAINed bucket/tables/UserPool
   deleted; MX+DKIM+SES identity removed; active rule set cleared — account verified clean).
 - 🚧 **Desktop inbox UI** (`apps/desktop/src/views/InboxView.tsx`): folder nav, read pane
-  (safe text rendering), read/unread/star, trash/restore, compose→send. It depends on a
+  (sanitized HTML, remote images blocked by default — see `lib/mailBody.ts`), read/unread/star,
+  trash/restore, compose→send. It depends on a
   `MailClient` interface (`apps/desktop/src/lib/mailClient.ts`) implemented by the shared
   `@mailpoppy/api-client` (live) **or** an in-memory `DemoMailClient` (offline) — same view for
   desktop + future React Native.
@@ -186,7 +187,11 @@ solo admin needs zero config.
     `RoleARN`) so the admin's own identity stays at `cloudformation:* + iam:PassRole`.
   Verified accurate against the real Phase 2 deploy. The *deployed* Lambda/Cognito roles remain
   tightly scoped inside the CDK stack.
-- **Safe HTML rendering** in the client: sanitize; block remote images/trackers by default.
+- **Safe HTML rendering** in the client: ✅ done — `apps/desktop/src/lib/mailBody.ts`
+  (`parseBody` via postal-mime + `sanitizeHtml` via DOMPurify): strips script/iframe/handlers,
+  hardens links (`target=_blank rel=noopener`), and **blocks remote images/trackers by default**
+  with a per-message "Load images" toggle. Rendered in `InboxView` (HTML when present, text/raw
+  fallback). Unit-tested (sanitizer in jsdom, parser in node — postal-mime misbehaves in jsdom).
 - Never store or transmit customer mail to the vendor side.
 - **Resource transparency (REQUIRED — DESIGN §14.1):** the app MUST show the admin exactly what
   Mailpoppy created/changed/deleted in *their* account — by service + resource name/ARN — with

@@ -55,8 +55,8 @@ describe("InboxView", () => {
 
     expect(await screen.findByText(/the full body text/)).toBeInTheDocument();
     expect(client.getRaw).toHaveBeenCalledWith("m1");
-    // It was unread → opening marks it read.
-    expect(client.setFlags).toHaveBeenCalledWith("m1", { unread: false });
+    // It was unread → opening marks it read (async side effect).
+    await waitFor(() => expect(client.setFlags).toHaveBeenCalledWith("m1", { unread: false }));
   });
 
   it("moves a message to trash and drops it from the list", async () => {

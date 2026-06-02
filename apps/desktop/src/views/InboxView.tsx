@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { MessageMeta, Folder } from "@mailpoppy/core";
 import { makeMailClient, type MailClient } from "../lib/mailClient";
+import { parseBody, sanitizeHtml, type ParsedBody } from "../lib/mailBody";
 
-// Phase 2 mailbox UI: browse folders, read a message (safe text rendering),
-// toggle read/star, move to trash / restore, and compose → send. Talks to a
+// Phase 2 mailbox UI: browse folders, read a message (sanitized HTML, remote
+// images blocked by default), toggle read/star, move to trash / restore, and
+// compose → send. Talks to a
 // MailClient (the shared api-client against a deployed backend, or the demo
 // client offline) — so this view is identical for desktop and, later, mobile.
 
@@ -54,6 +56,9 @@ export function InboxView({
   const [items, setItems] = useState<MessageMeta[]>([]);
   const [selected, setSelected] = useState<MessageMeta | null>(null);
   const [raw, setRaw] = useState<string | null>(null);
+  const [parsed, setParsed] = useState<ParsedBody | null>(null);
+  const [allowImages, setAllowImages] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
@@ -75,6 +80,7 @@ export function InboxView({
   useEffect(() => {
     setSelected(null);
     setRaw(null);
+    setParsed(null);
     void refresh(folder);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folder, mail]);
@@ -82,16 +88,35 @@ export function InboxView({
   async function open(m: MessageMeta) {
     setSelected(m);
     setRaw(null);
+    setParsed(null);
+    setAllowImages(false); // re-block remote content for each newly opened message
+    setShowRaw(false);
+
+    let eml: string;
     try {
-      const { eml } = await mail.getRaw(m.messageId);
-      setRaw(eml);
-      if (m.flags.unread) {
+      ({ eml } = await mail.getRaw(m.messageId));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    setRaw(eml);
+
+    // Mark read immediately — independent of (and not blocked by) body parsing.
+    if (m.flags.unread) {
+      try {
         await mail.setFlags(m.messageId, { unread: false });
         setItems((prev) => prev.map((x) => (x.messageId === m.messageId ? { ...x, flags: { ...x.flags, unread: false } } : x)));
         setSelected((s) => (s ? { ...s, flags: { ...s.flags, unread: false } } : s));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+    }
+
+    // Body parsing is best-effort: a parse failure just falls back to the raw view.
+    try {
+      setParsed(await parseBody(eml));
+    } catch {
+      setParsed(null);
     }
   }
 
@@ -233,11 +258,14 @@ export function InboxView({
                 )}
               </div>
 
-              {/* Raw .eml is rendered as text (React escapes it) — XSS-safe.
-                  Sanitized HTML rendering is the next step (DESIGN §11). */}
-              <pre style={{ ...mono, marginTop: 12, background: "#fafafa", border: "1px solid #eee", borderRadius: 8, padding: 12 }}>
-                {raw ?? "Loading message…"}
-              </pre>
+              <MessageBody
+                parsed={parsed}
+                raw={raw}
+                allowImages={allowImages}
+                onLoadImages={() => setAllowImages(true)}
+                showRaw={showRaw}
+                onToggleRaw={() => setShowRaw((v) => !v)}
+              />
             </article>
           )}
         </div>
@@ -255,6 +283,59 @@ export function InboxView({
         />
       )}
     </section>
+  );
+}
+
+function MessageBody({
+  parsed,
+  raw,
+  allowImages,
+  onLoadImages,
+  showRaw,
+  onToggleRaw,
+}: {
+  parsed: ParsedBody | null;
+  raw: string | null;
+  allowImages: boolean;
+  onLoadImages: () => void;
+  showRaw: boolean;
+  onToggleRaw: () => void;
+}) {
+  const sanitized = useMemo(
+    () => (parsed?.html ? sanitizeHtml(parsed.html, { allowRemoteImages: allowImages }) : null),
+    [parsed, allowImages],
+  );
+
+  if (!parsed && !raw) return <p style={{ color: "#888" }}>Loading message…</p>;
+
+  const preStyle: React.CSSProperties = { ...mono, marginTop: 8, background: "#fafafa", border: "1px solid #eee", borderRadius: 8, padding: 12 };
+  const htmlStyle: React.CSSProperties = { marginTop: 8, border: "1px solid #eee", borderRadius: 8, padding: 12, overflowX: "auto" };
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button onClick={onToggleRaw} style={{ cursor: "pointer", fontSize: 12, background: "none", border: "none", color: "#7c3aed", textDecoration: "underline" }}>
+          {showRaw ? "View formatted" : "View raw source"}
+        </button>
+      </div>
+
+      {showRaw ? (
+        <pre style={preStyle}>{raw}</pre>
+      ) : sanitized ? (
+        <>
+          {sanitized.blockedRemote && !allowImages && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, padding: "6px 12px", fontSize: 13 }}>
+              <span>🛡 Remote images blocked to protect your privacy.</span>
+              <button onClick={onLoadImages} style={{ cursor: "pointer", padding: "4px 10px" }}>Load images</button>
+            </div>
+          )}
+          {/* Safe: HTML is sanitized by DOMPurify (lib/mailBody.ts) before it reaches the DOM. */}
+          <div style={htmlStyle} dangerouslySetInnerHTML={{ __html: sanitized.clean }} />
+        </>
+      ) : (
+        <pre style={preStyle}>{parsed?.text ?? raw}</pre>
+      )}
+    </div>
   );
 }
 

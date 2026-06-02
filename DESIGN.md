@@ -331,6 +331,9 @@ This is the **highest, never-ending risk** — bigger than any AWS plumbing.
   compose with **rich-text → HTML (+ plaintext fallback)**, attachments, search, **offline
   cache** + local full-text index.
 - **Safe HTML rendering** (sanitize; block remote images/tracking by default) — security item.
+  ✅ **done** (`apps/desktop/src/lib/mailBody.ts`): postal-mime parse → DOMPurify sanitize
+  (strip script/iframe/handlers, harden links), remote images/trackers blocked by default with a
+  per-message "Load images" toggle; rendered in `InboxView`.
 - **Auth:** Cognito login (email/password + MFA); fresh device = just log in.
 - **Admin panel:** domain setup wizard (the headline feature), health/verification dashboard
   (DKIM verified? out of sandbox? records correct?), mailbox-user management, policy panels,
