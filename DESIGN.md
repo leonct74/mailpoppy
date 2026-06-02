@@ -480,7 +480,7 @@ Phase 2 backend.)* 🚧 **In progress:** compose dialog + **Reply / Reply-all / 
 `InboxView`). **Receive attachments**: the inbound-processor extracts each MIME attachment to S3
 (`attachments/<id>/<i>-<name>`), `GET /messages/{id}/attachments/{index}` returns a short-lived
 presigned URL (owned-mailbox-scoped), and `InboxView` shows download chips
-(typecheck + `cdk synth` validated; not yet live-deployed). **Rich-text compose**: the compose
+(✅ **verified live end-to-end 2026-06-02**, then torn down). **Rich-text compose**: the compose
 body is Markdown → sanitized HTML (+ plaintext fallback) with a live Preview (`lib/compose.ts`,
 reuses the read-pane sanitizer) — fulfils the original "write well-formatted / HTML emails" goal.
 Remaining: **sending** attachments (multipart MIME).

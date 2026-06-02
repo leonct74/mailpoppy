@@ -58,6 +58,12 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   `marshallOptions.removeUndefinedValues=true` on all four Lambdas (commit `a896f07`). The test
   stack was **fully torn down afterward** (stack destroyed; RETAINed bucket/tables/UserPool
   deleted; MX+DKIM+SES identity removed; active rule set cleared — account verified clean).
+- ✅ **Full backend re-verified live** (2026-06-02, 2nd pass): a real email **with an attachment**
+  → inbound-processor extracted it to S3 (content intact); then via the **access API with a real
+  Cognito JWT** (obtained through the app's SRP path): `GET /messages` (tenant-scoped),
+  `GET /messages/{id}/attachments/0` → presigned-URL download (bytes intact), `POST /send` →
+  `messageId` + a Sent copy in `folder=sent`. So Cognito login + attachment extraction +
+  presigned download + send are all proven on real AWS. Stack fully torn down; account clean.
 - 🚧 **Desktop inbox UI** (`apps/desktop/src/views/InboxView.tsx`): folder nav, client-side
   **search** (`lib/search.ts` — local filter over the loaded folder; deep/Athena search is a
   later opt-in), read pane
