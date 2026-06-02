@@ -4,6 +4,7 @@ import { makeMailClient, type MailClient } from "../lib/mailClient";
 import { parseBody, sanitizeHtml, type ParsedBody } from "../lib/mailBody";
 import { buildReply, type ComposeInit, type ReplyMode } from "../lib/reply";
 import { renderMarkdown } from "../lib/compose";
+import { filterMessages } from "../lib/search";
 
 // Phase 2 mailbox UI: browse folders, read a message (sanitized HTML, remote
 // images blocked by default), toggle read/star, move to trash / restore, and
@@ -56,6 +57,7 @@ export function InboxView({
 
   const [folder, setFolder] = useState<Folder>("inbox");
   const [items, setItems] = useState<MessageMeta[]>([]);
+  const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<MessageMeta | null>(null);
   const [raw, setRaw] = useState<string | null>(null);
   const [parsed, setParsed] = useState<ParsedBody | null>(null);
@@ -88,6 +90,7 @@ export function InboxView({
     setSelected(null);
     setRaw(null);
     setParsed(null);
+    setQuery("");
     void refresh(folder);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folder, mail]);
@@ -158,6 +161,7 @@ export function InboxView({
   }
 
   const unreadCount = items.filter((m) => m.flags.unread).length;
+  const visible = filterMessages(items, query);
 
   return (
     <section>
@@ -193,12 +197,24 @@ export function InboxView({
 
         {/* Message list */}
         <div style={listCol}>
+          <div style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+            <input
+              aria-label="Search messages"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={`Search ${FOLDER_LABEL[folder] ?? folder}…`}
+              style={{ width: "100%", padding: 6, boxSizing: "border-box" }}
+            />
+          </div>
           {loading && <p style={{ padding: 16, color: "#666" }}>Loading…</p>}
           {error && <p style={{ padding: 16, color: "#b91c1c" }}>{error}</p>}
           {!loading && !error && items.length === 0 && (
             <p style={{ padding: 16, color: "#666" }}>No messages in {FOLDER_LABEL[folder] ?? folder}.</p>
           )}
-          {items.map((m) => {
+          {!loading && !error && items.length > 0 && visible.length === 0 && (
+            <p style={{ padding: 16, color: "#666" }}>No messages match “{query}”.</p>
+          )}
+          {visible.map((m) => {
             const active = selected?.messageId === m.messageId;
             return (
               <button

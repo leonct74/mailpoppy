@@ -119,6 +119,21 @@ describe("InboxView", () => {
     expect(arg.html).toContain("<strong>bold</strong>");
   });
 
+  it("filters the list as you type in the search box", async () => {
+    const client = mockClient();
+    render(<InboxView client={client} />);
+
+    // message present initially
+    expect(await screen.findByRole("button", { name: "Open: Hello from test" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Search messages"), { target: { value: "tester" } });
+    expect(screen.getByRole("button", { name: "Open: Hello from test" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Search messages"), { target: { value: "nomatch" } });
+    expect(screen.queryByRole("button", { name: "Open: Hello from test" })).toBeNull();
+    expect(screen.getByText(/No messages match/)).toBeInTheDocument();
+  });
+
   it("switches folders and queries the selected folder", async () => {
     const client = mockClient();
     render(<InboxView client={client} />);

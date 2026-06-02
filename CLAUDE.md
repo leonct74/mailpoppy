@@ -58,7 +58,9 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   `marshallOptions.removeUndefinedValues=true` on all four Lambdas (commit `a896f07`). The test
   stack was **fully torn down afterward** (stack destroyed; RETAINed bucket/tables/UserPool
   deleted; MX+DKIM+SES identity removed; active rule set cleared — account verified clean).
-- 🚧 **Desktop inbox UI** (`apps/desktop/src/views/InboxView.tsx`): folder nav, read pane
+- 🚧 **Desktop inbox UI** (`apps/desktop/src/views/InboxView.tsx`): folder nav, client-side
+  **search** (`lib/search.ts` — local filter over the loaded folder; deep/Athena search is a
+  later opt-in), read pane
   (sanitized HTML, remote images blocked by default — see `lib/mailBody.ts`), read/unread/star,
   trash/restore, compose→send, **Reply / Reply-all / Forward** with In-Reply-To/References
   threading (`lib/reply.ts`, unit-tested), and **attachment downloads** (inbound-processor
