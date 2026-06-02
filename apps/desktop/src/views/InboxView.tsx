@@ -1,0 +1,293 @@
+import { useEffect, useMemo, useState } from "react";
+import type { MessageMeta, Folder } from "@mailpoppy/core";
+import { makeMailClient, type MailClient } from "../lib/mailClient";
+
+// Phase 2 mailbox UI: browse folders, read a message (safe text rendering),
+// toggle read/star, move to trash / restore, and compose → send. Talks to a
+// MailClient (the shared api-client against a deployed backend, or the demo
+// client offline) — so this view is identical for desktop and, later, mobile.
+
+const FOLDERS: Folder[] = ["inbox", "sent", "drafts", "trash", "junk"];
+const FOLDER_LABEL: Record<string, string> = {
+  inbox: "Inbox",
+  sent: "Sent",
+  drafts: "Drafts",
+  trash: "Trash",
+  junk: "Junk",
+};
+
+const wrap: React.CSSProperties = { display: "flex", gap: 16, marginTop: 16, alignItems: "flex-start" };
+const rail: React.CSSProperties = { width: 130, flexShrink: 0, display: "flex", flexDirection: "column", gap: 4 };
+const listCol: React.CSSProperties = { flex: 1, border: "1px solid #ddd", borderRadius: 12, overflow: "hidden", minWidth: 0 };
+const detailCol: React.CSSProperties = { flex: 1.4, border: "1px solid #ddd", borderRadius: 12, padding: 16, minWidth: 0 };
+const mono: React.CSSProperties = { fontFamily: "ui-monospace, monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 13 };
+const railBtn = (active: boolean): React.CSSProperties => ({
+  textAlign: "left",
+  padding: "8px 10px",
+  borderRadius: 8,
+  border: "1px solid " + (active ? "#c4b5fd" : "transparent"),
+  background: active ? "#f5f3ff" : "transparent",
+  cursor: "pointer",
+  fontWeight: active ? 600 : 400,
+});
+
+function fromLabel(m: MessageMeta): string {
+  return m.from.name || m.from.address || "(unknown)";
+}
+function shortDate(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+export function InboxView({ client }: { client?: MailClient }) {
+  const mail = useMemo<MailClient>(() => client ?? makeMailClient(), [client]);
+
+  const [folder, setFolder] = useState<Folder>("inbox");
+  const [items, setItems] = useState<MessageMeta[]>([]);
+  const [selected, setSelected] = useState<MessageMeta | null>(null);
+  const [raw, setRaw] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [composing, setComposing] = useState(false);
+
+  async function refresh(f: Folder = folder) {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await mail.list({ folder: f, limit: 100 });
+      setItems(res.items);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Reload whenever the folder changes.
+  useEffect(() => {
+    setSelected(null);
+    setRaw(null);
+    void refresh(folder);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folder, mail]);
+
+  async function open(m: MessageMeta) {
+    setSelected(m);
+    setRaw(null);
+    try {
+      const { eml } = await mail.getRaw(m.messageId);
+      setRaw(eml);
+      if (m.flags.unread) {
+        await mail.setFlags(m.messageId, { unread: false });
+        setItems((prev) => prev.map((x) => (x.messageId === m.messageId ? { ...x, flags: { ...x.flags, unread: false } } : x)));
+        setSelected((s) => (s ? { ...s, flags: { ...s.flags, unread: false } } : s));
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function toggleRead(m: MessageMeta) {
+    const next = !m.flags.unread;
+    await mail.setFlags(m.messageId, { unread: next });
+    setItems((prev) => prev.map((x) => (x.messageId === m.messageId ? { ...x, flags: { ...x.flags, unread: next } } : x)));
+  }
+
+  async function toggleStar(m: MessageMeta) {
+    const next = !m.flags.starred;
+    await mail.setFlags(m.messageId, { starred: next });
+    setItems((prev) => prev.map((x) => (x.messageId === m.messageId ? { ...x, flags: { ...x.flags, starred: next } } : x)));
+  }
+
+  async function moveTo(m: MessageMeta, dest: Folder) {
+    await mail.move(m.messageId, dest);
+    setItems((prev) => prev.filter((x) => x.messageId !== m.messageId));
+    if (selected?.messageId === m.messageId) {
+      setSelected(null);
+      setRaw(null);
+    }
+  }
+
+  const unreadCount = items.filter((m) => m.flags.unread).length;
+
+  return (
+    <section>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h2 style={{ margin: 0 }}>Mailbox</h2>
+        <button onClick={() => setComposing(true)} style={{ padding: "8px 14px", borderRadius: 8, cursor: "pointer" }}>
+          ✏️ Compose
+        </button>
+      </div>
+
+      <div style={wrap}>
+        {/* Folder rail */}
+        <nav style={rail} aria-label="Folders">
+          {FOLDERS.map((f) => (
+            <button key={f} style={railBtn(f === folder)} onClick={() => setFolder(f)} aria-current={f === folder}>
+              {FOLDER_LABEL[f] ?? f}
+              {f === "inbox" && unreadCount > 0 ? ` (${unreadCount})` : ""}
+            </button>
+          ))}
+        </nav>
+
+        {/* Message list */}
+        <div style={listCol}>
+          {loading && <p style={{ padding: 16, color: "#666" }}>Loading…</p>}
+          {error && <p style={{ padding: 16, color: "#b91c1c" }}>{error}</p>}
+          {!loading && !error && items.length === 0 && (
+            <p style={{ padding: 16, color: "#666" }}>No messages in {FOLDER_LABEL[folder] ?? folder}.</p>
+          )}
+          {items.map((m) => {
+            const active = selected?.messageId === m.messageId;
+            return (
+              <button
+                key={m.messageId}
+                onClick={() => void open(m)}
+                aria-label={`Open: ${m.subject}`}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  border: "none",
+                  borderBottom: "1px solid #eee",
+                  background: active ? "#f5f3ff" : "white",
+                  padding: "10px 12px",
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <span style={{ fontWeight: m.flags.unread ? 700 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {m.flags.starred ? "⭐ " : ""}
+                    {fromLabel(m)}
+                  </span>
+                  <span style={{ color: "#999", fontSize: 12, flexShrink: 0 }}>{shortDate(m.date)}</span>
+                </div>
+                <div style={{ fontWeight: m.flags.unread ? 600 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {m.hasAttachments ? "📎 " : ""}
+                  {m.subject}
+                </div>
+                <div style={{ color: "#888", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.snippet}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Detail pane */}
+        <div style={detailCol}>
+          {!selected && <p style={{ color: "#666" }}>Select a message to read it.</p>}
+          {selected && (
+            <article>
+              <h3 style={{ margin: "0 0 4px" }}>{selected.subject}</h3>
+              <div style={{ color: "#555", fontSize: 13 }}>
+                From <strong>{fromLabel(selected)}</strong> &lt;{selected.from.address}&gt;
+              </div>
+              <div style={{ color: "#777", fontSize: 12 }}>
+                To {selected.to.map((t) => t.address).join(", ")} · {shortDate(selected.date)}
+              </div>
+              {selected.verdicts && (
+                <div style={{ color: "#777", fontSize: 12, marginTop: 4 }}>
+                  SPF {selected.verdicts.spf} · DKIM {selected.verdicts.dkim} · DMARC {selected.verdicts.dmarc} · spam {selected.verdicts.spam}
+                </div>
+              )}
+              {selected.attachments && selected.attachments.length > 0 && (
+                <div style={{ marginTop: 8, fontSize: 13 }}>
+                  📎 {selected.attachments.map((a) => `${a.filename} (${Math.round(a.sizeBytes / 1024)} KB)`).join(", ")}
+                </div>
+              )}
+
+              <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button onClick={() => void toggleRead(selected)} style={{ cursor: "pointer" }}>
+                  {selected.flags.unread ? "Mark read" : "Mark unread"}
+                </button>
+                <button onClick={() => void toggleStar(selected)} style={{ cursor: "pointer" }}>
+                  {selected.flags.starred ? "Unstar" : "Star"}
+                </button>
+                {folder !== "trash" ? (
+                  <button aria-label="Move to Trash" onClick={() => void moveTo(selected, "trash")} style={{ cursor: "pointer" }}>
+                    🗑 Trash
+                  </button>
+                ) : (
+                  <button aria-label="Restore to Inbox" onClick={() => void moveTo(selected, "inbox")} style={{ cursor: "pointer" }}>
+                    ↩︎ Restore to Inbox
+                  </button>
+                )}
+              </div>
+
+              {/* Raw .eml is rendered as text (React escapes it) — XSS-safe.
+                  Sanitized HTML rendering is the next step (DESIGN §11). */}
+              <pre style={{ ...mono, marginTop: 12, background: "#fafafa", border: "1px solid #eee", borderRadius: 8, padding: 12 }}>
+                {raw ?? "Loading message…"}
+              </pre>
+            </article>
+          )}
+        </div>
+      </div>
+
+      {composing && (
+        <ComposeDialog
+          onClose={() => setComposing(false)}
+          onSend={async (input) => {
+            await mail.send(input);
+            setComposing(false);
+            setFolder("sent");
+            await refresh("sent");
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+function ComposeDialog({
+  onClose,
+  onSend,
+}: {
+  onClose: () => void;
+  onSend: (input: { to: string[]; subject: string; text: string }) => Promise<void>;
+}) {
+  const [to, setTo] = useState("");
+  const [subject, setSubject] = useState("");
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    setSending(true);
+    setErr(null);
+    try {
+      const recipients = to.split(",").map((s) => s.trim()).filter(Boolean);
+      if (recipients.length === 0) throw new Error("Add at least one recipient");
+      await onSend({ to: recipients, subject, text });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      setSending(false);
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-label="Compose message"
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
+    >
+      <div style={{ background: "white", borderRadius: 12, padding: 20, width: 480, maxWidth: "90vw" }}>
+        <h3 style={{ marginTop: 0 }}>New message</h3>
+        <label style={{ display: "block", fontSize: 13, color: "#555" }}>To (comma-separated)</label>
+        <input value={to} onChange={(e) => setTo(e.target.value)} placeholder="alice@example.com" style={{ width: "100%", padding: 8, marginBottom: 8 }} />
+        <label style={{ display: "block", fontSize: 13, color: "#555" }}>Subject</label>
+        <input value={subject} onChange={(e) => setSubject(e.target.value)} style={{ width: "100%", padding: 8, marginBottom: 8 }} />
+        <label style={{ display: "block", fontSize: 13, color: "#555" }}>Message</label>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} style={{ width: "100%", padding: 8 }} />
+        {err && <p style={{ color: "#b91c1c" }}>{err}</p>}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+          <button onClick={onClose} disabled={sending} style={{ cursor: "pointer" }}>
+            Cancel
+          </button>
+          <button onClick={() => void submit()} disabled={sending} style={{ cursor: "pointer" }}>
+            {sending ? "Sending…" : "Send"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

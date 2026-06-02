@@ -418,8 +418,12 @@ render (safe HTML), attachments, read/unread, folders, basic search.
 now wires SES receipt rule → S3 + `inbound-processor` Lambda → DynamoDB, plus the Cognito-JWT
 HTTP API → `access-api` Lambda (list/raw/flags/move/send), a daily `janitor`, and
 bounce/complaint `suppression`. Shared mailbox logic + verdict/spam-policy routing live in
-`@mailpoppy/core` (unit-tested). `cdk synth` produces a valid template; **not yet deployed live**
-and the desktop UI to browse the inbox is still to come.
+`@mailpoppy/core` (unit-tested). `cdk synth` produces a valid template.
+*Desktop inbox UI added same day:* `apps/desktop/src/views/InboxView.tsx` (folder nav, read
+pane, read/unread/star, trash/restore, compose→send) runs against a `MailClient` interface —
+the shared `api-client` when a backend is deployed, or an in-memory demo client offline — so the
+same view will serve desktop and React Native. **Backend not yet deployed live**; the inbox runs
+on demo data until then.
 
 **Phase 3 — Send mail.** Compose UI → SES with threading headers + attachments; Sent copy;
 bounce/complaint → suppression. *(Send path + Sent-copy + suppression Lambda already implemented

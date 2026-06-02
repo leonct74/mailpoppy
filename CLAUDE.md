@@ -49,7 +49,12 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   daily `janitor`; bounce/complaint `suppression`. Tenant isolation + verdict/spam routing live
   as pure, unit-tested functions in `@mailpoppy/core` (`mailbox.ts`). `npm run synth` emits a
   valid CloudFormation template; `npm run typecheck` + `npm run test` are green.
-  **Not yet deployed to live AWS, and the desktop inbox UI is still to build.**
+- 🚧 **Desktop inbox UI** (`apps/desktop/src/views/InboxView.tsx`): folder nav, read pane
+  (safe text rendering), read/unread/star, trash/restore, compose→send. It depends on a
+  `MailClient` interface (`apps/desktop/src/lib/mailClient.ts`) implemented by the shared
+  `@mailpoppy/api-client` (live) **or** an in-memory `DemoMailClient` (offline) — same view for
+  desktop + future React Native. `App.tsx` toggles Setup ⇆ Inbox.
+  **Backend not yet deployed to live AWS** → the inbox runs on demo data until a deploy exists.
 
 ## Architecture (concise)
 
