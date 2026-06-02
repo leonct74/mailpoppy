@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { MessageMeta, Folder } from "@mailpoppy/core";
-import { makeMailClient, type MailClient } from "../lib/mailClient";
+import { makeMailClient, type MailClient, type SendAttachment } from "../lib/mailClient";
+import { filesToAttachments } from "../lib/attachments";
 import { parseBody, sanitizeHtml, type ParsedBody } from "../lib/mailBody";
 import { buildReply, type ComposeInit, type ReplyMode } from "../lib/reply";
 import { renderMarkdown } from "../lib/compose";
@@ -399,14 +400,26 @@ function ComposeDialog({
     html?: string;
     inReplyTo?: string;
     references?: string;
+    attachments?: SendAttachment[];
   }) => Promise<void>;
 }) {
   const [to, setTo] = useState(init.to.join(", "));
   const [subject, setSubject] = useState(init.subject);
   const [text, setText] = useState(init.text);
   const [preview, setPreview] = useState(false);
+  const [attachments, setAttachments] = useState<SendAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  async function onFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    try {
+      const added = await filesToAttachments(files);
+      setAttachments((prev) => [...prev, ...added]);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   async function submit() {
     setSending(true);
@@ -416,7 +429,15 @@ function ComposeDialog({
       if (recipients.length === 0) throw new Error("Add at least one recipient");
       // Send a formatted HTML body (rendered from Markdown) + a plaintext fallback.
       const html = text.trim() ? renderMarkdown(text) : undefined;
-      await onSend({ to: recipients, subject, text, html, inReplyTo: init.inReplyTo, references: init.references });
+      await onSend({
+        to: recipients,
+        subject,
+        text,
+        html,
+        inReplyTo: init.inReplyTo,
+        references: init.references,
+        attachments: attachments.length ? attachments : undefined,
+      });
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
       setSending(false);
@@ -454,6 +475,27 @@ function ComposeDialog({
         ) : (
           <textarea aria-label="Message" value={text} onChange={(e) => setText(e.target.value)} rows={6} style={{ width: "100%", padding: 8 }} />
         )}
+
+        <div style={{ marginTop: 8 }}>
+          <input aria-label="Attach files" type="file" multiple onChange={(e) => void onFiles(e.target.files)} style={{ fontSize: 13 }} />
+          {attachments.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+              {attachments.map((a, i) => (
+                <span key={`${a.filename}-${i}`} style={{ fontSize: 12, background: "#f3f4f6", borderRadius: 6, padding: "2px 8px" }}>
+                  📎 {a.filename}
+                  <button
+                    aria-label={`Remove ${a.filename}`}
+                    onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+                    style={{ cursor: "pointer", border: "none", background: "none", color: "#b91c1c", marginLeft: 4 }}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
         {err && <p style={{ color: "#b91c1c" }}>{err}</p>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
           <button onClick={onClose} disabled={sending} style={{ cursor: "pointer" }}>

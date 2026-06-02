@@ -119,6 +119,25 @@ describe("InboxView", () => {
     expect(arg.html).toContain("<strong>bold</strong>");
   });
 
+  it("attaches a file and includes it (base64) in the send", async () => {
+    const client = mockClient();
+    render(<InboxView client={client} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Compose/ }));
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: "x@y.com" } });
+    const file = new File(["filedata"], "doc.txt", { type: "text/plain" });
+    fireEvent.change(screen.getByLabelText("Attach files"), { target: { files: [file] } });
+
+    expect(await screen.findByText(/doc\.txt/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(client.send).toHaveBeenCalled());
+    const arg = client.send.mock.calls[0]![0];
+    expect(arg.attachments).toHaveLength(1);
+    expect(arg.attachments[0].filename).toBe("doc.txt");
+    expect(atob(arg.attachments[0].contentBase64)).toBe("filedata");
+  });
+
   it("filters the list as you type in the search box", async () => {
     const client = mockClient();
     render(<InboxView client={client} />);

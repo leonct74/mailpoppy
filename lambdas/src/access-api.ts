@@ -12,7 +12,7 @@ import {
   PutCommand,
   DeleteCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { SESv2Client, SendEmailCommand, type MessageHeader } from "@aws-sdk/client-sesv2";
+import { SESv2Client, SendEmailCommand, type MessageHeader, type Attachment } from "@aws-sdk/client-sesv2";
 import {
   type MessageMeta,
   type Folder,
@@ -23,6 +23,7 @@ import {
   messageSk,
   folderPrefix,
   normalizeAddress,
+  attachmentS3Key,
 } from "@mailpoppy/core";
 
 /**
@@ -232,6 +233,11 @@ async function moveMessage(
   return json(200, toMeta(newItem));
 }
 
+interface SendAttachmentInput {
+  filename: string;
+  contentType: string;
+  contentBase64: string;
+}
 interface SendBody {
   to?: string[];
   subject?: string;
@@ -240,6 +246,7 @@ interface SendBody {
   from?: string;
   inReplyTo?: string;
   references?: string;
+  attachments?: SendAttachmentInput[];
 }
 
 async function sendMessage(owned: string[], body: SendBody): Promise<APIGatewayProxyResultV2> {
@@ -255,7 +262,16 @@ async function sendMessage(owned: string[], body: SendBody): Promise<APIGatewayP
   const text = body.text ?? "";
   const html = body.html;
 
-  const approxBytes = Buffer.byteLength(subject + text + (html ?? ""), "utf8");
+  // Decode attachments once (shared between the SES send and the Sent-copy store).
+  const inputAttachments = body.attachments ?? [];
+  const decoded = inputAttachments.map((a) => ({
+    filename: a.filename || "attachment",
+    contentType: a.contentType || "application/octet-stream",
+    bytes: Buffer.from(a.contentBase64 ?? "", "base64"),
+  }));
+
+  const attachmentBytes = decoded.reduce((n, a) => n + a.bytes.length, 0);
+  const approxBytes = Buffer.byteLength(subject + text + (html ?? ""), "utf8") + attachmentBytes;
   if (approxBytes > SES_MAX_MESSAGE_BYTES) {
     return json(413, { error: "message exceeds the 40MB SES limit" });
   }
@@ -263,6 +279,12 @@ async function sendMessage(owned: string[], body: SendBody): Promise<APIGatewayP
   const headers: MessageHeader[] = [];
   if (body.inReplyTo) headers.push({ Name: "In-Reply-To", Value: body.inReplyTo });
   if (body.references) headers.push({ Name: "References", Value: body.references });
+
+  const sesAttachments: Attachment[] = decoded.map((a) => ({
+    RawContent: a.bytes,
+    FileName: a.filename,
+    ContentType: a.contentType,
+  }));
 
   const sent = await ses.send(
     new SendEmailCommand({
@@ -276,12 +298,25 @@ async function sendMessage(owned: string[], body: SendBody): Promise<APIGatewayP
             ...(html ? { Html: { Data: html, Charset: "UTF-8" } } : {}),
           },
           ...(headers.length ? { Headers: headers } : {}),
+          ...(sesAttachments.length ? { Attachments: sesAttachments } : {}),
         },
       },
     }),
   );
   const messageId = sent.MessageId ?? `local-${Date.now()}`;
   const date = new Date().toISOString();
+
+  // Store each attachment to S3 so the Sent copy's attachments are downloadable
+  // via the same GET /messages/{id}/attachments/{index} endpoint.
+  const sentAttachments: AttachmentMeta[] = [];
+  for (let i = 0; i < decoded.length; i++) {
+    const a = decoded[i]!;
+    const key = attachmentS3Key(messageId, i, a.filename);
+    await s3.send(
+      new PutObjectCommand({ Bucket: MAIL_BUCKET, Key: key, Body: a.bytes, ContentType: a.contentType }),
+    );
+    sentAttachments.push({ filename: a.filename, contentType: a.contentType, sizeBytes: a.bytes.length, s3Key: key });
+  }
 
   // SES keeps no Sent copy — manufacture one (DESIGN §9.2): store a raw .eml in
   // S3 and an index row so the Sent folder is readable like any other.
@@ -303,9 +338,10 @@ async function sendMessage(owned: string[], body: SendBody): Promise<APIGatewayP
     snippet: (text || html || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 140),
     date,
     flags: { unread: false },
-    hasAttachments: false,
+    hasAttachments: sentAttachments.length > 0,
+    attachments: sentAttachments.length > 0 ? sentAttachments : undefined,
     s3Key,
-    sizeBytes: Buffer.byteLength(rawEml, "utf8"),
+    sizeBytes: Buffer.byteLength(rawEml, "utf8") + attachmentBytes,
   };
   await ddb.send(
     new PutCommand({

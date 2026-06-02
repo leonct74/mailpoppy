@@ -15,6 +15,12 @@ export interface ListResult {
   items: MessageMeta[];
   cursor?: string;
 }
+export interface SendAttachment {
+  filename: string;
+  contentType: string;
+  /** base64-encoded file bytes. */
+  contentBase64: string;
+}
 export interface SendInput {
   to: string[];
   subject: string;
@@ -22,6 +28,7 @@ export interface SendInput {
   text?: string;
   inReplyTo?: string;
   references?: string;
+  attachments?: SendAttachment[];
 }
 
 export interface AttachmentLink {

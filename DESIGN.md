@@ -483,7 +483,9 @@ presigned URL (owned-mailbox-scoped), and `InboxView` shows download chips
 (✅ **verified live end-to-end 2026-06-02**, then torn down). **Rich-text compose**: the compose
 body is Markdown → sanitized HTML (+ plaintext fallback) with a live Preview (`lib/compose.ts`,
 reuses the read-pane sanitizer) — fulfils the original "write well-formatted / HTML emails" goal.
-Remaining: **sending** attachments (multipart MIME).
+**Send attachments**: the compose dialog reads files to base64 (`lib/attachments.ts`) → access-API
+`/send` passes them to SESv2 (`Message.Attachments`) and stores each to S3 so the Sent copy's
+attachments are downloadable via the same endpoint. **Phase 3 is now feature-complete.**
 
 **Phase 4 — Migrate existing WorkMail data (deadline-driven).** WorkMail speaks IMAP → pull a
 user's existing mail into their S3 + index before the Mar 2027 cutoff.
