@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Mailpoppy provisioning policy — least-privilege permissions for the Mailpoppy
+  desktop app to set up domain email (Route53 + SES + S3). Creates a customer-managed
+  IAM policy you can attach to the IAM user/role you run Mailpoppy as, instead of
+  granting full AdministratorAccess. S3 access is scoped to "mailpoppy-*" buckets.
+
+Parameters:
+  AttachToUser:
+    Type: String
+    Default: ""
+    Description: >
+      (Optional) Existing IAM user name to attach the policy to. Leave blank to just
+      create the managed policy and attach it yourself.
+
+Conditions:
+  HasUser: !Not [!Equals [!Ref AttachToUser, ""]]
+
+Resources:
+  MailpoppyProvisioningPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: MailpoppyProvisioning
+      Description: Least-privilege permissions for Mailpoppy domain-email provisioning.
+      Users: !If [HasUser, [!Ref AttachToUser], !Ref "AWS::NoValue"]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: Identity
+            Effect: Allow
+            Action: ["sts:GetCallerIdentity"]
+            Resource: "*"
+          - Sid: Route53
+            Effect: Allow
+            Action:
+              - route53:ListHostedZonesByName
+              - route53:ListHostedZones
+              - route53:GetHostedZone
+              - route53:ListResourceRecordSets
+              - route53:ChangeResourceRecordSets
+              - route53:GetChange
+            Resource: "*"
+          - Sid: Ses
+            Effect: Allow
+            Action:
+              - ses:CreateEmailIdentity
+              - ses:GetEmailIdentity
+              - ses:ListEmailIdentities
+              - ses:DeleteEmailIdentity
+              - ses:GetAccount
+              - ses:SendEmail
+              - ses:CreateReceiptRuleSet
+              - ses:CreateReceiptRule
+              - ses:DeleteReceiptRule
+              - ses:DeleteReceiptRuleSet
+              - ses:DescribeActiveReceiptRuleSet
+              - ses:SetActiveReceiptRuleSet
+            Resource: "*"
+          - Sid: S3ListForReadiness
+            Effect: Allow
+            Action: ["s3:ListAllMyBuckets"]
+            Resource: "*"
+          - Sid: S3MailpoppyBuckets
+            Effect: Allow
+            Action:
+              - s3:CreateBucket
+              - s3:DeleteBucket
+              - s3:PutBucketPolicy
+              - s3:GetBucketPolicy
+              - s3:PutLifecycleConfiguration
+              - s3:GetLifecycleConfiguration
+              - s3:ListBucket
+            Resource: "arn:aws:s3:::mailpoppy-*"
+          - Sid: S3MailpoppyObjects
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource: "arn:aws:s3:::mailpoppy-*/*"
+
+Outputs:
+  PolicyArn:
+    Description: ARN of the Mailpoppy provisioning managed policy.
+    Value: !Ref MailpoppyProvisioningPolicy

@@ -1,0 +1,69 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Identity",
+      "Effect": "Allow",
+      "Action": ["sts:GetCallerIdentity"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Route53",
+      "Effect": "Allow",
+      "Action": [
+        "route53:ListHostedZonesByName",
+        "route53:ListHostedZones",
+        "route53:GetHostedZone",
+        "route53:ListResourceRecordSets",
+        "route53:ChangeResourceRecordSets",
+        "route53:GetChange"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Ses",
+      "Effect": "Allow",
+      "Action": [
+        "ses:CreateEmailIdentity",
+        "ses:GetEmailIdentity",
+        "ses:ListEmailIdentities",
+        "ses:DeleteEmailIdentity",
+        "ses:GetAccount",
+        "ses:SendEmail",
+        "ses:CreateReceiptRuleSet",
+        "ses:CreateReceiptRule",
+        "ses:DeleteReceiptRule",
+        "ses:DeleteReceiptRuleSet",
+        "ses:DescribeActiveReceiptRuleSet",
+        "ses:SetActiveReceiptRuleSet"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "S3ListForReadiness",
+      "Effect": "Allow",
+      "Action": ["s3:ListAllMyBuckets"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "S3MailpoppyBuckets",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:PutBucketPolicy",
+        "s3:GetBucketPolicy",
+        "s3:PutLifecycleConfiguration",
+        "s3:GetLifecycleConfiguration",
+        "s3:ListBucket"
+      ],
+      "Resource": "arn:aws:s3:::mailpoppy-*"
+    },
+    {
+      "Sid": "S3MailpoppyObjects",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::mailpoppy-*/*"
+    }
+  ]
+}

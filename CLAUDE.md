@@ -138,8 +138,11 @@ solo admin needs zero config.
 - **Multi-tenant isolation** within one AWS account is enforced **server-side** in the
   access-API Lambda from verified Cognito claims — user X can only touch X's mailbox. Treat as
   security-critical; test it.
-- **Least-privilege IAM** for the provisioning role (only the domain's zone, the bucket, SES,
-  the table, the Lambdas). Ship a one-click CloudFormation role.
+- **Least-privilege IAM**: `infra/policies/` has the provisioning policy (JSON +
+  CloudFormation one-click) for the current direct-API scope (Route53/SES/S3, S3 locked to
+  `mailpoppy-*`) — what Step 0 tells admins to attach instead of `AdministratorAccess`. The
+  broader *deploy-time* policy (CloudFormation/IAM/Lambda/Cognito/DynamoDB/API GW) lands with
+  the Phase 2 CDK deploy path.
 - **Safe HTML rendering** in the client: sanitize; block remote images/trackers by default.
 - Never store or transmit customer mail to the vendor side.
 
