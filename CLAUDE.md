@@ -64,6 +64,16 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   `GET /messages/{id}/attachments/0` → presigned-URL download (bytes intact), `POST /send` →
   `messageId` + a Sent copy in `folder=sent`. So Cognito login + attachment extraction +
   presigned download + send are all proven on real AWS. Stack fully torn down; account clean.
+- ✅ **Send-with-attachments verified live, both directions** (2026-06-02, 3rd pass) on
+  `ollydigital.com` / `eu-west-1`: `POST /send` (real Cognito SRP JWT) with a base64 `proof.txt`
+  attachment → SESv2 built the multipart message → (1) the **Sent** row carried the attachment
+  meta and `GET /messages/{id}/attachments/0` returned a presigned URL whose bytes were
+  **identical** to the original (correct `Content-Disposition: attachment; filename="proof.txt"`);
+  and the same message looped back through SES inbound → (2) `inbound-processor` **extracted** the
+  attachment to S3 (`attachments/<msgId>/0-proof.txt`, 62 B) and its presigned download was also
+  byte-identical. So send→multipart→SES→extract→download is end-to-end proven. Stack fully torn
+  down; clean sweep re-verified (no Mailpoppy CFN stack / DynamoDB tables / S3 bucket / SES
+  `ollydigital.com` identity / Cognito pool / Route53 MX+DKIM records).
 - 🚧 **Desktop inbox UI** (`apps/desktop/src/views/InboxView.tsx`): folder nav, client-side
   **search** (`lib/search.ts` — local filter over the loaded folder; deep/Athena search is a
   later opt-in), read pane
