@@ -414,9 +414,16 @@ Cognito/IAM) via CDK. Health/verification dashboard + sandbox-exit guidance. *"E
 
 **Phase 2 — Read mail.** Inbound Lambda (MIME → DynamoDB index). Client: inbox list, read,
 render (safe HTML), attachments, read/unread, folders, basic search.
+🚧 *Backend built & synth-validated (2026-06-02):* the deployable CDK stack (`infra/lib/mail-stack.ts`)
+now wires SES receipt rule → S3 + `inbound-processor` Lambda → DynamoDB, plus the Cognito-JWT
+HTTP API → `access-api` Lambda (list/raw/flags/move/send), a daily `janitor`, and
+bounce/complaint `suppression`. Shared mailbox logic + verdict/spam-policy routing live in
+`@mailpoppy/core` (unit-tested). `cdk synth` produces a valid template; **not yet deployed live**
+and the desktop UI to browse the inbox is still to come.
 
 **Phase 3 — Send mail.** Compose UI → SES with threading headers + attachments; Sent copy;
-bounce/complaint → suppression.
+bounce/complaint → suppression. *(Send path + Sent-copy + suppression Lambda already implemented
+in the Phase 2 backend; Phase 3 adds the compose UI + attachments.)*
 
 **Phase 4 — Migrate existing WorkMail data (deadline-driven).** WorkMail speaks IMAP → pull a
 user's existing mail into their S3 + index before the Mar 2027 cutoff.

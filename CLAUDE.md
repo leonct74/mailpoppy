@@ -42,7 +42,14 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   + per-service permission probes + optional CLI detection) → preflight → provision → DKIM poll
   → in-app deliverability test. **The AWS CLI is NOT required** (the SDK reads `~/.aws`/SSO
   directly); Step 0 only gates on resolvable creds + permissions so setup never fails midway.
-  CDK backend (`infra`) + Lambdas are still stubbed.
+- 🚧 **Phase 2 (backend) built & synth-validated** (2026-06-02). The CDK stack
+  (`infra/lib/mail-stack.ts`) is fully wired: SES receipt rule → S3 + `inbound-processor`
+  Lambda → DynamoDB index; Cognito-JWT **HTTP API** → `access-api` Lambda
+  (`GET /messages`, `/messages/{id}/raw`, `PATCH .../flags`, `POST .../move`, `POST /send`);
+  daily `janitor`; bounce/complaint `suppression`. Tenant isolation + verdict/spam routing live
+  as pure, unit-tested functions in `@mailpoppy/core` (`mailbox.ts`). `npm run synth` emits a
+  valid CloudFormation template; `npm run typecheck` + `npm run test` are green.
+  **Not yet deployed to live AWS, and the desktop inbox UI is still to build.**
 
 ## Architecture (concise)
 
@@ -96,9 +103,11 @@ mailpoppy/                      # pnpm + Turborepo, all TypeScript
 ## Commands (fill in once scaffolded)
 
 - Install (monorepo root): `npm install`
+- Typecheck everything (core/api-client/lambdas/infra): `npm run typecheck`
+- Run tests (core mailbox logic + desktop wizard): `npm run test`
+- Synth backend CloudFormation template (bundles Lambdas via esbuild): `npm run synth`
 - Desktop frontend dev: `npm run dev -w @mailpoppy/desktop`
 - Provisioning sidecar dev: `npm run dev -w @mailpoppy/desktop-sidecar`
-- Synth backend CloudFormation template: `npm run synth -w @mailpoppy/infra`
 - Phase-0-style manual AWS checks: see `phase0-derisk.md`
 
 ## Phase plan (DESIGN §18) — current = Phase 1
