@@ -53,7 +53,13 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   (safe text rendering), read/unread/star, trash/restore, compose→send. It depends on a
   `MailClient` interface (`apps/desktop/src/lib/mailClient.ts`) implemented by the shared
   `@mailpoppy/api-client` (live) **or** an in-memory `DemoMailClient` (offline) — same view for
-  desktop + future React Native. `App.tsx` toggles Setup ⇆ Inbox.
+  desktop + future React Native.
+- 🚧 **Mailbox login wired** (mailbox plane, not provisioning): `lib/auth.ts` (`CognitoAuth`
+  via `amazon-cognito-identity-js`, SRP + NEW_PASSWORD challenge + token refresh — portable to
+  RN), `lib/deploymentConfig.ts` (the 4 stack Outputs in localStorage), `views/ConnectView.tsx`
+  + `views/LoginView.tsx`. `App.tsx`'s Inbox tab is a state machine: **no config → demo inbox →
+  connect → login → live `MailClient` with the Cognito JWT.** Auth/views are dependency-injected
+  so they're unit-tested with mocks (no live Cognito needed).
   **Backend not yet deployed to live AWS** → the inbox runs on demo data until a deploy exists.
 
 ## Architecture (concise)

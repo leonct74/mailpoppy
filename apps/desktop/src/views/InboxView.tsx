@@ -39,7 +39,15 @@ function shortDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-export function InboxView({ client }: { client?: MailClient }) {
+export function InboxView({
+  client,
+  demo,
+  onConnect,
+}: {
+  client?: MailClient;
+  demo?: boolean;
+  onConnect?: () => void;
+}) {
   const mail = useMemo<MailClient>(() => client ?? makeMailClient(), [client]);
 
   const [folder, setFolder] = useState<Folder>("inbox");
@@ -112,6 +120,18 @@ export function InboxView({ client }: { client?: MailClient }) {
 
   return (
     <section>
+      {demo && (
+        <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, padding: "8px 12px", marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 13 }}>
+            🧪 <strong>Demo data</strong> — not connected to a live mailbox.
+          </span>
+          {onConnect && (
+            <button onClick={onConnect} style={{ cursor: "pointer", padding: "6px 10px" }}>
+              Connect a deployment
+            </button>
+          )}
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h2 style={{ margin: 0 }}>Mailbox</h2>
         <button onClick={() => setComposing(true)} style={{ padding: "8px 14px", borderRadius: 8, cursor: "pointer" }}>

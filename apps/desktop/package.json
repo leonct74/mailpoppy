@@ -12,6 +12,7 @@
   "dependencies": {
     "@mailpoppy/api-client": "*",
     "@mailpoppy/core": "*",
+    "amazon-cognito-identity-js": "^6.3.12",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
