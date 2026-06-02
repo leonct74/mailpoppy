@@ -480,8 +480,10 @@ Phase 2 backend.)* 🚧 **In progress:** compose dialog + **Reply / Reply-all / 
 `InboxView`). **Receive attachments**: the inbound-processor extracts each MIME attachment to S3
 (`attachments/<id>/<i>-<name>`), `GET /messages/{id}/attachments/{index}` returns a short-lived
 presigned URL (owned-mailbox-scoped), and `InboxView` shows download chips
-(typecheck + `cdk synth` validated; not yet live-deployed). Remaining: **sending** attachments
-(multipart) and rich-text/HTML compose.
+(typecheck + `cdk synth` validated; not yet live-deployed). **Rich-text compose**: the compose
+body is Markdown → sanitized HTML (+ plaintext fallback) with a live Preview (`lib/compose.ts`,
+reuses the read-pane sanitizer) — fulfils the original "write well-formatted / HTML emails" goal.
+Remaining: **sending** attachments (multipart MIME).
 
 **Phase 4 — Migrate existing WorkMail data (deadline-driven).** WorkMail speaks IMAP → pull a
 user's existing mail into their S3 + index before the Mar 2027 cutoff.

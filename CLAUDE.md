@@ -63,7 +63,8 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   trash/restore, compose→send, **Reply / Reply-all / Forward** with In-Reply-To/References
   threading (`lib/reply.ts`, unit-tested), and **attachment downloads** (inbound-processor
   extracts attachments to S3 → `GET /messages/{id}/attachments/{index}` presigned URL → download
-  chips). It depends on a
+  chips), and **Markdown→HTML compose** (`lib/compose.ts`: marked + the read-pane sanitizer, with
+  a live Preview; sends HTML + plaintext fallback). It depends on a
   `MailClient` interface (`apps/desktop/src/lib/mailClient.ts`) implemented by the shared
   `@mailpoppy/api-client` (live) **or** an in-memory `DemoMailClient` (offline) — same view for
   desktop + future React Native.

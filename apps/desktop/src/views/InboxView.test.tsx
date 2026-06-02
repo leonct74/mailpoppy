@@ -101,6 +101,24 @@ describe("InboxView", () => {
     await waitFor(() => expect(client.getAttachmentUrl).toHaveBeenCalledWith("m1", 0));
   });
 
+  it("compose sends an HTML body rendered from Markdown, plus a text fallback", async () => {
+    const client = mockClient();
+    render(<InboxView client={client} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Compose/ }));
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: "x@y.com" } });
+    fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "Hi" } });
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "**bold** body" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(client.send).toHaveBeenCalled());
+    const arg = client.send.mock.calls[0]![0];
+    expect(arg.to).toEqual(["x@y.com"]);
+    expect(arg.subject).toBe("Hi");
+    expect(arg.text).toBe("**bold** body");
+    expect(arg.html).toContain("<strong>bold</strong>");
+  });
+
   it("switches folders and queries the selected folder", async () => {
     const client = mockClient();
     render(<InboxView client={client} />);

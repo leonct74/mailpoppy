@@ -3,6 +3,7 @@ import type { MessageMeta, Folder } from "@mailpoppy/core";
 import { makeMailClient, type MailClient } from "../lib/mailClient";
 import { parseBody, sanitizeHtml, type ParsedBody } from "../lib/mailBody";
 import { buildReply, type ComposeInit, type ReplyMode } from "../lib/reply";
+import { renderMarkdown } from "../lib/compose";
 
 // Phase 2 mailbox UI: browse folders, read a message (sanitized HTML, remote
 // images blocked by default), toggle read/star, move to trash / restore, and
@@ -379,6 +380,7 @@ function ComposeDialog({
     to: string[];
     subject: string;
     text: string;
+    html?: string;
     inReplyTo?: string;
     references?: string;
   }) => Promise<void>;
@@ -386,6 +388,7 @@ function ComposeDialog({
   const [to, setTo] = useState(init.to.join(", "));
   const [subject, setSubject] = useState(init.subject);
   const [text, setText] = useState(init.text);
+  const [preview, setPreview] = useState(false);
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -395,7 +398,9 @@ function ComposeDialog({
     try {
       const recipients = to.split(",").map((s) => s.trim()).filter(Boolean);
       if (recipients.length === 0) throw new Error("Add at least one recipient");
-      await onSend({ to: recipients, subject, text, inReplyTo: init.inReplyTo, references: init.references });
+      // Send a formatted HTML body (rendered from Markdown) + a plaintext fallback.
+      const html = text.trim() ? renderMarkdown(text) : undefined;
+      await onSend({ to: recipients, subject, text, html, inReplyTo: init.inReplyTo, references: init.references });
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
       setSending(false);
@@ -411,11 +416,28 @@ function ComposeDialog({
       <div style={{ background: "white", borderRadius: 12, padding: 20, width: 480, maxWidth: "90vw" }}>
         <h3 style={{ marginTop: 0 }}>{init.inReplyTo ? "Reply" : "New message"}</h3>
         <label style={{ display: "block", fontSize: 13, color: "#555" }}>To (comma-separated)</label>
-        <input value={to} onChange={(e) => setTo(e.target.value)} placeholder="alice@example.com" style={{ width: "100%", padding: 8, marginBottom: 8 }} />
+        <input aria-label="To" value={to} onChange={(e) => setTo(e.target.value)} placeholder="alice@example.com" style={{ width: "100%", padding: 8, marginBottom: 8 }} />
         <label style={{ display: "block", fontSize: 13, color: "#555" }}>Subject</label>
-        <input value={subject} onChange={(e) => setSubject(e.target.value)} style={{ width: "100%", padding: 8, marginBottom: 8 }} />
-        <label style={{ display: "block", fontSize: 13, color: "#555" }}>Message</label>
-        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} style={{ width: "100%", padding: 8 }} />
+        <input aria-label="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} style={{ width: "100%", padding: 8, marginBottom: 8 }} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <label style={{ fontSize: 13, color: "#555" }}>Message <span style={{ color: "#999" }}>· Markdown supported</span></label>
+          <button
+            type="button"
+            onClick={() => setPreview((v) => !v)}
+            style={{ cursor: "pointer", fontSize: 12, background: "none", border: "none", color: "#7c3aed", textDecoration: "underline" }}
+          >
+            {preview ? "Edit" : "Preview"}
+          </button>
+        </div>
+        {preview ? (
+          <div
+            aria-label="Preview"
+            style={{ minHeight: 120, border: "1px solid #eee", borderRadius: 6, padding: 8, background: "#fafafa" }}
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
+          />
+        ) : (
+          <textarea aria-label="Message" value={text} onChange={(e) => setText(e.target.value)} rows={6} style={{ width: "100%", padding: 8 }} />
+        )}
         {err && <p style={{ color: "#b91c1c" }}>{err}</p>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
           <button onClick={onClose} disabled={sending} style={{ cursor: "pointer" }}>
