@@ -113,6 +113,25 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   `https://tauri.localhost`. The sidecar binary is git-ignored (per-platform build artifact).
   **Build it with `npm run build:sidecar` (or `tauri:build`) — never commit it.** Windows/Linux
   targets + signing/notarization are Phase 5.
+- 🚧 **Phase 4 — WorkMail/IMAP migration (built, not yet live-verified)**. The desktop sidecar
+  imports existing mail into the deployed backend, producing rows **identical** to the inbound
+  Lambda's so imported mail shows up in the normal inbox. Pieces:
+  - `@mailpoppy/core/migration.ts` — pure `mapImapFolder` (special-use + name heuristics; unknown
+    folders preserved as sanitized custom folders; **`#` stripped** so SKs stay safe),
+    `imapFlagsToFlags`, `isImapDeleted` (10 unit tests).
+  - `node-sidecar/src/migration.ts` — `imapflow` + `mailparser`. `testImap` (creds + folder/counts
+    preview) and `migrate` (fetch → `mig-<sha256(raw)>` id → raw `.eml` to `inbound/<id>` + extract
+    attachments → DynamoDB row via core helpers; **idempotent**; `removeUndefinedValues`; skips
+    `\Deleted`; resolves bucket/table from CFN outputs via `prov.getStackOutputs`; records a
+    `Migration` entry in the transparency ledger).
+  - sidecar routes `POST /migrate/imap/test` + `POST /migrate/imap/run` (run resolves
+    `MailBucketName`/`IndexTableName` from the stack unless overridden).
+  - `views/MigrationView.tsx` (4th App tab **Migrate**) — IMAP form → preview folders → import
+    selected → per-folder summary; dry-run toggle; injectable `test`/`run` for tests (4 tests).
+  - provisioning IAM policy gained scoped `s3:PutObject`/`GetObject` on `mailpoppymailstack-*` and
+    `dynamodb:PutItem`/`BatchWriteItem` on `MailpoppyMailStack-*` (accessanalyzer: no findings).
+  - **Verified**: imapflow+mailparser bundle and run inside the SEA binary (bogus-host test
+    returned a live `ECONNREFUSED`, not a module-load crash). Live IMAP-source verify still pending.
 
 ## Architecture (concise)
 

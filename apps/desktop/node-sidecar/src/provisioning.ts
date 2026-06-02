@@ -43,6 +43,7 @@ import {
 import {
   CloudFormationClient,
   DescribeStackResourcesCommand,
+  DescribeStacksCommand,
 } from "@aws-sdk/client-cloudformation";
 import { record } from "./ledger";
 
@@ -280,6 +281,26 @@ export async function listStackResources(
     }
     throw e;
   }
+}
+
+/**
+ * Read the deployed stack's CloudFormation Outputs as a key→value map (e.g.
+ * `MailBucketName`, `IndexTableName`, `ApiBaseUrl`). Used to resolve the data
+ * resources a migration needs to write into, without the desktop having to
+ * persist them separately.
+ */
+export async function getStackOutputs(
+  ctx: AwsContext,
+  stackName: string,
+): Promise<Record<string, string>> {
+  const { cloudformation } = clients(ctx);
+  const out = await cloudformation.send(new DescribeStacksCommand({ StackName: stackName }));
+  const outputs = out.Stacks?.[0]?.Outputs ?? [];
+  const map: Record<string, string> = {};
+  for (const o of outputs) {
+    if (o.OutputKey) map[o.OutputKey] = o.OutputValue ?? "";
+  }
+  return map;
 }
 
 /** Poll DKIM/identity verification (the gate before sending). */

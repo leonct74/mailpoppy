@@ -74,6 +74,24 @@
       "Effect": "Allow",
       "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
       "Resource": "arn:aws:s3:::mailpoppy-*/*"
+    },
+    {
+      "Sid": "MigrationStackBucket",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket"],
+      "Resource": "arn:aws:s3:::mailpoppymailstack-*"
+    },
+    {
+      "Sid": "MigrationStackObjects",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Resource": "arn:aws:s3:::mailpoppymailstack-*/*"
+    },
+    {
+      "Sid": "MigrationIndexTableWrite",
+      "Effect": "Allow",
+      "Action": ["dynamodb:PutItem", "dynamodb:BatchWriteItem"],
+      "Resource": "arn:aws:dynamodb:*:*:table/MailpoppyMailStack-*"
     }
   ]
 }

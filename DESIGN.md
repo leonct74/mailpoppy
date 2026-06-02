@@ -498,8 +498,23 @@ need no Node install — esbuild bundles it, then Node 22 SEA injects the bundle
 embedded sidecar, which answers `/health` on `127.0.0.1:8787`; quitting the app tears the sidecar
 down with no orphan. (Windows/Linux triples + signing/notarization are Phase 5.)
 
-**Phase 4 — Migrate existing WorkMail data (deadline-driven).** WorkMail speaks IMAP → pull a
-user's existing mail into their S3 + index before the Mar 2027 cutoff.
+**Phase 4 — Migrate existing WorkMail data (deadline-driven).** 🚧 **Built (2026-06-02):** WorkMail
+(and any IMAP server) → the desktop sidecar connects with the user's IMAP credentials (which never
+leave the machine), fetches each message, and writes it straight into the deployed backend's S3
+(raw `.eml` at `inbound/<id>` + extracted attachments) and DynamoDB index — producing rows
+**identical** to what the inbound Lambda creates, so imported mail renders in the normal inbox with
+no special-casing. Idempotent (row id = `mig-<sha256(raw)>` → re-runs never duplicate); folders
+mapped via IMAP special-use + name heuristics (lossless: unknown folders preserved as sanitized
+custom folders, `#` stripped so sort keys stay safe); `\Seen/\Flagged/\Answered` → flags;
+`\Deleted` skipped. Pieces: pure mapping in `@mailpoppy/core` (`migration.ts`, unit-tested);
+`node-sidecar/src/migration.ts` (imapflow + mailparser; resolves bucket/table from CFN stack
+outputs; records a migration entry in the transparency ledger); sidecar `POST /migrate/imap/test`
+(verify creds + preview folders/counts) + `POST /migrate/imap/run` (import or dry-run);
+`apps/desktop/src/views/MigrationView.tsx` ("Bring your old mail across" — connect → preview
+folders → import selected → per-folder summary). The provisioning IAM policy gained scoped
+`s3:PutObject` + `dynamodb:PutItem` on the stack's bucket/table (re-validated, no findings).
+**Not yet live-verified** (needs a real IMAP source). imapflow + mailparser confirmed to bundle and
+run inside the SEA sidecar binary.
 
 **Phase 5 — Deliverability & hardening.** DMARC report ingestion; reputation monitoring; act on
 spam/virus verdicts; aliases/catch-all; allow/block lists; policy panels; the full

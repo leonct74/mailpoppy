@@ -5,6 +5,7 @@
  */
 import Fastify from "fastify";
 import * as prov from "./provisioning";
+import * as migration from "./migration";
 import { readLedger } from "./ledger";
 
 const app = Fastify({ logger: true });
@@ -105,6 +106,73 @@ app.post("/provision/:domain/test", async (req, reply) => {
     html: "<p>If you can read this in your <b>inbox</b> (not spam), Mailpoppy sending works.</p><p>Open <b>Show original</b> and confirm <b>SPF=PASS, DKIM=PASS, DMARC=PASS</b>.</p>",
   });
   return { ok: true, messageId };
+});
+
+// ---- Phase 4: migrate existing mail (WorkMail / any IMAP) -------------------
+
+// Read-only: verify the IMAP credentials and enumerate folders + message counts
+// (with the Mailpoppy folder each maps to) so the UI can preview the import.
+app.post("/migrate/imap/test", async (req, reply) => {
+  const b = (req.body ?? {}) as Partial<migration.ImapSource>;
+  if (!b.host || !b.user || !b.password) {
+    return reply.code(400).send({ ok: false, error: "host, user and password are required" });
+  }
+  try {
+    return await migration.testImap({
+      host: b.host,
+      port: b.port,
+      secure: b.secure,
+      user: b.user,
+      password: b.password,
+    });
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
+// Mutating: pull mail from IMAP into the deployed backend's S3 + DynamoDB. The
+// UI confirms before calling this. Bucket/table are resolved from the stack
+// Outputs unless explicitly provided.
+app.post("/migrate/imap/run", async (req, reply) => {
+  const b = (req.body ?? {}) as {
+    source?: migration.ImapSource;
+    mailbox?: string;
+    stackName?: string;
+    bucket?: string;
+    indexTable?: string;
+    folders?: string[];
+    maxMessages?: number;
+    dryRun?: boolean;
+  };
+  if (!b.source?.host || !b.source?.user || !b.source?.password) {
+    return reply.code(400).send({ ok: false, error: "source.host, source.user, source.password required" });
+  }
+  if (!b.mailbox) return reply.code(400).send({ ok: false, error: "mailbox (destination) is required" });
+
+  const c = ctx();
+  let bucket = b.bucket;
+  let indexTable = b.indexTable;
+  if (!bucket || !indexTable) {
+    const outputs = await prov.getStackOutputs(c, b.stackName ?? "MailpoppyMailStack");
+    bucket = bucket ?? outputs.MailBucketName;
+    indexTable = indexTable ?? outputs.IndexTableName;
+  }
+  if (!bucket || !indexTable) {
+    return reply.code(400).send({ ok: false, error: "could not resolve MailBucketName / IndexTableName from the stack" });
+  }
+
+  try {
+    const summary = await migration.migrate(c, {
+      source: b.source,
+      target: { mailbox: b.mailbox, bucket, indexTable },
+      folders: b.folders,
+      maxMessages: b.maxMessages,
+      dryRun: b.dryRun,
+    });
+    return { ok: true, ...summary };
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
 });
 
 const port = Number(process.env.PORT ?? 8787);

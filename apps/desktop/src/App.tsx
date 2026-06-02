@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { SetupWizard } from "./views/SetupWizard";
 import { InboxView } from "./views/InboxView";
 import { ResourcesView } from "./views/ResourcesView";
+import { MigrationView } from "./views/MigrationView";
 import { ConnectView } from "./views/ConnectView";
 import { LoginView } from "./views/LoginView";
 import { CognitoAuth } from "./lib/auth";
@@ -13,7 +14,7 @@ import {
   type DeploymentConfig,
 } from "./lib/deploymentConfig";
 
-type Tab = "setup" | "inbox" | "resources";
+type Tab = "setup" | "inbox" | "migrate" | "resources";
 
 const tabBtn = (active: boolean): React.CSSProperties => ({
   padding: "8px 14px",
@@ -107,11 +108,13 @@ export function App() {
       <nav style={{ display: "flex", gap: 8, marginTop: 12 }}>
         <button style={tabBtn(tab === "setup")} onClick={() => setTab("setup")}>Setup</button>
         <button style={tabBtn(tab === "inbox")} onClick={() => setTab("inbox")}>Inbox</button>
+        <button style={tabBtn(tab === "migrate")} onClick={() => setTab("migrate")}>Migrate</button>
         <button style={tabBtn(tab === "resources")} onClick={() => setTab("resources")}>AWS Resources</button>
       </nav>
 
       {tab === "setup" && <SetupWizard />}
       {tab === "inbox" && <InboxTab />}
+      {tab === "migrate" && <MigrationView />}
       {tab === "resources" && <ResourcesView />}
     </main>
   );
