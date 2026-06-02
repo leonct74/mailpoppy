@@ -46,6 +46,16 @@
       "Resource": "*"
     },
     {
+      "Sid": "CloudFormationReadForInventory",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:DescribeStacks",
+        "cloudformation:DescribeStackResources",
+        "cloudformation:ListStackResources"
+      ],
+      "Resource": "arn:aws:cloudformation:*:*:stack/MailpoppyMailStack/*"
+    },
+    {
       "Sid": "S3MailpoppyBuckets",
       "Effect": "Allow",
       "Action": [

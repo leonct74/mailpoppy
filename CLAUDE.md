@@ -175,11 +175,17 @@ solo admin needs zero config.
 - **Multi-tenant isolation** within one AWS account is enforced **server-side** in the
   access-API Lambda from verified Cognito claims — user X can only touch X's mailbox. Treat as
   security-critical; test it.
-- **Least-privilege IAM**: `infra/policies/` has the provisioning policy (JSON +
-  CloudFormation one-click) for the current direct-API scope (Route53/SES/S3, S3 locked to
-  `mailpoppy-*`) — what Step 0 tells admins to attach instead of `AdministratorAccess`. The
-  broader *deploy-time* policy (CloudFormation/IAM/Lambda/Cognito/DynamoDB/API GW) lands with
-  the Phase 2 CDK deploy path.
+- **Least-privilege IAM**: `infra/policies/` has **two** validated policies (both pass
+  `accessanalyzer validate-policy` with no findings):
+  - **provisioning** (`mailpoppy-provisioning-policy.json` + `-role.yaml`) — direct-API
+    Route53/SES/S3 (S3 locked to `mailpoppy-*`) + read-only CloudFormation for the §14.1
+    inventory view. What Step 0 tells admins to attach instead of `AdministratorAccess`.
+  - **deploy-time** (`mailpoppy-deploy-policy.json` + `-role.yaml`) — the `cloudformation:CreateStack`
+    path (CFN/IAM/Lambda/DynamoDB/Cognito/API GW/SNS/EventBridge/SES/S3/Logs), scoped to
+    `MailpoppyMailStack-*`/`mailpoppy*`. Shipped as a CloudFormation **service role** (passed via
+    `RoleARN`) so the admin's own identity stays at `cloudformation:* + iam:PassRole`.
+  Verified accurate against the real Phase 2 deploy. The *deployed* Lambda/Cognito roles remain
+  tightly scoped inside the CDK stack.
 - **Safe HTML rendering** in the client: sanitize; block remote images/trackers by default.
 - Never store or transmit customer mail to the vendor side.
 - **Resource transparency (REQUIRED — DESIGN §14.1):** the app MUST show the admin exactly what

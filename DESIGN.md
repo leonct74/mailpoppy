@@ -523,10 +523,13 @@ API, so it's cross-platform TS (an admin can manage users from mobile too).
 
 - Single combined app (role-aware) vs. separate admin + mail-client apps. *(Leaning: single,
   role-aware.)*
-- IAM least-privilege policy: ✅ drafted for the current direct-API scope in
-  `infra/policies/` (JSON + CloudFormation; S3 scoped to `mailpoppy-*`). TODO: the broader
-  *deploy-time* policy (CloudFormation/IAM/Lambda/Cognito/DynamoDB/API GW) when the CDK deploy
-  path is built.
+- IAM least-privilege policy: ✅ **done** in `infra/policies/`. Two validated policies (both
+  pass `accessanalyzer validate-policy` with no findings): the narrow **provisioning** policy
+  (direct-API Route53/SES/S3, S3 scoped to `mailpoppy-*`, + read-only CloudFormation for the
+  §14.1 inventory view) and the broader **deploy-time** policy for the `cloudformation:CreateStack`
+  path (CFN/IAM/Lambda/DynamoDB/Cognito/API GW/SNS/EventBridge/SES/S3/Logs, scoped to
+  `MailpoppyMailStack-*`/`mailpoppy*`), shipped with a CloudFormation **service role** so the
+  admin's own identity stays at `cloudformation:* + iam:PassRole`.
 - DynamoDB key schema details + which GSIs (depends on search/threading needs).
 - Calendar/contacts (CalDAV/CardDAV) — WorkMail had them; out of MVP scope, revisit for parity.
 - Whether to support a hosted-web client later (would change the BYO-AWS trust model — a web
