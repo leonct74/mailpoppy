@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { MessageMeta, Folder } from "@mailpoppy/core";
 import { makeMailClient, type MailClient } from "../lib/mailClient";
 import { parseBody, sanitizeHtml, type ParsedBody } from "../lib/mailBody";
+import { buildReply, type ComposeInit, type ReplyMode } from "../lib/reply";
 
 // Phase 2 mailbox UI: browse folders, read a message (sanitized HTML, remote
 // images blocked by default), toggle read/star, move to trash / restore, and
@@ -61,7 +62,12 @@ export function InboxView({
   const [showRaw, setShowRaw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [composing, setComposing] = useState(false);
+  const [composeInit, setComposeInit] = useState<ComposeInit | null>(null);
+
+  function startReply(mode: ReplyMode) {
+    if (!selected) return;
+    setComposeInit(buildReply(selected, mode, { self: selected.mailbox, quotedBody: parsed?.text ?? selected.snippet }));
+  }
 
   async function refresh(f: Folder = folder) {
     setLoading(true);
@@ -159,7 +165,7 @@ export function InboxView({
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h2 style={{ margin: 0 }}>Mailbox</h2>
-        <button onClick={() => setComposing(true)} style={{ padding: "8px 14px", borderRadius: 8, cursor: "pointer" }}>
+        <button onClick={() => setComposeInit({ to: [], subject: "", text: "" })} style={{ padding: "8px 14px", borderRadius: 8, cursor: "pointer" }}>
           ✏️ Compose
         </button>
       </div>
@@ -241,6 +247,11 @@ export function InboxView({
               )}
 
               <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button onClick={() => startReply("reply")} style={{ cursor: "pointer" }}>↩︎ Reply</button>
+                {selected.to.length > 1 && (
+                  <button onClick={() => startReply("replyAll")} style={{ cursor: "pointer" }}>↩︎ Reply all</button>
+                )}
+                <button onClick={() => startReply("forward")} style={{ cursor: "pointer" }}>↪ Forward</button>
                 <button onClick={() => void toggleRead(selected)} style={{ cursor: "pointer" }}>
                   {selected.flags.unread ? "Mark read" : "Mark unread"}
                 </button>
@@ -271,12 +282,13 @@ export function InboxView({
         </div>
       </div>
 
-      {composing && (
+      {composeInit && (
         <ComposeDialog
-          onClose={() => setComposing(false)}
+          init={composeInit}
+          onClose={() => setComposeInit(null)}
           onSend={async (input) => {
             await mail.send(input);
-            setComposing(false);
+            setComposeInit(null);
             setFolder("sent");
             await refresh("sent");
           }}
@@ -340,15 +352,23 @@ function MessageBody({
 }
 
 function ComposeDialog({
+  init,
   onClose,
   onSend,
 }: {
+  init: ComposeInit;
   onClose: () => void;
-  onSend: (input: { to: string[]; subject: string; text: string }) => Promise<void>;
+  onSend: (input: {
+    to: string[];
+    subject: string;
+    text: string;
+    inReplyTo?: string;
+    references?: string;
+  }) => Promise<void>;
 }) {
-  const [to, setTo] = useState("");
-  const [subject, setSubject] = useState("");
-  const [text, setText] = useState("");
+  const [to, setTo] = useState(init.to.join(", "));
+  const [subject, setSubject] = useState(init.subject);
+  const [text, setText] = useState(init.text);
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -358,7 +378,7 @@ function ComposeDialog({
     try {
       const recipients = to.split(",").map((s) => s.trim()).filter(Boolean);
       if (recipients.length === 0) throw new Error("Add at least one recipient");
-      await onSend({ to: recipients, subject, text });
+      await onSend({ to: recipients, subject, text, inReplyTo: init.inReplyTo, references: init.references });
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
       setSending(false);
@@ -372,7 +392,7 @@ function ComposeDialog({
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
     >
       <div style={{ background: "white", borderRadius: 12, padding: 20, width: 480, maxWidth: "90vw" }}>
-        <h3 style={{ marginTop: 0 }}>New message</h3>
+        <h3 style={{ marginTop: 0 }}>{init.inReplyTo ? "Reply" : "New message"}</h3>
         <label style={{ display: "block", fontSize: 13, color: "#555" }}>To (comma-separated)</label>
         <input value={to} onChange={(e) => setTo(e.target.value)} placeholder="alice@example.com" style={{ width: "100%", padding: 8, marginBottom: 8 }} />
         <label style={{ display: "block", fontSize: 13, color: "#555" }}>Subject</label>

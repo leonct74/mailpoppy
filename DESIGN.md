@@ -474,8 +474,10 @@ DynamoDB-marshalling bug (fixed: `removeUndefinedValues`). Test stack fully torn
 account verified clean. The desktop inbox still defaults to demo data (no persistent deployment).
 
 **Phase 3 — Send mail.** Compose UI → SES with threading headers + attachments; Sent copy;
-bounce/complaint → suppression. *(Send path + Sent-copy + suppression Lambda already implemented
-in the Phase 2 backend; Phase 3 adds the compose UI + attachments.)*
+bounce/complaint → suppression. *(Send path + Sent-copy + suppression Lambda implemented in the
+Phase 2 backend.)* 🚧 **In progress:** compose dialog + **Reply / Reply-all / Forward** with
+`In-Reply-To`/`References` threading (`apps/desktop/src/lib/reply.ts`, unit-tested; wired into
+`InboxView`). Remaining: **attachments** (multipart MIME + S3) and rich-text/HTML compose.
 
 **Phase 4 — Migrate existing WorkMail data (deadline-driven).** WorkMail speaks IMAP → pull a
 user's existing mail into their S3 + index before the Mar 2027 cutoff.

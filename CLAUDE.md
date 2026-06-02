@@ -60,7 +60,8 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   deleted; MX+DKIM+SES identity removed; active rule set cleared — account verified clean).
 - 🚧 **Desktop inbox UI** (`apps/desktop/src/views/InboxView.tsx`): folder nav, read pane
   (sanitized HTML, remote images blocked by default — see `lib/mailBody.ts`), read/unread/star,
-  trash/restore, compose→send. It depends on a
+  trash/restore, compose→send, and **Reply / Reply-all / Forward** with In-Reply-To/References
+  threading (`lib/reply.ts`, unit-tested). It depends on a
   `MailClient` interface (`apps/desktop/src/lib/mailClient.ts`) implemented by the shared
   `@mailpoppy/api-client` (live) **or** an in-memory `DemoMailClient` (offline) — same view for
   desktop + future React Native.

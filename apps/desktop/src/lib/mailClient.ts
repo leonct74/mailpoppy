@@ -21,6 +21,7 @@ export interface SendInput {
   html?: string;
   text?: string;
   inReplyTo?: string;
+  references?: string;
 }
 
 /** The exact surface InboxView depends on — satisfied by both clients below. */

@@ -72,6 +72,18 @@ describe("InboxView", () => {
     );
   });
 
+  it("Reply prefills the compose dialog with the sender and a Re: subject", async () => {
+    const client = mockClient();
+    render(<InboxView client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open: Hello from test" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Reply$/ }));
+
+    expect(await screen.findByRole("dialog", { name: "Compose message" })).toBeInTheDocument();
+    expect(screen.getByDisplayValue("tester@ext.example")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Re: Hello from test")).toBeInTheDocument();
+  });
+
   it("switches folders and queries the selected folder", async () => {
     const client = mockClient();
     render(<InboxView client={client} />);

@@ -22,6 +22,7 @@ export interface SendInput {
   html?: string;
   text?: string;
   inReplyTo?: string;
+  references?: string;
 }
 
 /**
