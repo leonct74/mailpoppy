@@ -63,6 +63,16 @@ export function folderPrefix(folder: Folder): string {
   return `${folder}${SEP}`;
 }
 
+/**
+ * S3 key for an extracted attachment: `attachments/<messageId>/<index>-<safeName>`.
+ * The filename is sanitized to a safe key segment (path separators and odd
+ * characters collapsed) so a hostile filename can't escape the prefix.
+ */
+export function attachmentS3Key(messageId: string, index: number, filename: string): string {
+  const safe = (filename || "attachment").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 100);
+  return `attachments/${messageId}/${index}-${safe}`;
+}
+
 export interface ParsedSk {
   folder: Folder;
   date: string;

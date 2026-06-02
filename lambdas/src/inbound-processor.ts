@@ -1,5 +1,5 @@
 import type { SESEvent, SESReceipt } from "aws-lambda";
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { simpleParser, type AddressObject } from "mailparser";
@@ -17,6 +17,7 @@ import {
   classifyDelivery,
   normalizeAddress,
   addressDomain,
+  attachmentS3Key,
 } from "@mailpoppy/core";
 
 /**
@@ -98,11 +99,20 @@ export async function handler(event: SESEvent): Promise<void> {
         messageId: parsed.messageId ?? messageId,
       }) || messageId;
 
-    const attachments: AttachmentMeta[] = (parsed.attachments ?? []).map((a) => ({
-      filename: a.filename ?? "attachment",
-      contentType: a.contentType ?? "application/octet-stream",
-      sizeBytes: a.size ?? 0,
-    }));
+    // Extract each attachment to its own S3 object so the client can download it
+    // on demand (one copy per message, shared across recipients).
+    const attachments: AttachmentMeta[] = [];
+    const parsedAttachments = parsed.attachments ?? [];
+    for (let i = 0; i < parsedAttachments.length; i++) {
+      const a = parsedAttachments[i]!;
+      const filename = a.filename ?? `attachment-${i}`;
+      const contentType = a.contentType ?? "application/octet-stream";
+      const key = attachmentS3Key(messageId, i, filename);
+      await s3.send(
+        new PutObjectCommand({ Bucket: MAIL_BUCKET, Key: key, Body: a.content, ContentType: contentType }),
+      );
+      attachments.push({ filename, contentType, sizeBytes: a.size ?? a.content?.length ?? 0, s3Key: key });
+    }
 
     const date = (parsed.date ?? new Date()).toISOString();
     const subject = parsed.subject ?? "(no subject)";

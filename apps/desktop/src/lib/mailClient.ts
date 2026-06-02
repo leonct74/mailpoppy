@@ -24,10 +24,17 @@ export interface SendInput {
   references?: string;
 }
 
+export interface AttachmentLink {
+  url: string;
+  filename?: string;
+  contentType?: string;
+}
+
 /** The exact surface InboxView depends on — satisfied by both clients below. */
 export interface MailClient {
   list(opts: ListOptions): Promise<ListResult>;
   getRaw(messageId: string): Promise<{ eml: string }>;
+  getAttachmentUrl(messageId: string, index: number): Promise<AttachmentLink>;
   setFlags(messageId: string, flags: Partial<MessageFlags>): Promise<MessageMeta>;
   move(messageId: string, folder: Folder): Promise<MessageMeta>;
   send(input: SendInput): Promise<{ messageId: string }>;
@@ -135,6 +142,16 @@ export class DemoMailClient implements MailClient {
       m.snippet || "(no body in demo data)",
     ].join("\r\n");
     return { eml };
+  }
+
+  async getAttachmentUrl(messageId: string, index: number): Promise<AttachmentLink> {
+    const att = this.find(messageId)?.attachments?.[index];
+    // Demo mode has no real S3 object — hand back an inline placeholder.
+    return {
+      url: `data:text/plain;charset=utf-8,${encodeURIComponent(`Demo attachment: ${att?.filename ?? "file"}`)}`,
+      filename: att?.filename,
+      contentType: att?.contentType,
+    };
   }
 
   async setFlags(messageId: string, flags: Partial<MessageFlags>): Promise<MessageMeta> {

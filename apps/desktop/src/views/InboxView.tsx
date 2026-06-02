@@ -126,6 +126,15 @@ export function InboxView({
     }
   }
 
+  async function downloadAttachment(messageId: string, index: number) {
+    try {
+      const { url } = await mail.getAttachmentUrl(messageId, index);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   async function toggleRead(m: MessageMeta) {
     const next = !m.flags.unread;
     await mail.setFlags(m.messageId, { unread: next });
@@ -241,8 +250,16 @@ export function InboxView({
                 </div>
               )}
               {selected.attachments && selected.attachments.length > 0 && (
-                <div style={{ marginTop: 8, fontSize: 13 }}>
-                  📎 {selected.attachments.map((a) => `${a.filename} (${Math.round(a.sizeBytes / 1024)} KB)`).join(", ")}
+                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {selected.attachments.map((a, i) => (
+                    <button
+                      key={`${a.filename}-${i}`}
+                      onClick={() => void downloadAttachment(selected.messageId, i)}
+                      style={{ cursor: "pointer", fontSize: 13, border: "1px solid #ddd", borderRadius: 8, padding: "4px 10px", background: "#fafafa" }}
+                    >
+                      📎 {a.filename} ({Math.max(1, Math.round(a.sizeBytes / 1024))} KB) ⬇
+                    </button>
+                  ))}
                 </div>
               )}
 

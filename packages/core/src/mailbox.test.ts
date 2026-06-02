@@ -6,6 +6,7 @@ import {
   messageSk,
   parseSk,
   folderPrefix,
+  attachmentS3Key,
   deriveThreadId,
   mapVerdict,
   addressMatchesList,
@@ -68,6 +69,12 @@ describe("key derivation", () => {
   });
   it("throws on a malformed sort key", () => {
     expect(() => parseSk("inbox-only")).toThrow();
+  });
+
+  it("builds a safe attachment key, sanitizing the filename", () => {
+    expect(attachmentS3Key("ses-1", 0, "report.pdf")).toBe("attachments/ses-1/0-report.pdf");
+    expect(attachmentS3Key("ses-1", 1, "../../etc/passwd")).toBe("attachments/ses-1/1-.._.._etc_passwd");
+    expect(attachmentS3Key("ses-1", 2, "")).toBe("attachments/ses-1/2-attachment");
   });
 });
 

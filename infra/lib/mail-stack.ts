@@ -117,8 +117,10 @@ export class MailStack extends Stack {
         bundling: {
           format: OutputFormat.CJS,
           target: "node20",
-          // The v3 SDK ships in the Node 20 runtime — don't bundle it.
-          externalModules: ["@aws-sdk/*"],
+          // Bundle everything (incl. @aws-sdk/*): the clients are in the Node 20
+          // runtime, but utility packages like @aws-sdk/s3-request-presigner may
+          // not be — bundling guarantees a self-contained, version-pinned artifact.
+          externalModules: [],
         },
       });
 
@@ -128,7 +130,7 @@ export class MailStack extends Stack {
       INBOUND_PREFIX: "inbound/",
       HOSTED_DOMAINS: mailDomain.valueAsString,
     });
-    mailBucket.grantRead(inboundProcessor);
+    mailBucket.grantReadWrite(inboundProcessor); // read the raw .eml + write extracted attachments
     indexTable.grantWriteData(inboundProcessor);
     settingsTable.grantReadData(inboundProcessor);
 
@@ -219,6 +221,7 @@ export class MailStack extends Stack {
     });
     httpApi.addRoutes({ path: "/messages", methods: [HttpMethod.GET], integration });
     httpApi.addRoutes({ path: "/messages/{id}/raw", methods: [HttpMethod.GET], integration });
+    httpApi.addRoutes({ path: "/messages/{id}/attachments/{index}", methods: [HttpMethod.GET], integration });
     httpApi.addRoutes({ path: "/messages/{id}/flags", methods: [HttpMethod.PATCH], integration });
     httpApi.addRoutes({ path: "/messages/{id}/move", methods: [HttpMethod.POST], integration });
     httpApi.addRoutes({ path: "/send", methods: [HttpMethod.POST], integration });

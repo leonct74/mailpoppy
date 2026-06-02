@@ -27,11 +27,12 @@ function msg(over: Partial<MessageMeta> = {}): MessageMeta {
   };
 }
 
-function mockClient(): MailClient & Record<"list" | "getRaw" | "setFlags" | "move" | "send", ReturnType<typeof vi.fn>> {
+function mockClient(): MailClient & Record<"list" | "getRaw" | "getAttachmentUrl" | "setFlags" | "move" | "send", ReturnType<typeof vi.fn>> {
   const inbox = [msg()];
   return {
     list: vi.fn(async ({ folder }) => ({ items: folder === "inbox" ? inbox : [] })),
     getRaw: vi.fn(async () => ({ eml: "From: tester@ext.example\r\n\r\nthe full body text" })),
+    getAttachmentUrl: vi.fn(async () => ({ url: "https://signed.example/file", filename: "report.pdf" })),
     setFlags: vi.fn(async (_id: string, f) => ({ ...inbox[0]!, flags: { ...inbox[0]!.flags, ...f } })),
     move: vi.fn(async (_id: string, folder) => ({ ...inbox[0]!, folder })),
     send: vi.fn(async () => ({ messageId: "sent-1" })),
@@ -82,6 +83,22 @@ describe("InboxView", () => {
     expect(await screen.findByRole("dialog", { name: "Compose message" })).toBeInTheDocument();
     expect(screen.getByDisplayValue("tester@ext.example")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Re: Hello from test")).toBeInTheDocument();
+  });
+
+  it("offers a download for each attachment", async () => {
+    const withAttachment = msg({
+      hasAttachments: true,
+      attachments: [{ filename: "report.pdf", contentType: "application/pdf", sizeBytes: 2048, s3Key: "attachments/m1/0-report.pdf" }],
+    });
+    const client = mockClient();
+    client.list = vi.fn(async ({ folder }) => ({ items: folder === "inbox" ? [withAttachment] : [] }));
+    window.open = vi.fn() as unknown as typeof window.open;
+    render(<InboxView client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open: Hello from test" }));
+    fireEvent.click(await screen.findByRole("button", { name: /report\.pdf/ }));
+
+    await waitFor(() => expect(client.getAttachmentUrl).toHaveBeenCalledWith("m1", 0));
   });
 
   it("switches folders and queries the selected folder", async () => {

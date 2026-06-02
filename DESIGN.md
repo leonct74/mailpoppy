@@ -477,7 +477,11 @@ account verified clean. The desktop inbox still defaults to demo data (no persis
 bounce/complaint → suppression. *(Send path + Sent-copy + suppression Lambda implemented in the
 Phase 2 backend.)* 🚧 **In progress:** compose dialog + **Reply / Reply-all / Forward** with
 `In-Reply-To`/`References` threading (`apps/desktop/src/lib/reply.ts`, unit-tested; wired into
-`InboxView`). Remaining: **attachments** (multipart MIME + S3) and rich-text/HTML compose.
+`InboxView`). **Receive attachments**: the inbound-processor extracts each MIME attachment to S3
+(`attachments/<id>/<i>-<name>`), `GET /messages/{id}/attachments/{index}` returns a short-lived
+presigned URL (owned-mailbox-scoped), and `InboxView` shows download chips
+(typecheck + `cdk synth` validated; not yet live-deployed). Remaining: **sending** attachments
+(multipart) and rich-text/HTML compose.
 
 **Phase 4 — Migrate existing WorkMail data (deadline-driven).** WorkMail speaks IMAP → pull a
 user's existing mail into their S3 + index before the Mar 2027 cutoff.

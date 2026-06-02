@@ -3,6 +3,7 @@ import type {
   APIGatewayProxyResultV2,
 } from "aws-lambda";
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
@@ -16,6 +17,7 @@ import {
   type MessageMeta,
   type Folder,
   type MessageFlags,
+  type AttachmentMeta,
   SES_MAX_MESSAGE_BYTES,
   mailboxPk,
   messageSk,
@@ -163,6 +165,33 @@ async function getRaw(messageId: string, owned: string[]): Promise<APIGatewayPro
   );
   const eml = await obj.Body!.transformToString();
   return json(200, { eml });
+}
+
+async function getAttachment(
+  messageId: string,
+  indexStr: string,
+  owned: string[],
+): Promise<APIGatewayProxyResultV2> {
+  const row = await findOwnedRow(messageId, owned);
+  if (!row) return json(404, { error: "not found" });
+  const attachments = (row.attachments ?? []) as AttachmentMeta[];
+  const index = Number(indexStr);
+  const att = Number.isInteger(index) && index >= 0 ? attachments[index] : undefined;
+  if (!att?.s3Key) return json(404, { error: "attachment not found" });
+
+  // Hand back a short-lived presigned S3 URL — the client downloads directly
+  // from S3 (avoids streaming large files through API Gateway / Lambda).
+  const url = await getSignedUrl(
+    s3,
+    new GetObjectCommand({
+      Bucket: MAIL_BUCKET,
+      Key: att.s3Key,
+      ResponseContentDisposition: `attachment; filename="${att.filename.replace(/"/g, "")}"`,
+      ResponseContentType: att.contentType,
+    }),
+    { expiresIn: 300 },
+  );
+  return json(200, { url, filename: att.filename, contentType: att.contentType });
 }
 
 async function setFlags(
@@ -338,6 +367,11 @@ export async function handler(
         return await listMessages(owned, query);
       case "GET /messages/{id}/raw":
         return id ? await getRaw(id, owned) : json(400, { error: "missing id" });
+      case "GET /messages/{id}/attachments/{index}": {
+        const index = event.pathParameters?.index;
+        if (!id || index === undefined) return json(400, { error: "missing id/index" });
+        return await getAttachment(id, index, owned);
+      }
       case "PATCH /messages/{id}/flags":
         return id ? await setFlags(id, owned, parseBody<Partial<MessageFlags>>()) : json(400, { error: "missing id" });
       case "POST /messages/{id}/move": {

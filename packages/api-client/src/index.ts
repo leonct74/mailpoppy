@@ -56,6 +56,12 @@ export class MailpoppyClient {
   getRaw(messageId: string): Promise<{ eml: string }> {
     return this.req(`/messages/${encodeURIComponent(messageId)}/raw`);
   }
+  getAttachmentUrl(
+    messageId: string,
+    index: number,
+  ): Promise<{ url: string; filename?: string; contentType?: string }> {
+    return this.req(`/messages/${encodeURIComponent(messageId)}/attachments/${index}`);
+  }
   setFlags(messageId: string, flags: Partial<MessageFlags>): Promise<MessageMeta> {
     return this.req(`/messages/${encodeURIComponent(messageId)}/flags`, {
       method: "PATCH",
