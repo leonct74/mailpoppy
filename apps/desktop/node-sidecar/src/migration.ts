@@ -184,7 +184,7 @@ export async function migrate(ctx: AwsContext, opts: MigrateOptions): Promise<Mi
 
       const lock = await client.getMailboxLock(f.path);
       try {
-        for await (const msg of client.fetch("1:*", { source: true, flags: true })) {
+        for await (const msg of client.fetch("1:*", { source: true, flags: true, internalDate: true })) {
           if (totalImported >= maxMessages) break;
           const flags = Array.from(msg.flags ?? []);
           const raw = msg.source;
@@ -228,7 +228,12 @@ export async function migrate(ctx: AwsContext, opts: MigrateOptions): Promise<Mi
             }),
           );
 
-          const date = (parsed.date ?? new Date()).toISOString();
+          // The sort key embeds the date, so it MUST be deterministic for a given
+          // message or a re-run produces a duplicate row. Prefer the Date header,
+          // fall back to the IMAP INTERNALDATE (server-assigned, stable across
+          // fetches), and only then to epoch — never `new Date()`.
+          const internal = msg.internalDate ? new Date(msg.internalDate) : new Date(0);
+          const date = (parsed.date ?? internal).toISOString();
           const meta: MessageMeta = {
             domain: (target.mailbox.split("@")[1] ?? "").toLowerCase(),
             mailbox: normalizeAddress(target.mailbox),

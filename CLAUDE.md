@@ -113,7 +113,7 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   `https://tauri.localhost`. The sidecar binary is git-ignored (per-platform build artifact).
   **Build it with `npm run build:sidecar` (or `tauri:build`) — never commit it.** Windows/Linux
   targets + signing/notarization are Phase 5.
-- 🚧 **Phase 4 — WorkMail/IMAP migration (built, not yet live-verified)**. The desktop sidecar
+- ✅ **Phase 4 — WorkMail/IMAP migration (live-verified 2026-06-02)**. The desktop sidecar
   imports existing mail into the deployed backend, producing rows **identical** to the inbound
   Lambda's so imported mail shows up in the normal inbox. Pieces:
   - `@mailpoppy/core/migration.ts` — pure `mapImapFolder` (special-use + name heuristics; unknown
@@ -130,8 +130,14 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
     selected → per-folder summary; dry-run toggle; injectable `test`/`run` for tests (4 tests).
   - provisioning IAM policy gained scoped `s3:PutObject`/`GetObject` on `mailpoppymailstack-*` and
     `dynamodb:PutItem`/`BatchWriteItem` on `MailpoppyMailStack-*` (accessanalyzer: no findings).
-  - **Verified**: imapflow+mailparser bundle and run inside the SEA binary (bogus-host test
-    returned a live `ECONNREFUSED`, not a module-load crash). Live IMAP-source verify still pending.
+  - **Live-verified (2026-06-02)** against a local GreenMail IMAP server into a real deployed
+    stack: imported INBOX(2, incl. attachment) + "Sent Items"(1→**sent**), read back via the
+    access API (correct folders/flags), attachment downloaded byte-identical. **The live run
+    caught a real idempotency bug**: the SK embeds the date and the fallback was `new Date()`, so
+    re-running duplicated rows for messages with no `Date:` header. **Fixed** → fall back to IMAP
+    `INTERNALDATE` (stable); a 2nd run is now a no-op. Stack fully torn down; account clean.
+    **Idempotency rule for any re-runnable importer: the sort-key date MUST be deterministic —
+    never `new Date()`.**
 
 ## Architecture (concise)
 

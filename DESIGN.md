@@ -513,8 +513,15 @@ outputs; records a migration entry in the transparency ledger); sidecar `POST /m
 `apps/desktop/src/views/MigrationView.tsx` ("Bring your old mail across" — connect → preview
 folders → import selected → per-folder summary). The provisioning IAM policy gained scoped
 `s3:PutObject` + `dynamodb:PutItem` on the stack's bucket/table (re-validated, no findings).
-**Not yet live-verified** (needs a real IMAP source). imapflow + mailparser confirmed to bundle and
-run inside the SEA sidecar binary.
+✅ **Live-verified end-to-end (2026-06-02)**: a local GreenMail IMAP server (INBOX ×2 incl. an
+attachment + a "Sent Items" message) → `POST /migrate/imap/run` (resolved bucket/table from CFN
+outputs, imapflow fetched + wrote to a real deployed stack) → read back via the access API with a
+real Cognito JWT: inbox=2, sent=1 ("Sent Items" correctly mapped to **sent**, `\Seen`→read), the
+attachment downloaded **byte-identical**, raw `.eml` retrievable. **The live run caught a real
+idempotency bug**: the sort key embeds the date, and the fallback was `new Date()`, so re-running
+duplicated rows for messages lacking a `Date:` header. Fixed to fall back to the stable IMAP
+`INTERNALDATE`; a 2nd run then left inbox/sent unchanged (idempotent). Stack + retained
+resources fully torn down; account verified clean. (No SES/DNS is created for migration.)
 
 **Phase 5 — Deliverability & hardening.** DMARC report ingestion; reputation monitoring; act on
 spam/virus verdicts; aliases/catch-all; allow/block lists; policy panels; the full
