@@ -226,8 +226,8 @@ sorts into four buckets:
 | Bucket | Examples |
 |---|---|
 | **Fixed engineering** (internal, we decide) | attachment storage model; search core; verdict plumbing; janitor-Lambda delete mechanism |
-| **Admin policy** (default + per-deployment/per-domain override) | **retention**; verdict actions (spam/virus/auth → junk/reject/tag); allow/block lists; attachment soft-cap; Junk-folder behavior |
-| **Cost-bearing opt-in** (admin enables, billed in their AWS) | advanced spam filtering (rspamd / 3rd-party); deep server-side search (Athena); extended retention/storage |
+| **Admin policy** (default + per-deployment/per-domain override) | **retention**; verdict actions (spam/virus/auth → junk/reject/tag); allow/block lists; attachment soft-cap; Junk-folder behavior; **per-mailbox storage quota** |
+| **Cost-bearing opt-in** (admin enables, billed in their AWS) | advanced spam filtering (rspamd / 3rd-party); deep server-side search (Athena); extended retention/storage; **GuardDuty Malware Protection for S3** (attachment virus scanning) |
 | **Hard AWS limits** (nobody can change) | ~40 MB message cap; SES inbound region availability; SES sandbox |
 
 **Resolved defaults:**
@@ -244,6 +244,20 @@ sorts into four buckets:
   later for previews/lazy-load. Hard ceiling ~40 MB (AWS). Optional admin soft-cap below that.
   Later: "send large files as S3 link." Storage ≈ $0.023/GB-mo billed to the *user's* AWS
   account (the main TCO driver); old mail can lifecycle-tier to cheaper classes.
+- **Per-mailbox storage quota** — ✅ **built + live-verified (2026-06-03)**. Admin caps each mailbox
+  in GB (settings table, key `quota#<address>`); the inbox shows a live "X% of Y used" bar. Chosen
+  over-quota behavior = **bounce + notify the sender** (an "Undeliverable" NDR from `mailer-daemon@`)
+  rather than silent drop or accept-over: the `inbound-processor` sums `sizeBytes` under the mailbox
+  PK and, when a new message would exceed the cap, **does not store it** and returns the NDR (system
+  senders exempt to avoid bounce loops). Default = no limit. *(Post-MVP: full DSN instead of a text
+  bounce; a running usage counter instead of the O(N) per-inbound sum.)*
+- **Attachment malware scanning** — SES already runs a built-in spam/virus scan and emits verdicts
+  (surfaced to the user; virus → never inbox). For deeper, S3-object-level scanning, **GuardDuty
+  Malware Protection for S3** is an **optional, "(recommended)"** opt-in (default on in the wizard)
+  that tags each stored object `GuardDutyMalwareScanStatus`; the access-API download endpoint
+  **blocks (403) any object tagged `THREATS_FOUND`** (fail-open for un-scanned/clean). Cost-bearing
+  in the admin's own AWS — **$0.09/GB + $0.215/1000 objects, 1 GB + 1000 objects/mo free tier** —
+  hence opt-in. ✅ **built + live-verified (2026-06-03)**.
 - **Search** — default = DynamoDB metadata search (sender/subject/date/folder/flags) **+
   client-side full-text** over locally cached mail (free, offline, desktop-natural).
   Deep server-side search = **Athena over S3** (cheap, pay-per-query) as an admin opt-in.
@@ -335,6 +349,15 @@ This is the **highest, never-ending risk** — bigger than any AWS plumbing.
   (strip script/iframe/handlers, harden links), remote images/trackers blocked by default with a
   per-message "Load images" toggle; rendered in `InboxView`.
 - **Auth:** Cognito login (email/password + MFA); fresh device = just log in.
+- **Security transparency** (a top concern for admins evaluating vs. WorkMail) — ✅ **done**
+  (`views/SecurityInfo.tsx`, 🔒 button in the inbox): an at-a-glance panel of the 8 S3/mailbox
+  protections (SSE-S3, TLS-only bucket policy, no public access, presigned-only time-limited
+  downloads, server-side tenant isolation, SES spam/virus verdicts, safe-HTML rendering, optional
+  GuardDuty). Inbound virus verdict shown as a 🛡 badge; a dismissible banner explains SES's
+  built-in scan. Pairs with the §14.1 resource transparency view.
+- **Per-mailbox storage** — ✅ **done**: usage bar in the inbox ("X% of Y used"; amber ≥80%, red
+  "Full" ≥100%) + admin set/clear quota per mailbox in the management list. Enforced server-side
+  (over-quota → bounce + NDR, see §10).
 - **Admin panel:** domain setup wizard (the headline feature), health/verification dashboard
   (DKIM verified? out of sandbox? records correct?), mailbox-user management, policy panels,
   licensing.
@@ -540,6 +563,21 @@ resources fully torn down; account verified clean. (No SES/DNS is created for mi
 spam/virus verdicts; aliases/catch-all; allow/block lists; policy panels; the full
 created/deleted **resource audit ledger (§14.1)** with console deep-links and teardown
 reconciliation; multi-domain.
+🚧 **Several hardening items landed early (2026-06-03, from real-mail admin testing), all
+live-verified on ollydigital.com:**
+- **In-app teardown / uninstall** ("Remove everything" in the AWS-resources view) — deactivate
+  rule set → DeleteStack → delete RETAINed orphans (bucket/tables/Cognito) → deploy bucket → SES
+  identity → DNS records; the user-facing form of §14.1 teardown reconciliation.
+- **Attachment malware scanning** via optional GuardDuty Malware Protection for S3 + a download
+  gate that 403s `THREATS_FOUND` objects (see §10). ✅ verified: tag→403, retag→200.
+- **Per-mailbox storage quota** with bounce-the-sender enforcement + in-app usage visibility (§10).
+  ✅ verified: over-quota mail bounced (NDR to sender), not stored, usage unchanged.
+- **Email-security transparency panel** (§14) so an admin can see the S3/mailbox protections at a
+  glance — directly addresses the "is this as safe as WorkMail?" evaluation question.
+- *(Also fixed in this pass: attachment send/receive — raw-MIME `Content.Raw` send so Gmail can
+  open them, + `tauri-plugin-opener` and a fallback link so received attachments download. The
+  "still failing" symptom was a **stale prebuilt sidecar binary** masking re-deploys — always
+  rebuild the binary after Lambda/template changes.)*
 
 **Phase 6 — Mobile.** Flutter/React Native client; Cognito auth; SNS → APNs/FCM push.
 

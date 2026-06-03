@@ -188,6 +188,70 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
     `INTERNALDATE` (stable); a 2nd run is now a no-op. Stack fully torn down; account clean.
     **Idempotency rule for any re-runnable importer: the sort-key date MUST be deterministic —
     never `new Date()`.**
+- ✅ **Attachments fixed end-to-end, both directions (2026-06-03, from real-mail user testing)** —
+  three layered bugs the earlier teardown-after-test passes missed because the user ran a
+  *persistent* deploy and a *stale* sidecar binary:
+  - **Outbound "Unsupported file type" in Gmail**: SESv2 `Content.Simple` + attachments built
+    unopenable MIME → the attachment path now hand-builds **raw MIME** (`packages/core/src/mime.ts`
+    `buildMimeMessage`: multipart/mixed + multipart/alternative, base64 wrapped at 76, RFC 2047
+    subject, `Content-Disposition: attachment`) sent via SES **`Content.Raw`**; needs IAM
+    **`ses:SendRawEmail`** (added to access-api in `mail-stack.ts`). Octet-stream attachments fixed
+    with `core/contentType.ts` (`resolveContentType` by extension) on both send + inbound store.
+  - **Received-attachment download did nothing**: `window.open()` is a no-op in Tauri WKWebView →
+    added **`tauri-plugin-opener`** (Rust plugin + `opener:allow-open-url` capability +
+    `lib/openExternal.ts`) AND a guaranteed **fallback link panel** (Open/Copy) shown when
+    `openExternal()` reports it couldn't open.
+  - **The "still fails" root cause**: the user was running a **stale prebuilt sidecar binary**, so
+    re-deploys returned `NO_CHANGE` and fixes never reached the deployed Lambdas (deployed
+    `lambdaCodeKey` ≠ freshly-built key). **After any Lambda/template change you MUST
+    `npm run build:sidecar` and fully restart the app** — same class of bug as the ScrutiBank
+    stale-PyInstaller-bundle gotcha.
+  - ✅ **Live-verified 2026-06-03** on ollydigital.com/eu-west-1: a PNG sent from the app opened
+    fine in Gmail, and an inbound attachment downloaded **byte-identical** (after a 500 traced to a
+    missing `ses:SendRawEmail`, which the IAM fix resolved).
+- ✅ **In-app teardown — "Remove everything" (2026-06-03)** — `views/ResourcesView.tsx` Danger Zone
+  (type-the-domain-to-confirm) → sidecar `POST /teardown` → `prov.teardownAll`: deactivate the SES
+  rule set → `DeleteStack` (+wait) → delete the **RETAINed orphans** (mail bucket, DynamoDB tables,
+  Cognito pool) → deploy bucket → SES identity → DNS records (`removeDnsRecords` strips the
+  amazonses MX/SPF/DKIM, keeps unrelated TXT). The user-facing version of the clean-sweep every live
+  test already did by hand. IAM gained scoped deletes (s3:DeleteBucket/DeleteObject,
+  dynamodb:DeleteTable, cognito-idp:DeleteUserPool; access-analyzer clean).
+- ✅ **Email-security transparency + optional malware scanning (2026-06-03)** — for the
+  admin-evaluating-vs-WorkMail ("are attachments virus-scanned?"):
+  - **`views/SecurityInfo.tsx`** modal (🔒 button in the inbox) lists the 8 S3/mailbox protections
+    (SSE-S3, TLS-only bucket policy, no public access, presigned-only time-limited access,
+    server-side tenant isolation, SES spam/virus verdicts, safe-HTML rendering, GuardDuty). A
+    dismissible inbox banner (`scanNoteDismissed` localStorage) explains SES's built-in spam/virus
+    checks; the inbound virus verdict shows as a 🛡 badge.
+  - **GuardDuty Malware Protection for S3** as an **optional, "(recommended)"** toggle in the Deploy
+    step (default on). CDK: `EnableMalwareProtection` CfnParameter + `MalwareProtectionEnabled`
+    condition gate `AWS::GuardDuty::MalwareProtectionPlan` (object-tagging ENABLED) + its scan IAM
+    role (exact AWS-documented policy, no KMS); sidecar threads `enableMalwareProtection` through
+    `deployBackend`. **Download gate**: `access-api::getAttachment` reads the
+    `GuardDutyMalwareScanStatus` object tag → **403 if `THREATS_FOUND`** (fail-open for
+    un-scanned/`NO_THREATS_FOUND`). Pricing surfaced to the admin: **$0.09/GB + $0.215/1000 objects,
+    1 GB + 1000 objects/mo free tier**.
+  - ✅ **Live-verified 2026-06-03** on the real stack: deployed with `MalwareProtection: "enabled"`,
+    plan + scan role `CREATE_COMPLETE`; tagging an attachment object `THREATS_FOUND` → download
+    **403**; retagging `NO_THREATS_FOUND` → **200 + presigned url**. (Gate logic verified by manual
+    tagging, not by waiting on a real GuardDuty scan.) **NB: GuardDuty is currently left ENABLED on
+    the user's live `MailpoppyMailStack`** at the recommended default — re-deploy with the box
+    unchecked to disable (small AWS cost otherwise).
+- ✅ **Per-mailbox storage quota + usage visibility (2026-06-03)** — admin caps each mailbox (GB) in
+  the Mailboxes list (`views/MailboxStorageRow.tsx`); the inbox shows a live **"X% of Y used"** bar
+  (amber ≥80%, red "Full — new mail is bounced" ≥100%). Quota lives in the settings table keyed
+  **`quota#<address>`** (`core/storage.ts`: `quotaSettingsKey`, `formatBytes`, `usagePercent`,
+  `usageLevel`, `wouldExceedQuota`). Enforcement (chosen behavior = **bounce + notify sender**):
+  `inbound-processor` sums `sizeBytes` under the mailbox PK and, if the new message would exceed the
+  quota, **skips storing it and sends the sender an NDR** ("Undeliverable…", from `mailer-daemon@`;
+  system senders exempt to avoid bounce loops). Sidecar `GET /mailbox/storage/:stack/:email` +
+  `POST /mailbox/quota`; access-api `GET /usage` (sum + quota) feeds the inbox bar. inbound-processor
+  gained `SETTINGS_TABLE` + `ses:SendEmail`/`SendRawEmail`. **Post-MVP follow-ups:** the NDR is a
+  basic text bounce (not a full DSN); usage is summed O(N) per inbound (could be a running counter).
+  - ✅ **Live-verified 2026-06-03** on the real stack: delivered a small message (usage 3676 B) →
+    set quota = 3676 (full) → a second message was **blocked from the inbox**, the sender received an
+    "Undeliverable" NDR, and usage stayed unchanged. Throwaway test mailboxes deleted afterward
+    (only `marco@` remains).
 
 ## Architecture (concise)
 
@@ -285,6 +349,14 @@ solo admin needs zero config.
 - **Multi-tenant isolation** within one AWS account is enforced **server-side** in the
   access-API Lambda from verified Cognito claims — user X can only touch X's mailbox. Treat as
   security-critical; test it.
+- **Attachment malware scanning** (✅ live-verified 2026-06-03): SES's built-in virus verdict
+  (virus → never inbox) + an **optional, recommended** GuardDuty Malware Protection for S3 plan
+  that tags stored objects; the access-API download endpoint **403s any `THREATS_FOUND` object**
+  (fail-open for un-scanned/clean). Surfaced to the admin via the SecurityInfo panel + 🛡 verdict
+  badge. Opt-in because it's cost-bearing in the admin's AWS (see DESIGN §10).
+- **Per-mailbox storage quota** (✅ live-verified 2026-06-03): server-side enforcement in the
+  inbound-processor — over-quota mail is **bounced to the sender (NDR) and not stored**, so a full
+  mailbox can't be used to run up the admin's S3 bill or silently lose mail.
 - **Least-privilege IAM**: `infra/policies/` has **two** validated policies (both pass
   `accessanalyzer validate-policy` with no findings):
   - **provisioning** (`mailpoppy-provisioning-policy.json` + `-role.yaml`) — direct-API
