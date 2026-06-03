@@ -58,11 +58,14 @@ app.get("/aws/preflight/:domain", async (req) => {
   return { accountId, zoneId, region: c.region };
 });
 
-// Mutating: run the proven Phase 0 sequence. The UI must confirm before calling this.
+// Mutating: set up the domain's MAIL identity + DNS only. The S3 bucket and the
+// SES receipt rule set now belong to the deployed backend stack (POST
+// /deploy/backend), which avoids two parallel buckets/rule-sets fighting over the
+// single active receipt rule set. So this just: verify-domain DKIM + publish the
+// DKIM CNAMEs / MX / DMARC records. The UI must confirm before calling this.
 app.post("/provision/:domain", async (req) => {
   const domain = (req.params as { domain: string }).domain;
   const c = ctx();
-  const accountId = await prov.getAccountId(c);
   const zoneId = await prov.findHostedZoneId(c, domain);
   const dkimTokens = await prov.createIdentityGetDkimTokens(c, domain);
   const changeId = await prov.applyDnsRecords(c, {
@@ -71,10 +74,7 @@ app.post("/provision/:domain", async (req) => {
     dkimTokens,
     dmarcRua: `postmaster@${domain}`,
   });
-  const bucket = `mailpoppy-${domain.replace(/\./g, "-")}`;
-  await prov.createMailBucket(c, { bucket, accountId });
-  await prov.createReceiptPipeline(c, { ruleSet: "mailpoppy", domain, bucket });
-  return { ok: true, domain, bucket, zoneId, dkimTokens, changeId };
+  return { ok: true, domain, zoneId, dkimTokens, changeId };
 });
 
 // Read-only: the resource transparency inventory (DESIGN §14.1) — the deployed
@@ -225,6 +225,26 @@ app.post("/mailbox/create", async (req, reply) => {
   } catch (err) {
     return reply.code(400).send({ ok: false, error: (err as Error).message });
   }
+});
+
+// ---- One-click backend deploy (CloudFormation, no terminal/cdk for the user) ----
+
+// Mutating: upload the embedded template + Lambda code and Create/UpdateStack.
+// The UI confirms first. Returns immediately; poll the status route.
+app.post("/deploy/backend", async (req, reply) => {
+  const b = (req.body ?? {}) as { domain?: string; stackName?: string };
+  if (!b.domain) return reply.code(400).send({ ok: false, error: "domain is required" });
+  try {
+    return await prov.deployBackend(ctx(), { domain: b.domain, stackName: b.stackName });
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
+// Poll deploy progress; activates the SES rule set once complete.
+app.get("/deploy/backend/:stackName/status", async (req) => {
+  const stackName = (req.params as { stackName: string }).stackName;
+  return prov.getDeployStatus(ctx(), stackName);
 });
 
 const port = Number(process.env.PORT ?? 8787);

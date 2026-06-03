@@ -128,6 +128,43 @@ describe("SetupWizard · Mailboxes", () => {
     await waitFor(() => expect(localStorage.getItem("mailpoppy.deployment")).toContain("api.example.com"));
   });
 
+  it("deploys the backend in-app (CloudFormation) and saves the client config", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    mockSidecar.mockImplementation(async (path: string) => {
+      if (path === "/aws/readiness") return READY;
+      if (path.startsWith("/mailbox/list")) return { ...BACKEND, mailboxes: [] };
+      if (path.startsWith("/aws/preflight")) return { accountId: "123456789012", zoneId: "Z123", region: "eu-west-1" };
+      if (path === "/deploy/backend") return { ok: true, stackName: "MailpoppyMailStack", operation: "CREATE", bucket: "b", region: "eu-west-1" };
+      if (path.endsWith("/status")) {
+        return {
+          status: "CREATE_COMPLETE",
+          complete: true,
+          failed: false,
+          outputs: {
+            ApiBaseUrl: "https://api.example.com",
+            UserPoolId: "eu-west-1_abc123",
+            UserPoolClientId: "client123",
+            DeployRegion: "eu-west-1",
+          },
+        };
+      }
+      throw new Error(`unexpected sidecar path ${path}`);
+    });
+
+    render(<SetupWizard />);
+    await screen.findByText(/Environment ready/i);
+
+    fireEvent.change(screen.getByPlaceholderText("yourdomain.com"), { target: { value: "ollydigital.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /Check AWS/i }));
+    await screen.findByText(/Hosted zone/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /Deploy backend/i }));
+
+    expect(await screen.findByText(/Backend deployed/i)).toBeInTheDocument();
+    await waitFor(() => expect(localStorage.getItem("mailpoppy.deployment")).toContain("api.example.com"));
+    confirmSpy.mockRestore();
+  });
+
   it("shows a clear message when the backend stack isn't deployed", async () => {
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;

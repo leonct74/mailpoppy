@@ -42,6 +42,12 @@ function run(cmd, args) {
 }
 
 async function main() {
+  // Regenerate the embedded backend bundle (template + Lambda zip) so the binary
+  // can deploy the backend with no cdk at runtime — runs regardless of how this
+  // build was invoked (the desktop calls this script directly, not via npm).
+  console.log("[0/5] generate backend bundle");
+  execFileSync(process.execPath, [join(sidecarRoot, "scripts", "build-backend-bundle.mjs")], { stdio: "inherit" });
+
   const triple = targetTriple();
   const isWin = process.platform === "win32";
   const binName = `mailpoppy-sidecar-${triple}${isWin ? ".exe" : ""}`;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { sidecar } from "../lib/sidecar";
 import { createMailbox, listMailboxes, type Mailbox, type BackendInfo } from "../lib/mailbox";
+import { deployBackend, deployStatus, type DeployStatus } from "../lib/deploy";
 import { saveDeploymentConfig } from "../lib/deploymentConfig";
 
 // Phase 1 setup wizard.
@@ -22,7 +23,6 @@ interface Preflight {
 }
 interface ProvisionResult {
   ok: boolean;
-  bucket: string;
   dkimTokens: string[];
 }
 interface IdentityStatus {
@@ -30,7 +30,16 @@ interface IdentityStatus {
   dkim: string;
 }
 
-type Step = "start" | "preflighted" | "provisioning" | "verifying" | "verified" | "sending" | "sent";
+type Step =
+  | "start"
+  | "preflighted"
+  | "deploying"
+  | "deployed"
+  | "provisioning"
+  | "verifying"
+  | "verified"
+  | "sending"
+  | "sent";
 const SERVICES = ["route53", "ses", "sesv2", "s3"] as const;
 
 const box: React.CSSProperties = { border: "1px solid #ddd", borderRadius: 12, padding: 20, marginTop: 16 };
@@ -77,6 +86,10 @@ export function SetupWizard() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
+
+  // Backend deploy (CloudFormation)
+  const [deploy, setDeploy] = useState<DeployStatus | null>(null);
+  const deployPollRef = useRef<number | null>(null);
 
   // Mailboxes
   const [stackName, setStackName] = useState("MailpoppyMailStack");
@@ -134,8 +147,67 @@ export function SetupWizard() {
     }
   }
 
+  // Step 2 — deploy the full backend stack via CloudFormation (no terminal/cdk).
+  async function onDeploy() {
+    if (!confirm(`Deploy the Mailpoppy backend for ${domain} into your AWS account? This creates a CloudFormation stack (S3, DynamoDB, Lambdas, API, Cognito).`)) return;
+    setError(null);
+    setBusy(true);
+    setStep("deploying");
+    try {
+      await deployBackend({ domain });
+    } catch (e) {
+      fail(e, "preflighted");
+      return;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Poll the deploy until the stack settles; on success persist the client config.
+  useEffect(() => {
+    if (step !== "deploying") return;
+    let cancelled = false;
+    async function poll() {
+      try {
+        const s = await deployStatus("MailpoppyMailStack");
+        if (cancelled) return;
+        setDeploy(s);
+        if (s.failed) {
+          setError(`Backend deploy failed (${s.status})${s.reason ? `: ${s.reason}` : ""}.`);
+          setStep("preflighted");
+          return;
+        }
+        if (s.complete) {
+          const o = s.outputs ?? {};
+          if (o.ApiBaseUrl && o.UserPoolId && o.UserPoolClientId) {
+            saveDeploymentConfig({
+              apiBaseUrl: o.ApiBaseUrl,
+              userPoolId: o.UserPoolId,
+              clientId: o.UserPoolClientId,
+              region: o.DeployRegion || "eu-west-1",
+            });
+          }
+          setStep("deployed");
+          return;
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(String(e));
+          setStep("preflighted");
+        }
+        return;
+      }
+      deployPollRef.current = window.setTimeout(poll, 5000);
+    }
+    poll();
+    return () => {
+      cancelled = true;
+      if (deployPollRef.current) window.clearTimeout(deployPollRef.current);
+    };
+  }, [step, domain]);
+
   async function provisionDomain() {
-    if (!confirm(`Provision Mailpoppy for ${domain}? This creates AWS resources and changes DNS.`)) return;
+    if (!confirm(`Set up mail DNS for ${domain}? This verifies the domain in SES and publishes DKIM/MX/DMARC records.`)) return;
     setError(null);
     setBusy(true);
     setStep("provisioning");
@@ -350,16 +422,38 @@ export function SetupWizard() {
             <div>✅ Account <code style={mono}>{preflight.accountId}</code> · region <code style={mono}>{preflight.region}</code></div>
             <div>✅ Hosted zone <code style={mono}>{preflight.zoneId}</code></div>
             {step === "preflighted" && (
-              <button onClick={provisionDomain} disabled={busy} style={{ marginTop: 8 }}>
-                2. Provision (creates resources + DNS)
+              <button onClick={onDeploy} disabled={busy} style={{ marginTop: 8 }}>
+                2. Deploy backend
               </button>
             )}
           </div>
         )}
 
+        {step === "deploying" && (
+          <div style={{ marginTop: 12, fontSize: 14 }}>
+            <Spinner />
+            Deploying the backend stack… <code style={mono}>{deploy?.status ?? "starting"}</code>{" "}
+            <span style={{ color: "#999" }}>(CloudFormation — this usually takes 1–3 minutes)</span>
+          </div>
+        )}
+
+        {(step === "deployed" || step === "provisioning" || step === "verifying" || step === "verified" || step === "sending" || step === "sent") &&
+          deploy?.outputs?.ApiBaseUrl && (
+            <div style={{ marginTop: 12, fontSize: 14 }}>
+              ✅ Backend deployed · API <code style={mono}>{deploy.outputs.ApiBaseUrl}</code> · the Inbox tab is now connected.
+              {step === "deployed" && (
+                <div>
+                  <button onClick={provisionDomain} disabled={busy} style={{ marginTop: 8 }}>
+                    3. Set up domain mail (SES + DNS)
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
         {provision?.ok && (
           <div style={{ marginTop: 12, fontSize: 14 }}>
-            ✅ Provisioned · bucket <code style={mono}>{provision.bucket}</code> · {provision.dkimTokens.length} DKIM records published.
+            ✅ Domain mail set up · {provision.dkimTokens.length} DKIM records + MX/DMARC published.
           </div>
         )}
 
@@ -385,7 +479,7 @@ export function SetupWizard() {
               />
             </label>{" "}
             <button onClick={sendTest} disabled={busy || step !== "verified" || !recipient}>
-              3. Send deliverability test
+              4. Send deliverability test
             </button>
           </div>
         )}

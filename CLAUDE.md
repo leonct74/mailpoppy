@@ -113,6 +113,31 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   `https://tauri.localhost`. The sidecar binary is git-ignored (per-platform build artifact).
   **Build it with `npm run build:sidecar` (or `tauri:build`) — never commit it.** Windows/Linux
   targets + signing/notarization are Phase 5.
+- ✅ **One-click in-app backend deploy (no terminal/cdk for the user)** — the wizard's "Deploy
+  backend" button stands up the FULL stack via CloudFormation from the sidecar. How it works:
+  - **Asset-free stack** (`infra/lib/mail-stack.ts`): Lambda code = `Code.fromBucket` via CFN params
+    `LambdaCodeBucket`/`LambdaCodeKey` (not CDK assets); the in-stack `AwsCustomResource` for
+    SES `SetActiveReceiptRuleSet` was removed (it would re-introduce an asset) — the sidecar
+    activates the rule set post-deploy via the new `RuleSetName` output. `bin/mailpoppy.ts` uses
+    `DefaultStackSynthesizer({generateBootstrapVersionRule:false})` so **no `cdk bootstrap`** is
+    needed. Verified: synth has zero `aws:asset`/bootstrap refs.
+  - **Build pipeline** (`node-sidecar/scripts/build-backend-bundle.mjs`, run by `build:binary` +
+    `pre{dev,typecheck}`): esbuild-bundles the 4 handlers → one zip (handlers `<name>.handler`),
+    `cdk synth` → template, emits git-ignored `src/generated/backend-bundle.ts`
+    (`templateJson` + `lambdaZipBase64` + content-addressed `lambdaCodeKey`) which the SEA binary
+    embeds. **The 4 Lambdas now ship in ONE zip; no NodejsFunction at deploy time.**
+  - **Sidecar** (`prov.deployBackend`/`getDeployStatus`, routes `POST /deploy/backend` +
+    `GET /deploy/backend/:stack/status`): ensure a `mailpoppy-deploy-<acct>-<region>` bucket, upload
+    template+zip, Create/UpdateStack (TemplateURL, params, CAPABILITY_IAM/NAMED_IAM/AUTO_EXPAND;
+    ROLLBACK_COMPLETE → delete+recreate), poll; on `*_COMPLETE` activate the rule set. Ledger entry.
+  - **Wizard** (`lib/deploy.ts` + SetupWizard): flow is now domain → **2. Deploy backend** (progress
+    poll, saves deployment config from outputs so Inbox auto-connects) → **3. Set up domain mail
+    (SES+DNS)** → **4. test**. `POST /provision` was **reconciled** to do ONLY SES identity + DKIM/MX/
+    DMARC (the stack owns the bucket + receipt rule, so no more dueling rule-sets/buckets).
+  - IAM: provisioning policy gained `cloudformation:Create/Update/Delete/Describe*` on
+    `MailpoppyMailStack/*` (deploy bucket already covered by `mailpoppy-*`); accessanalyzer clean.
+  - **Not yet live-verified** through the new path (pending go-ahead). `createMailBucket`/
+    `createReceiptPipeline` in provisioning.ts are now unused (kept, harmless).
 - ✅ **Mailbox management (Cognito users)** — a mailbox = a Cognito user in the deployed backend's
   user pool (so it requires the CDK stack, not just the wizard's SES/DNS/S3 wiring). Sidecar:
   `prov.createMailbox`/`listMailboxes` (`@aws-sdk/client-cognito-identity-provider`:

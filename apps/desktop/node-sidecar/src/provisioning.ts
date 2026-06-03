@@ -39,12 +39,20 @@ import {
   CreateBucketCommand,
   PutBucketPolicyCommand,
   ListBucketsCommand,
+  PutObjectCommand,
+  HeadBucketCommand,
+  type BucketLocationConstraint,
 } from "@aws-sdk/client-s3";
 import {
   CloudFormationClient,
   DescribeStackResourcesCommand,
   DescribeStacksCommand,
+  CreateStackCommand,
+  UpdateStackCommand,
+  DeleteStackCommand,
+  type Capability,
 } from "@aws-sdk/client-cloudformation";
+import { templateJson, lambdaZipBase64, lambdaCodeKey } from "./generated/backend-bundle";
 import {
   CognitoIdentityProviderClient,
   AdminCreateUserCommand,
@@ -308,6 +316,161 @@ export async function getStackOutputs(
     if (o.OutputKey) map[o.OutputKey] = o.OutputValue ?? "";
   }
   return map;
+}
+
+// ---- One-click backend deploy (CloudFormation, no cdk/bootstrap at runtime) ----
+
+/** Current stack status, or null if the stack doesn't exist. */
+async function stackStatus(ctx: AwsContext, stackName: string): Promise<string | null> {
+  const { cloudformation } = clients(ctx);
+  try {
+    const out = await cloudformation.send(new DescribeStacksCommand({ StackName: stackName }));
+    return out.Stacks?.[0]?.StackStatus ?? null;
+  } catch (e) {
+    if (/does not exist|ValidationError/i.test((e as Error).message ?? "")) return null;
+    throw e;
+  }
+}
+
+export interface DeployResult {
+  ok: true;
+  stackName: string;
+  operation: "CREATE" | "UPDATE" | "NO_CHANGE" | "RECREATE";
+  bucket: string;
+  region: string;
+}
+
+/**
+ * Deploy (or update) the backend stack into the admin's account WITHOUT cdk: we
+ * upload the embedded asset-free template + prebuilt Lambda zip to a per-account
+ * deploy bucket, then CloudFormation Create/UpdateStack referencing them. The
+ * receipt rule set is activated separately (see getDeployStatus) once the stack
+ * is up. Returns immediately; poll getDeployStatus for completion.
+ */
+export async function deployBackend(
+  ctx: AwsContext,
+  args: { domain: string; stackName?: string },
+): Promise<DeployResult> {
+  const { s3, cloudformation } = clients(ctx);
+  const region = ctx.region;
+  const stackName = args.stackName ?? "MailpoppyMailStack";
+  const domain = args.domain.trim().toLowerCase();
+  const accountId = await getAccountId(ctx);
+  const bucket = `mailpoppy-deploy-${accountId}-${region}`;
+
+  // Ensure the deploy bucket exists (holds the template + Lambda code).
+  try {
+    await s3.send(new HeadBucketCommand({ Bucket: bucket }));
+  } catch {
+    await s3.send(
+      new CreateBucketCommand({
+        Bucket: bucket,
+        ...(region !== "us-east-1"
+          ? { CreateBucketConfiguration: { LocationConstraint: region as BucketLocationConstraint } }
+          : {}),
+      }),
+    );
+  }
+
+  // Upload artifacts (code key is content-addressed → idempotent).
+  await s3.send(new PutObjectCommand({ Bucket: bucket, Key: lambdaCodeKey, Body: Buffer.from(lambdaZipBase64, "base64") }));
+  const templateKey = `templates/${stackName}.template.json`;
+  await s3.send(new PutObjectCommand({ Bucket: bucket, Key: templateKey, Body: templateJson, ContentType: "application/json" }));
+  const templateUrl = `https://${bucket}.s3.${region}.amazonaws.com/${templateKey}`;
+
+  const Parameters = [
+    { ParameterKey: "MailDomain", ParameterValue: domain },
+    { ParameterKey: "LambdaCodeBucket", ParameterValue: bucket },
+    { ParameterKey: "LambdaCodeKey", ParameterValue: lambdaCodeKey },
+  ];
+  const Capabilities: Capability[] = ["CAPABILITY_IAM", "CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"];
+
+  let status = await stackStatus(ctx, stackName);
+  let operation: DeployResult["operation"];
+
+  // A previous failed create leaves ROLLBACK_COMPLETE — it can't be updated, so
+  // delete it first, then create fresh.
+  if (status === "ROLLBACK_COMPLETE" || status === "REVIEW_IN_PROGRESS") {
+    await cloudformation.send(new DeleteStackCommand({ StackName: stackName }));
+    status = null;
+    operation = "RECREATE";
+    await cloudformation.send(
+      new CreateStackCommand({ StackName: stackName, TemplateURL: templateUrl, Parameters, Capabilities }),
+    );
+  } else if (status) {
+    try {
+      await cloudformation.send(
+        new UpdateStackCommand({ StackName: stackName, TemplateURL: templateUrl, Parameters, Capabilities }),
+      );
+      operation = "UPDATE";
+    } catch (e) {
+      if (/No updates are to be performed/i.test((e as Error).message ?? "")) operation = "NO_CHANGE";
+      else throw e;
+    }
+  } else {
+    await cloudformation.send(
+      new CreateStackCommand({ StackName: stackName, TemplateURL: templateUrl, Parameters, Capabilities }),
+    );
+    operation = "CREATE";
+  }
+
+  await record([
+    {
+      action: "created",
+      service: "CloudFormation",
+      resourceType: "Stack",
+      name: stackName,
+      region,
+      detail: `backend ${operation} for ${domain}`,
+    },
+  ]);
+
+  return { ok: true, stackName, operation, bucket, region };
+}
+
+export interface DeployStatus {
+  status: string; // CloudFormation StackStatus, or "NOT_FOUND"
+  complete: boolean;
+  failed: boolean;
+  reason?: string;
+  outputs?: Record<string, string>;
+}
+
+/**
+ * Poll the deploy. When the stack reaches a *_COMPLETE state we also activate its
+ * SES receipt rule set (idempotent) so inbound mail starts flowing — this is the
+ * step that replaces the in-stack custom resource.
+ */
+export async function getDeployStatus(ctx: AwsContext, stackName: string): Promise<DeployStatus> {
+  const { cloudformation, ses } = clients(ctx);
+  let stack;
+  try {
+    const out = await cloudformation.send(new DescribeStacksCommand({ StackName: stackName }));
+    stack = out.Stacks?.[0];
+  } catch (e) {
+    if (/does not exist|ValidationError/i.test((e as Error).message ?? "")) {
+      return { status: "NOT_FOUND", complete: false, failed: false };
+    }
+    throw e;
+  }
+
+  const status = stack?.StackStatus ?? "UNKNOWN";
+  const outputs: Record<string, string> = {};
+  for (const o of stack?.Outputs ?? []) if (o.OutputKey) outputs[o.OutputKey] = o.OutputValue ?? "";
+
+  const complete = /_COMPLETE$/.test(status) && !status.startsWith("DELETE") && !status.includes("ROLLBACK");
+  const failed = /FAILED/.test(status) || status === "ROLLBACK_COMPLETE";
+
+  if (complete && outputs.RuleSetName) {
+    // Only one receipt rule set can be active per account/region — make ours it.
+    try {
+      await ses.send(new SetActiveReceiptRuleSetCommand({ RuleSetName: outputs.RuleSetName }));
+    } catch {
+      // best-effort; the wizard's domain step also confirms inbound works
+    }
+  }
+
+  return { status, complete, failed, reason: stack?.StackStatusReason, outputs };
 }
 
 // ---- Mailboxes (Cognito users in the deployed backend's user pool) ----

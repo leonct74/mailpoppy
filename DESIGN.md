@@ -452,9 +452,19 @@ realities up front.
 
 **Phase 1 — Setup/migration wizard (the wedge; shippable alone).** Tauri desktop app takes the
 admin's AWS profile and one-click provisions the full stack (Route53/SES/S3/Lambda/DynamoDB/
-Cognito/IAM) via CDK. Health/verification dashboard + sandbox-exit guidance + the **resource
+Cognito/IAM). Health/verification dashboard + sandbox-exit guidance + the **resource
 inventory view (§14.1)** so the admin sees exactly what was created in their account. *"Escape
 WorkMail — move to your own AWS in minutes."*
+
+✅ **One-click in-app deploy built (2026-06-03) — no terminal, no `cdk`, no `cdk bootstrap`.** The
+backend stack was made **asset-free** (Lambda code from S3 via CFN params; SES rule-set activation
+moved out of the stack into the sidecar) so the desktop app deploys it with raw
+`cloudformation:CreateStack`. The synthesized template + a prebuilt Lambda zip are embedded in the
+sidecar binary; at deploy time the sidecar uploads them to a `mailpoppy-deploy-*` bucket and
+Create/UpdateStacks, polls to completion, then activates the receipt rule set. Wizard flow: domain
+→ **Deploy backend** → **Set up domain mail (SES + DNS)** → **test**, then create a mailbox — all
+in-app. `/provision` was reduced to SES identity + DKIM/MX/DMARC only (the stack owns the S3 bucket
++ receipt rule). *Not yet live-verified through the new path.*
 
 **Phase 2 — Read mail.** Inbound Lambda (MIME → DynamoDB index). Client: inbox list, read,
 render (safe HTML), attachments, read/unread, folders, basic search.

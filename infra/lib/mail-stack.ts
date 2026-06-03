@@ -7,12 +7,10 @@ import {
   CfnOutput,
 } from "aws-cdk-lib";
 import type { Construct } from "constructs";
-import * as path from "node:path";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as lambda from "aws-cdk-lib/aws-lambda";
-import { NodejsFunction, OutputFormat } from "aws-cdk-lib/aws-lambda-nodejs";
 import * as ses from "aws-cdk-lib/aws-ses";
 import * as sesActions from "aws-cdk-lib/aws-ses-actions";
 import * as sns from "aws-cdk-lib/aws-sns";
@@ -23,13 +21,7 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import { HttpApi, HttpMethod, CorsHttpMethod } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { HttpUserPoolAuthorizer } from "aws-cdk-lib/aws-apigatewayv2-authorizers";
-import {
-  AwsCustomResource,
-  AwsCustomResourcePolicy,
-  PhysicalResourceId,
-} from "aws-cdk-lib/custom-resources";
 
-const LAMBDA_SRC = path.join(__dirname, "..", "..", "lambdas", "src");
 const BY_MESSAGE_INDEX = "by-message";
 
 /**
@@ -52,6 +44,22 @@ export class MailStack extends Stack {
       type: "String",
       description: "Primary domain this deployment receives email for (e.g. ollydigital.com).",
     });
+
+    // Lambda code is loaded from S3 (NOT a CDK asset) so the desktop app can
+    // deploy this template via cloudformation:CreateStack — no `cdk deploy`, no
+    // bootstrap. The sidecar uploads the prebuilt zip and passes these in.
+    const codeBucketParam = new CfnParameter(this, "LambdaCodeBucket", {
+      type: "String",
+      description: "S3 bucket holding the prebuilt Lambda code zip.",
+    });
+    const codeKeyParam = new CfnParameter(this, "LambdaCodeKey", {
+      type: "String",
+      description: "S3 key of the prebuilt Lambda code zip (all handlers).",
+    });
+    const lambdaCode = lambda.Code.fromBucket(
+      s3.Bucket.fromBucketName(this, "LambdaCodeBucketRef", codeBucketParam.valueAsString),
+      codeKeyParam.valueAsString,
+    );
 
     // ---- Storage -----------------------------------------------------------
     // Raw mail: inbound/<messageId>, sent/<messageId>.
@@ -105,26 +113,20 @@ export class MailStack extends Stack {
     });
 
     // ---- Lambdas -----------------------------------------------------------
-    const fn = (name: string, file: string, env: Record<string, string>): NodejsFunction =>
-      new NodejsFunction(this, name, {
-        entry: path.join(LAMBDA_SRC, file),
-        handler: "handler",
+    // All four handlers ship in one prebuilt zip (each esbuild-bundled, deps
+    // inlined); they differ only by handler entry point `<name>.handler`.
+    const fn = (name: string, base: string, env: Record<string, string>): lambda.Function =>
+      new lambda.Function(this, name, {
+        code: lambdaCode,
+        handler: `${base}.handler`,
         runtime: lambda.Runtime.NODEJS_20_X,
         architecture: lambda.Architecture.ARM_64,
         timeout: Duration.seconds(30),
         memorySize: 256,
         environment: env,
-        bundling: {
-          format: OutputFormat.CJS,
-          target: "node20",
-          // Bundle everything (incl. @aws-sdk/*): the clients are in the Node 20
-          // runtime, but utility packages like @aws-sdk/s3-request-presigner may
-          // not be — bundling guarantees a self-contained, version-pinned artifact.
-          externalModules: [],
-        },
       });
 
-    const inboundProcessor = fn("InboundProcessor", "inbound-processor.ts", {
+    const inboundProcessor = fn("InboundProcessor", "inbound-processor", {
       INDEX_TABLE: indexTable.tableName,
       MAIL_BUCKET: mailBucket.bucketName,
       INBOUND_PREFIX: "inbound/",
@@ -134,7 +136,7 @@ export class MailStack extends Stack {
     indexTable.grantWriteData(inboundProcessor);
     settingsTable.grantReadData(inboundProcessor);
 
-    const accessApi = fn("AccessApi", "access-api.ts", {
+    const accessApi = fn("AccessApi", "access-api", {
       INDEX_TABLE: indexTable.tableName,
       MAIL_BUCKET: mailBucket.bucketName,
       BY_MESSAGE_INDEX,
@@ -147,14 +149,14 @@ export class MailStack extends Stack {
       new iam.PolicyStatement({ actions: ["ses:SendEmail"], resources: ["*"] }),
     );
 
-    const janitor = fn("Janitor", "janitor.ts", {
+    const janitor = fn("Janitor", "janitor", {
       INDEX_TABLE: indexTable.tableName,
       MAIL_BUCKET: mailBucket.bucketName,
     });
     indexTable.grantReadWriteData(janitor);
     mailBucket.grantReadWrite(janitor);
 
-    const suppression = fn("Suppression", "suppression.ts", {
+    const suppression = fn("Suppression", "suppression", {
       SETTINGS_TABLE: settingsTable.tableName,
     });
     settingsTable.grantWriteData(suppression);
@@ -173,33 +175,10 @@ export class MailStack extends Stack {
       ],
     });
 
-    // Only one receipt rule set can be active per account/region — activate ours.
-    // (No native CFN resource exists; SES API call via a custom resource.)
-    const activate = new AwsCustomResource(this, "ActivateRuleSet", {
-      onCreate: {
-        service: "SES",
-        action: "setActiveReceiptRuleSet",
-        parameters: { RuleSetName: ruleSet.receiptRuleSetName },
-        physicalResourceId: PhysicalResourceId.of("mailpoppy-active-rule-set"),
-      },
-      onUpdate: {
-        service: "SES",
-        action: "setActiveReceiptRuleSet",
-        parameters: { RuleSetName: ruleSet.receiptRuleSetName },
-        physicalResourceId: PhysicalResourceId.of("mailpoppy-active-rule-set"),
-      },
-      onDelete: {
-        service: "SES",
-        action: "setActiveReceiptRuleSet",
-        parameters: {}, // clear the active rule set on stack delete
-      },
-      policy: AwsCustomResourcePolicy.fromSdkCalls({
-        resources: AwsCustomResourcePolicy.ANY_RESOURCE,
-      }),
-      // setActiveReceiptRuleSet is in the runtime's built-in SDK — no need to fetch latest.
-      installLatestAwsSdk: false,
-    });
-    activate.node.addDependency(ruleSet);
+    // Only one receipt rule set can be active per account/region. Rather than a
+    // custom-resource Lambda (which would re-introduce a CDK asset and break the
+    // asset-free CreateStack path), the sidecar calls SES setActiveReceiptRuleSet
+    // right after the stack deploys (and clears it on teardown), using RuleSetName.
 
     // ---- Access API: HTTP API + Cognito JWT authorizer ---------------------
     const authorizer = new HttpUserPoolAuthorizer("MailboxAuthorizer", userPool, {
@@ -245,6 +224,7 @@ export class MailStack extends Stack {
     new CfnOutput(this, "MailBucketName", { value: mailBucket.bucketName });
     new CfnOutput(this, "IndexTableName", { value: indexTable.tableName });
     new CfnOutput(this, "NotificationsTopicArn", { value: notifications.topicArn });
+    new CfnOutput(this, "RuleSetName", { value: ruleSet.receiptRuleSetName });
     new CfnOutput(this, "DeployRegion", { value: this.region });
   }
 }

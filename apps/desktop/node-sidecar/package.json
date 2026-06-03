@@ -4,9 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "gen:backend": "node scripts/build-backend-bundle.mjs",
+    "predev": "npm run gen:backend",
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "build:binary": "node scripts/build-sidecar.mjs",
+    "pretypecheck": "npm run gen:backend",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

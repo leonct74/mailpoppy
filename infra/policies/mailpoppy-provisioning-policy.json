@@ -46,12 +46,17 @@
       "Resource": "*"
     },
     {
-      "Sid": "CloudFormationReadForInventory",
+      "Sid": "CloudFormationStack",
       "Effect": "Allow",
       "Action": [
         "cloudformation:DescribeStacks",
         "cloudformation:DescribeStackResources",
-        "cloudformation:ListStackResources"
+        "cloudformation:ListStackResources",
+        "cloudformation:DescribeStackEvents",
+        "cloudformation:GetTemplate",
+        "cloudformation:CreateStack",
+        "cloudformation:UpdateStack",
+        "cloudformation:DeleteStack"
       ],
       "Resource": "arn:aws:cloudformation:*:*:stack/MailpoppyMailStack/*"
     },
