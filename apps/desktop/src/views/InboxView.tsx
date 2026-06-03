@@ -3,6 +3,7 @@ import type { MessageMeta, Folder } from "@mailpoppy/core";
 import { makeMailClient, type MailClient, type SendAttachment } from "../lib/mailClient";
 import { filesToAttachments } from "../lib/attachments";
 import { openExternal } from "../lib/openExternal";
+import { SecurityInfo } from "./SecurityInfo";
 import { parseBody, sanitizeHtml, type ParsedBody } from "../lib/mailBody";
 import { buildReply, type ComposeInit, type ReplyMode } from "../lib/reply";
 import { renderMarkdown } from "../lib/compose";
@@ -75,6 +76,7 @@ export function InboxView({
   const [scanNoteDismissed, setScanNoteDismissed] = useState(
     () => typeof localStorage !== "undefined" && localStorage.getItem("mailpoppy.scanNoteDismissed") === "1",
   );
+  const [securityOpen, setSecurityOpen] = useState(false);
 
   function startReply(mode: ReplyMode) {
     if (!selected) return;
@@ -193,10 +195,16 @@ export function InboxView({
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h2 style={{ margin: 0 }}>Mailbox</h2>
-        <button onClick={() => setComposeInit({ to: [], subject: "", text: "" })} style={{ padding: "8px 14px", borderRadius: 8, cursor: "pointer" }}>
-          ✏️ Compose
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => setSecurityOpen(true)} style={{ padding: "8px 14px", borderRadius: 8, cursor: "pointer" }} title="How your email is protected">
+            🔒 Security
+          </button>
+          <button onClick={() => setComposeInit({ to: [], subject: "", text: "" })} style={{ padding: "8px 14px", borderRadius: 8, cursor: "pointer" }}>
+            ✏️ Compose
+          </button>
+        </div>
       </div>
+      <SecurityInfo open={securityOpen} onClose={() => setSecurityOpen(false)} />
 
       {!demo && !scanNoteDismissed && (
         <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "8px 12px", marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, fontSize: 13 }}>
