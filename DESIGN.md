@@ -464,7 +464,10 @@ sidecar binary; at deploy time the sidecar uploads them to a `mailpoppy-deploy-*
 Create/UpdateStacks, polls to completion, then activates the receipt rule set. Wizard flow: domain
 → **Deploy backend** → **Set up domain mail (SES + DNS)** → **test**, then create a mailbox — all
 in-app. `/provision` was reduced to SES identity + DKIM/MX/DMARC only (the stack owns the S3 bucket
-+ receipt rule). *Not yet live-verified through the new path.*
++ receipt rule). ✅ **Live-verified 2026-06-03** on ollydigital.com via the sidecar `CreateStack`
+path (not `cdk deploy`): stack reached `CREATE_COMPLETE` with Lambdas running from the uploaded zip,
+rule set auto-activated, mailbox created, and a loopback email arrived in the inbox (deployed
+inbound-processor ran) — then full teardown + clean sweep.
 
 **Phase 2 — Read mail.** Inbound Lambda (MIME → DynamoDB index). Client: inbox list, read,
 render (safe HTML), attachments, read/unread, folders, basic search.

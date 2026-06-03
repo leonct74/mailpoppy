@@ -136,8 +136,16 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
     DMARC (the stack owns the bucket + receipt rule, so no more dueling rule-sets/buckets).
   - IAM: provisioning policy gained `cloudformation:Create/Update/Delete/Describe*` on
     `MailpoppyMailStack/*` (deploy bucket already covered by `mailpoppy-*`); accessanalyzer clean.
-  - **Not yet live-verified** through the new path (pending go-ahead). `createMailBucket`/
-    `createReceiptPipeline` in provisioning.ts are now unused (kept, harmless).
+  - ✅ **Live-verified end-to-end (2026-06-03)** on ollydigital.com/eu-west-1 via the real sidecar
+    path (NOT `cdk deploy`): `POST /deploy/backend` → CreateStack reached `CREATE_COMPLETE` (Lambdas
+    running from the uploaded zip), rule set auto-activated → `/provision` (SES+DNS) → DKIM verified
+    → `/mailbox/create` → SRP JWT → access-API `/send` loopback → the message arrived in the inbox
+    (`spam PASS`, proving the **deployed inbound-processor Lambda ran**) + a Sent copy. Then full
+    teardown (DeleteStack + RETAIN orphans + deploy/stray buckets + SES identity + DNS), clean sweep
+    verified. **Live-test gotcha:** the reconciled `/provision` only takes effect after rebuilding
+    the SEA binary — a stale binary recreated the old `mailpoppy-<domain>` bucket + "mailpoppy" rule
+    set and stole the active-rule-set pointer; rebuild then re-activate the stack's `RuleSetName`.
+    `createMailBucket`/`createReceiptPipeline` in provisioning.ts are now unused (kept, harmless).
 - ✅ **Mailbox management (Cognito users)** — a mailbox = a Cognito user in the deployed backend's
   user pool (so it requires the CDK stack, not just the wizard's SES/DNS/S3 wiring). Sidecar:
   `prov.createMailbox`/`listMailboxes` (`@aws-sdk/client-cognito-identity-provider`:
