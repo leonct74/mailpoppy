@@ -6,6 +6,7 @@ import {
   ledgerConsoleUrl,
   type Inventory,
 } from "../lib/resources";
+import { teardownEverything as defaultTeardown, type TeardownResult } from "../lib/teardown";
 
 // "What Mailpoppy did to your account" (DESIGN §14.1). Shows the authoritative
 // CloudFormation inventory of the deployed stack — grouped by service, every
@@ -35,13 +36,21 @@ function actionBadge(action: "created" | "deleted"): React.CSSProperties {
 export function ResourcesView({
   stackName = "MailpoppyMailStack",
   load = defaultLoad,
+  teardown = defaultTeardown,
 }: {
   stackName?: string;
   load?: (stackName: string) => Promise<Inventory>;
+  teardown?: typeof defaultTeardown;
 }) {
   const [inv, setInv] = useState<Inventory | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Danger zone (remove everything)
+  const [confirmText, setConfirmText] = useState("");
+  const [tearingDown, setTearingDown] = useState(false);
+  const [tdResult, setTdResult] = useState<TeardownResult | null>(null);
+  const [tdError, setTdError] = useState<string | null>(null);
 
   async function refresh() {
     setLoading(true);
@@ -62,6 +71,31 @@ export function ResourcesView({
 
   const grouped = inv ? groupByService(inv.resources) : [];
   const ledger = inv ? [...inv.ledger].sort((a, b) => (a.ts < b.ts ? 1 : -1)) : [];
+
+  // The domain to tear down: the SES identity Mailpoppy created (its ledger name
+  // is exactly the domain). If we can't infer it (e.g. a fresh machine), the user
+  // types it freely below.
+  const knownDomain = inv?.ledger.find((e) => e.service === "SES" && e.resourceType === "EmailIdentity")?.name;
+  const somethingDeployed = !!inv && (inv.stackExists || ledger.length > 0);
+  const typed = confirmText.trim().toLowerCase();
+  const canTearDown =
+    !tearingDown && typed.length > 0 && (knownDomain ? typed === knownDomain.toLowerCase() : /\./.test(typed));
+
+  async function onTeardown() {
+    setTdError(null);
+    setTdResult(null);
+    setTearingDown(true);
+    try {
+      const res = await teardown({ domain: typed, stackName });
+      setTdResult(res);
+      setConfirmText("");
+      await refresh();
+    } catch (e) {
+      setTdError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTearingDown(false);
+    }
+  }
 
   return (
     <section>
@@ -189,6 +223,81 @@ export function ResourcesView({
           </table>
         )}
       </div>
+
+      {/* Danger zone — remove everything Mailpoppy deployed */}
+      {somethingDeployed && (
+        <div style={{ ...box, borderColor: "#fecaca", background: "#fff5f5" }}>
+          <strong style={{ color: "#b91c1c" }}>Danger zone — remove everything</strong>
+          <p style={{ fontSize: 13, color: "#7f1d1d", marginTop: 6 }}>
+            Permanently delete everything Mailpoppy created{knownDomain ? <> for <code style={mono}>{knownDomain}</code></> : null}:
+            the backend stack, <b>all stored mail and mailboxes</b> (S3, DynamoDB, Cognito), the deploy bucket, the SES
+            domain identity, and the DNS records (MX/DKIM/DMARC/SPF). <b>This cannot be undone.</b>
+          </p>
+
+          {tdResult ? (
+            <div style={{ ...box, marginTop: 8, borderColor: "#bbf7d0", background: "#f0fdf4" }}>
+              <strong style={{ color: "#15803d" }}>Removed {tdResult.deleted.length} item(s).</strong>
+              <ul style={{ margin: "6px 0 0 18px", fontSize: 13 }}>
+                {tdResult.deleted.map((d, i) => (
+                  <li key={i} style={mono}>{d}</li>
+                ))}
+              </ul>
+              {tdResult.warnings.length > 0 && (
+                <div style={{ marginTop: 8, fontSize: 13, color: "#b45309" }}>
+                  <b>Warnings:</b>
+                  <ul style={{ margin: "4px 0 0 18px" }}>
+                    {tdResult.warnings.map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ) : tearingDown ? (
+            <div style={{ fontSize: 14, color: "#7f1d1d", marginTop: 8 }}>
+              Removing everything… this can take a few minutes (waiting for CloudFormation to delete the stack). Please
+              keep the app open.
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+              <label style={{ fontSize: 13, color: "#7f1d1d" }}>
+                Type {knownDomain ? <code style={mono}>{knownDomain}</code> : "the domain name"} to confirm{" "}
+                <input
+                  aria-label="Type domain to confirm teardown"
+                  value={confirmText}
+                  onChange={(e) => setConfirmText(e.target.value)}
+                  placeholder={knownDomain ?? "yourdomain.com"}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  style={{ padding: 6, minWidth: 220, marginLeft: 6 }}
+                />
+              </label>
+              <button
+                onClick={() => void onTeardown()}
+                disabled={!canTearDown}
+                style={{
+                  padding: "10px 18px",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: "#fff",
+                  background: "#dc2626",
+                  border: "none",
+                  borderRadius: 8,
+                  opacity: canTearDown ? 1 : 0.5,
+                  cursor: canTearDown ? "pointer" : "default",
+                }}
+              >
+                Remove everything
+              </button>
+            </div>
+          )}
+
+          {tdError && (
+            <div style={{ marginTop: 8, fontSize: 13, color: "#b91c1c" }}>Teardown failed: {tdError}</div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

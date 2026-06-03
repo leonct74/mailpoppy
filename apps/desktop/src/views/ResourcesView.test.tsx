@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { ResourcesView } from "./ResourcesView";
 import type { Inventory } from "../lib/resources";
 
@@ -65,5 +65,47 @@ describe("ResourcesView", () => {
 
     expect(await screen.findByText(/Couldn’t read your account/)).toBeInTheDocument();
     expect(screen.getByText(/boom/)).toBeInTheDocument();
+  });
+
+  it("gates the danger zone behind typing the domain, then runs teardown", async () => {
+    const teardown = vi.fn(async () => ({
+      ok: true as const,
+      domain: "ollydigital.com",
+      stackName: "MailpoppyMailStack",
+      deleted: ["CloudFormation stack MailpoppyMailStack", "S3 bucket mailpoppy-bucket-abc"],
+      warnings: [],
+    }));
+    render(<ResourcesView load={vi.fn(async () => POPULATED)} teardown={teardown} />);
+
+    const btn = await screen.findByRole("button", { name: "Remove everything" });
+    expect(btn).toBeDisabled();
+
+    const input = screen.getByLabelText("Type domain to confirm teardown");
+    fireEvent.change(input, { target: { value: "wrong.com" } });
+    expect(btn).toBeDisabled();
+
+    fireEvent.change(input, { target: { value: "ollydigital.com" } });
+    expect(btn).not.toBeDisabled();
+
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(teardown).toHaveBeenCalledWith({ domain: "ollydigital.com", stackName: "MailpoppyMailStack" }),
+    );
+    expect(await screen.findByText(/Removed 2 item\(s\)/)).toBeInTheDocument();
+    expect(screen.getByText("S3 bucket mailpoppy-bucket-abc")).toBeInTheDocument();
+  });
+
+  it("hides the danger zone when nothing is deployed", async () => {
+    const empty: Inventory = {
+      stackName: "MailpoppyMailStack",
+      region: "eu-west-1",
+      stackExists: false,
+      resources: [],
+      ledger: [],
+    };
+    render(<ResourcesView load={vi.fn(async () => empty)} />);
+
+    await screen.findByText(/No Mailpoppy backend is deployed/);
+    expect(screen.queryByRole("button", { name: "Remove everything" })).toBeNull();
   });
 });

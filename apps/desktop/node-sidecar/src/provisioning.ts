@@ -19,12 +19,14 @@ import {
   ChangeResourceRecordSetsCommand,
   type Change,
   type ResourceRecord,
+  type RRType,
 } from "@aws-sdk/client-route-53";
 import {
   SESv2Client,
   CreateEmailIdentityCommand,
   GetEmailIdentityCommand,
   ListEmailIdentitiesCommand,
+  DeleteEmailIdentityCommand,
   SendEmailCommand,
 } from "@aws-sdk/client-sesv2";
 import {
@@ -41,8 +43,12 @@ import {
   ListBucketsCommand,
   PutObjectCommand,
   HeadBucketCommand,
+  ListObjectsV2Command,
+  DeleteObjectsCommand,
+  DeleteBucketCommand,
   type BucketLocationConstraint,
 } from "@aws-sdk/client-s3";
+import { DynamoDBClient, DeleteTableCommand } from "@aws-sdk/client-dynamodb";
 import {
   CloudFormationClient,
   DescribeStackResourcesCommand,
@@ -58,8 +64,9 @@ import {
   AdminCreateUserCommand,
   AdminSetUserPasswordCommand,
   ListUsersCommand,
+  DeleteUserPoolCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
-import { record } from "./ledger";
+import { record, type LedgerEntry } from "./ledger";
 
 export interface AwsContext {
   region: string;
@@ -78,6 +85,7 @@ function clients(ctx: AwsContext) {
     s3: new S3Client(base),
     cloudformation: new CloudFormationClient(base),
     cognito: new CognitoIdentityProviderClient(base),
+    dynamodb: new DynamoDBClient(base),
   };
 }
 
@@ -626,4 +634,285 @@ export async function checkReadiness(ctx: AwsContext): Promise<Readiness> {
 
   const ready = credentials.ok && Object.values(permissions).every((v) => v === "ok");
   return { cli, credentials, permissions, ready };
+}
+
+// ---- Teardown: remove everything Mailpoppy deployed (the inverse of deploy + provision) ----
+
+export interface TeardownResult {
+  ok: true;
+  domain: string;
+  stackName: string;
+  deleted: string[]; // human-readable list of what was removed
+  warnings: string[]; // non-fatal issues the user should know about
+}
+
+/** Empty a bucket (all objects + versions) then delete it. Returns false if it didn't exist. */
+async function emptyAndDeleteBucket(ctx: AwsContext, bucket: string): Promise<boolean> {
+  const { s3 } = clients(ctx);
+  try {
+    await s3.send(new HeadBucketCommand({ Bucket: bucket }));
+  } catch {
+    return false; // already gone
+  }
+  let token: string | undefined;
+  do {
+    const list = await s3.send(new ListObjectsV2Command({ Bucket: bucket, ContinuationToken: token }));
+    const objects = (list.Contents ?? []).map((o) => ({ Key: o.Key! })).filter((o) => o.Key);
+    if (objects.length > 0) {
+      await s3.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: objects, Quiet: true } }));
+    }
+    token = list.IsTruncated ? list.NextContinuationToken : undefined;
+  } while (token);
+  await s3.send(new DeleteBucketCommand({ Bucket: bucket }));
+  return true;
+}
+
+/** Poll until the stack is gone (DELETE_COMPLETE) or fails. Returns true on success. */
+async function waitForStackDeleted(ctx: AwsContext, stackName: string, timeoutMs = 600_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const status = await stackStatus(ctx, stackName);
+    if (status === null) return true; // gone
+    if (status === "DELETE_FAILED" || /ROLLBACK_FAILED/.test(status)) return false;
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  return false;
+}
+
+/**
+ * Remove the DNS records Mailpoppy published for a domain: the SES MX, the DMARC
+ * TXT, the DKIM CNAMEs, and the amazonses SPF value (merged out of the apex TXT,
+ * preserving any other TXT records like domain-verification tokens). Builds DELETE
+ * changes from the *actual* record sets so they match exactly. Returns a list of
+ * human-readable descriptions of what was removed.
+ */
+async function removeDnsRecords(ctx: AwsContext, domain: string): Promise<string[]> {
+  const { route53 } = clients(ctx);
+  const zoneId = await findHostedZoneId(ctx, domain);
+  const apex = `${domain}.`;
+  const dmarc = `_dmarc.${domain}.`;
+
+  // Gather all record sets (paginated).
+  type RecordSet = { Name?: string; Type?: RRType; TTL?: number; ResourceRecords?: ResourceRecord[] };
+  const all: RecordSet[] = [];
+  let startName: string | undefined;
+  let startType: RRType | undefined;
+  do {
+    const out = await route53.send(
+      new ListResourceRecordSetsCommand({ HostedZoneId: zoneId, StartRecordName: startName, StartRecordType: startType }),
+    );
+    for (const r of out.ResourceRecordSets ?? []) all.push(r);
+    if (out.IsTruncated) {
+      startName = out.NextRecordName;
+      startType = out.NextRecordType;
+    } else {
+      startName = undefined;
+      startType = undefined;
+    }
+  } while (startName);
+
+  const changes: Change[] = [];
+  const removed: string[] = [];
+
+  const del = (r: RecordSet) => {
+    changes.push({
+      Action: "DELETE",
+      ResourceRecordSet: { Name: r.Name!, Type: r.Type, TTL: r.TTL, ResourceRecords: r.ResourceRecords },
+    });
+  };
+
+  for (const r of all) {
+    const records = r.ResourceRecords ?? [];
+    // SES inbound MX at the apex.
+    if (r.Name === apex && r.Type === "MX" && records.some((x) => /inbound-smtp\..*amazonaws\.com/.test(x.Value ?? ""))) {
+      del(r);
+      removed.push(`MX ${domain}`);
+    }
+    // DMARC TXT.
+    else if (r.Name === dmarc && r.Type === "TXT") {
+      del(r);
+      removed.push(`TXT ${dmarc.replace(/\.$/, "")}`);
+    }
+    // DKIM CNAMEs (token._domainkey.<domain> → ....dkim.amazonses.com).
+    else if (
+      r.Type === "CNAME" &&
+      r.Name?.endsWith(`._domainkey.${apex}`) &&
+      records.some((x) => /dkim\.amazonses\.com\.?$/.test(x.Value ?? ""))
+    ) {
+      del(r);
+      removed.push(`DKIM CNAME ${r.Name.replace(/\.$/, "")}`);
+    }
+    // Apex TXT: strip only the amazonses SPF value, keep everything else.
+    else if (r.Name === apex && r.Type === "TXT") {
+      const isSpf = (v: string) => /v=spf1/.test(v) && /include:amazonses\.com/.test(v);
+      const keep = records.filter((x) => !isSpf(x.Value ?? ""));
+      const hadSpf = keep.length !== records.length;
+      if (hadSpf) {
+        if (keep.length === 0) {
+          del(r);
+          removed.push(`TXT ${domain} (SPF)`);
+        } else {
+          changes.push({
+            Action: "UPSERT",
+            ResourceRecordSet: { Name: r.Name, Type: "TXT", TTL: r.TTL ?? 300, ResourceRecords: keep },
+          });
+          removed.push(`SPF value from TXT ${domain}`);
+        }
+      }
+    }
+  }
+
+  if (changes.length > 0) {
+    await route53.send(
+      new ChangeResourceRecordSetsCommand({
+        HostedZoneId: zoneId,
+        ChangeBatch: { Comment: "Mailpoppy teardown", Changes: changes },
+      }),
+    );
+  }
+  return removed;
+}
+
+/**
+ * Remove EVERYTHING Mailpoppy created for a domain: deactivate + delete the SES
+ * receipt rule set (via the stack), delete the CloudFormation stack, then delete
+ * the resources the stack RETAINs on delete (S3 mail bucket, DynamoDB tables,
+ * Cognito user pool), the per-account deploy bucket, the SES domain identity, and
+ * the published DNS records. Destructive and irreversible — the UI confirms first.
+ *
+ * Best-effort and idempotent: each step tolerates "already gone", and failures are
+ * collected as warnings rather than aborting the whole teardown, so a partial
+ * earlier run can be finished by running it again.
+ */
+export async function teardownAll(
+  ctx: AwsContext,
+  args: { domain: string; stackName?: string; deleteDeployBucket?: boolean },
+): Promise<TeardownResult> {
+  const { cloudformation, ses, sesv2, dynamodb, cognito } = clients(ctx);
+  const region = ctx.region;
+  const stackName = args.stackName ?? "MailpoppyMailStack";
+  const domain = args.domain.trim().toLowerCase();
+  const deleted: string[] = [];
+  const warnings: string[] = [];
+  const ledger: Array<Omit<LedgerEntry, "ts">> = [];
+
+  // 1. Inventory the stack's RETAIN resources + rule set BEFORE we delete it (we
+  //    can't read them once the stack is gone).
+  const orphanBuckets: string[] = [];
+  const orphanTables: string[] = [];
+  const orphanUserPools: string[] = [];
+  let ruleSetName: string | undefined;
+  const initialStatus = await stackStatus(ctx, stackName);
+  if (initialStatus) {
+    const [{ resources }, outputs] = await Promise.all([
+      listStackResources(ctx, stackName),
+      getStackOutputs(ctx, stackName).catch(() => ({}) as Record<string, string>),
+    ]);
+    ruleSetName = outputs.RuleSetName;
+    for (const r of resources) {
+      if (!r.physicalId) continue;
+      if (r.type === "AWS::S3::Bucket") orphanBuckets.push(r.physicalId);
+      else if (r.type === "AWS::DynamoDB::Table") orphanTables.push(r.physicalId);
+      else if (r.type === "AWS::Cognito::UserPool") orphanUserPools.push(r.physicalId);
+    }
+  } else {
+    warnings.push(`stack ${stackName} not found — cleaning up any remaining known resources`);
+  }
+
+  // 2. Deactivate the SES receipt rule set if ours is active (CloudFormation can't
+  //    delete an active rule set, and inbound mail should stop now).
+  try {
+    const active = await ses.send(new DescribeActiveReceiptRuleSetCommand({}));
+    const activeName = active.Metadata?.Name;
+    if (activeName && (activeName === ruleSetName || /mailpoppy|MailRuleSet/i.test(activeName))) {
+      await ses.send(new SetActiveReceiptRuleSetCommand({})); // omitting the name clears the active set
+      deleted.push(`SES active receipt rule set cleared (${activeName})`);
+      ledger.push({ action: "deleted", service: "SES", resourceType: "ActiveReceiptRuleSet", name: activeName, region });
+    }
+  } catch (e) {
+    warnings.push(`could not clear active receipt rule set: ${(e as Error).message}`);
+  }
+
+  // 3. Delete the CloudFormation stack and wait for it to finish.
+  if (initialStatus) {
+    try {
+      await cloudformation.send(new DeleteStackCommand({ StackName: stackName }));
+      if (await waitForStackDeleted(ctx, stackName)) {
+        deleted.push(`CloudFormation stack ${stackName}`);
+        ledger.push({ action: "deleted", service: "CloudFormation", resourceType: "Stack", name: stackName, region });
+      } else {
+        warnings.push(`stack ${stackName} did not reach DELETE_COMPLETE; some resources may remain — check CloudFormation`);
+      }
+    } catch (e) {
+      warnings.push(`DeleteStack failed: ${(e as Error).message}`);
+    }
+  }
+
+  // 4. Delete the RETAINed resources the stack left behind (idempotent).
+  for (const b of orphanBuckets) {
+    try {
+      if (await emptyAndDeleteBucket(ctx, b)) {
+        deleted.push(`S3 bucket ${b}`);
+        ledger.push({ action: "deleted", service: "S3", resourceType: "Bucket", name: b, region });
+      }
+    } catch (e) {
+      warnings.push(`bucket ${b}: ${(e as Error).message}`);
+    }
+  }
+  for (const t of orphanTables) {
+    try {
+      await dynamodb.send(new DeleteTableCommand({ TableName: t }));
+      deleted.push(`DynamoDB table ${t}`);
+      ledger.push({ action: "deleted", service: "DynamoDB", resourceType: "Table", name: t, region });
+    } catch (e) {
+      if (!/ResourceNotFound/i.test((e as Error).name ?? "")) warnings.push(`table ${t}: ${(e as Error).message}`);
+    }
+  }
+  for (const p of orphanUserPools) {
+    try {
+      await cognito.send(new DeleteUserPoolCommand({ UserPoolId: p }));
+      deleted.push(`Cognito user pool ${p}`);
+      ledger.push({ action: "deleted", service: "Cognito", resourceType: "UserPool", name: p, region });
+    } catch (e) {
+      if (!/ResourceNotFound/i.test((e as Error).name ?? "")) warnings.push(`user pool ${p}: ${(e as Error).message}`);
+    }
+  }
+
+  // 5. Delete the per-account deploy bucket (template + Lambda zip). Default on;
+  //    pass deleteDeployBucket:false to keep it for faster future deploys.
+  if (args.deleteDeployBucket !== false) {
+    try {
+      const accountId = await getAccountId(ctx);
+      const deployBucket = `mailpoppy-deploy-${accountId}-${region}`;
+      if (await emptyAndDeleteBucket(ctx, deployBucket)) {
+        deleted.push(`S3 deploy bucket ${deployBucket}`);
+        ledger.push({ action: "deleted", service: "S3", resourceType: "Bucket", name: deployBucket, region });
+      }
+    } catch (e) {
+      warnings.push(`deploy bucket: ${(e as Error).message}`);
+    }
+  }
+
+  // 6. Delete the SES domain identity.
+  try {
+    await sesv2.send(new DeleteEmailIdentityCommand({ EmailIdentity: domain }));
+    deleted.push(`SES domain identity ${domain}`);
+    ledger.push({ action: "deleted", service: "SES", resourceType: "EmailIdentity", name: domain, region });
+  } catch (e) {
+    if (!/NotFound/i.test((e as Error).name ?? "")) warnings.push(`SES identity: ${(e as Error).message}`);
+  }
+
+  // 7. Remove the DNS records (MX / DMARC / DKIM CNAMEs / amazonses SPF).
+  try {
+    const removed = await removeDnsRecords(ctx, domain);
+    for (const d of removed) {
+      deleted.push(`Route53 ${d}`);
+      ledger.push({ action: "deleted", service: "Route53", resourceType: "DNS", name: d, region });
+    }
+  } catch (e) {
+    warnings.push(`DNS cleanup: ${(e as Error).message}`);
+  }
+
+  await record(ledger);
+  return { ok: true, domain, stackName, deleted, warnings };
 }

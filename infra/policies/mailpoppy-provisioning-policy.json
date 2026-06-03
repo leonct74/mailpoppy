@@ -81,21 +81,21 @@
       "Resource": "arn:aws:s3:::mailpoppy-*/*"
     },
     {
-      "Sid": "MigrationStackBucket",
+      "Sid": "StackBucket",
       "Effect": "Allow",
-      "Action": ["s3:ListBucket"],
+      "Action": ["s3:ListBucket", "s3:DeleteBucket"],
       "Resource": "arn:aws:s3:::mailpoppymailstack-*"
     },
     {
-      "Sid": "MigrationStackObjects",
+      "Sid": "StackObjects",
       "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
       "Resource": "arn:aws:s3:::mailpoppymailstack-*/*"
     },
     {
-      "Sid": "MigrationIndexTableWrite",
+      "Sid": "StackIndexTable",
       "Effect": "Allow",
-      "Action": ["dynamodb:PutItem", "dynamodb:BatchWriteItem"],
+      "Action": ["dynamodb:PutItem", "dynamodb:BatchWriteItem", "dynamodb:DeleteTable"],
       "Resource": "arn:aws:dynamodb:*:*:table/MailpoppyMailStack-*"
     },
     {
@@ -105,7 +105,8 @@
         "cognito-idp:AdminCreateUser",
         "cognito-idp:AdminSetUserPassword",
         "cognito-idp:AdminGetUser",
-        "cognito-idp:ListUsers"
+        "cognito-idp:ListUsers",
+        "cognito-idp:DeleteUserPool"
       ],
       "Resource": "arn:aws:cognito-idp:*:*:userpool/*"
     }

@@ -247,6 +247,26 @@ app.get("/deploy/backend/:stackName/status", async (req) => {
   return prov.getDeployStatus(ctx(), stackName);
 });
 
+// ---- Teardown: remove everything Mailpoppy deployed for a domain ----
+
+// Mutating + DESTRUCTIVE: deletes the stack, its RETAINed data (mail bucket,
+// DynamoDB tables, Cognito pool), the deploy bucket, the SES identity and the
+// DNS records. The UI requires the user to type the domain to confirm. This is a
+// long-running request (it waits for CloudFormation DeleteStack to finish).
+app.post("/teardown", async (req, reply) => {
+  const b = (req.body ?? {}) as { domain?: string; stackName?: string; deleteDeployBucket?: boolean };
+  if (!b.domain) return reply.code(400).send({ ok: false, error: "domain is required" });
+  try {
+    return await prov.teardownAll(ctx(), {
+      domain: b.domain,
+      stackName: b.stackName,
+      deleteDeployBucket: b.deleteDeployBucket,
+    });
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
 const port = Number(process.env.PORT ?? 8787);
 app
   .listen({ port, host: "127.0.0.1" })
