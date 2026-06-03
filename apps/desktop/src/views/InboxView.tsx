@@ -71,6 +71,10 @@ export function InboxView({
   // Fallback when the OS can't auto-open a download (e.g. a Tauri build whose
   // opener plugin isn't active yet): surface the link so the user is never stuck.
   const [attachmentLink, setAttachmentLink] = useState<{ url: string; filename: string } | null>(null);
+  // One-time security note explaining SES's built-in virus/spam scanning.
+  const [scanNoteDismissed, setScanNoteDismissed] = useState(
+    () => typeof localStorage !== "undefined" && localStorage.getItem("mailpoppy.scanNoteDismissed") === "1",
+  );
 
   function startReply(mode: ReplyMode) {
     if (!selected) return;
@@ -193,6 +197,30 @@ export function InboxView({
           ✏️ Compose
         </button>
       </div>
+
+      {!demo && !scanNoteDismissed && (
+        <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "8px 12px", marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, fontSize: 13 }}>
+          <span style={{ color: "#166534" }}>
+            🛡 <strong>Incoming mail is automatically scanned for viruses and spam by AWS SES.</strong> A message that fails
+            the virus check is quarantined to Junk and never reaches your inbox. Each message shows its scan result (virus /
+            SPF / DKIM / DMARC / spam). Note: this is AWS's built-in scan — it's not a substitute for your own device
+            antivirus when you download a file.
+          </span>
+          <button
+            onClick={() => {
+              try {
+                localStorage.setItem("mailpoppy.scanNoteDismissed", "1");
+              } catch {
+                /* ignore */
+              }
+              setScanNoteDismissed(true);
+            }}
+            style={{ cursor: "pointer", padding: "4px 10px", background: "none", border: "none", color: "#15803d", whiteSpace: "nowrap" }}
+          >
+            Got it
+          </button>
+        </div>
+      )}
 
       <div style={wrap}>
         {/* Folder rail */}
