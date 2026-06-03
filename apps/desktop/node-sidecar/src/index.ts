@@ -178,7 +178,7 @@ app.post("/migrate/imap/run", async (req, reply) => {
 // ---- Mailboxes (Cognito users in the deployed backend's user pool) ----
 
 const NO_BACKEND =
-  "No deployed Mailpoppy backend was found. Deploy it first (cd infra && npx cdk deploy --parameters MailDomain=<domain>), then create mailboxes.";
+  'No deployed Mailpoppy backend was found yet. Set up a domain and use the in-app "Deploy backend" step to create it, then add mailboxes.';
 
 async function resolveBackend(stackName: string) {
   const c = ctx();

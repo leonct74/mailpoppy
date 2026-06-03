@@ -129,7 +129,6 @@ describe("SetupWizard · Mailboxes", () => {
   });
 
   it("deploys the backend in-app (CloudFormation) and saves the client config", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;
       if (path.startsWith("/mailbox/list")) return { ...BACKEND, mailboxes: [] };
@@ -159,22 +158,52 @@ describe("SetupWizard · Mailboxes", () => {
     await screen.findByText(/Hosted zone/i);
 
     fireEvent.click(screen.getByRole("button", { name: /Deploy backend/i }));
+    // Confirm via the in-app dialog (native window.confirm is unreliable in the
+    // Tauri webview, so we render our own).
+    fireEvent.click(await screen.findByRole("button", { name: /Yes, continue/i }));
 
     expect(await screen.findByText(/Backend deployed/i)).toBeInTheDocument();
     await waitFor(() => expect(localStorage.getItem("mailpoppy.deployment")).toContain("api.example.com"));
-    confirmSpy.mockRestore();
   });
 
-  it("shows a clear message when the backend stack isn't deployed", async () => {
+  it("confirms deploy via an in-app dialog, and cancelling does not deploy", async () => {
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;
-      if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed Mailpoppy backend was found.");
+      if (path.startsWith("/mailbox/list")) return { ...BACKEND, mailboxes: [] };
+      if (path.startsWith("/aws/preflight")) return { accountId: "123456789012", zoneId: "Z123", region: "eu-west-1" };
+      if (path === "/deploy/backend") throw new Error("deploy must not be called after cancel");
+      throw new Error(`unexpected sidecar path ${path}`);
+    });
+
+    render(<SetupWizard />);
+    await screen.findByText(/Environment ready/i);
+    fireEvent.change(screen.getByPlaceholderText("yourdomain.com"), { target: { value: "ollydigital.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /Check AWS/i }));
+    await screen.findByText(/Hosted zone/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /Deploy backend/i }));
+    // The dialog is our own element, not a native prompt.
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Cancel/i }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // No deploy was attempted (the /deploy/backend handler would have thrown).
+    expect(mockSidecar.mock.calls.find((c) => c[0] === "/deploy/backend")).toBeUndefined();
+  });
+
+  it("treats a not-yet-deployed backend as the expected first-run state, not a red error", async () => {
+    mockSidecar.mockImplementation(async (path: string) => {
+      if (path === "/aws/readiness") return READY;
+      if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
       throw new Error(`unexpected ${path}`);
     });
 
     render(<SetupWizard />);
     await screen.findByText(/Environment ready/i);
 
-    expect(await screen.findByText(/No deployed Mailpoppy backend/i)).toBeInTheDocument();
+    // Friendly deploy hint, not the raw sidecar error.
+    expect(await screen.findByText(/No backend deployed yet/i)).toBeInTheDocument();
+    expect(screen.queryByText(/sidecar 404/i)).not.toBeInTheDocument();
+    // Create is gated until the backend exists.
+    expect(screen.getByRole("button", { name: "Create mailbox" })).toBeDisabled();
   });
 });

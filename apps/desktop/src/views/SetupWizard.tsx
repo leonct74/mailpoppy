@@ -47,6 +47,22 @@ const mono: React.CSSProperties = { fontFamily: "ui-monospace, monospace" };
 const warn: React.CSSProperties = { marginTop: 10, background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, padding: 10 };
 const input: React.CSSProperties = { padding: 6, minWidth: 240 };
 const noAutoCap = { autoCapitalize: "off", autoCorrect: "off", spellCheck: false } as const;
+// Prominent style for the numbered flow actions (the "Deploy backend" button was
+// too small to notice before).
+const primaryBtn: React.CSSProperties = {
+  padding: "10px 18px",
+  fontSize: 15,
+  fontWeight: 600,
+  color: "#fff",
+  background: "#7c3aed",
+  border: "none",
+  borderRadius: 8,
+};
+const pBtn = (disabled: boolean): React.CSSProperties => ({
+  ...primaryBtn,
+  opacity: disabled ? 0.5 : 1,
+  cursor: disabled ? "default" : "pointer",
+});
 
 const permIcon = (v: "ok" | "denied" | "error") => (v === "ok" ? "✅" : v === "denied" ? "⛔" : "⚠️");
 
@@ -86,6 +102,10 @@ export function SetupWizard() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
+  // In-app confirmation. Tauri's webview (WKWebView on macOS) doesn't reliably
+  // show the native window.confirm() dialog — it just returns false — so a
+  // confirm-gated action would silently do nothing. We render our own dialog.
+  const [confirmAction, setConfirmAction] = useState<null | { message: string; run: () => void }>(null);
 
   // Backend deploy (CloudFormation)
   const [deploy, setDeploy] = useState<DeployStatus | null>(null);
@@ -99,6 +119,7 @@ export function SetupWizard() {
   const [mbBackend, setMbBackend] = useState<BackendInfo | null>(null);
   const [mbBusy, setMbBusy] = useState(false);
   const [mbError, setMbError] = useState<string | null>(null);
+  const [mbNoBackend, setMbNoBackend] = useState(false);
   const [mbCreated, setMbCreated] = useState<string | null>(null);
 
   // The sidecar may still be booting when the view mounts; retry a few times
@@ -134,6 +155,10 @@ export function SetupWizard() {
     if (back) setStep(back);
   }
 
+  function askConfirm(message: string, run: () => void) {
+    setConfirmAction({ message, run });
+  }
+
   async function runPreflight() {
     setError(null);
     setBusy(true);
@@ -148,8 +173,13 @@ export function SetupWizard() {
   }
 
   // Step 2 — deploy the full backend stack via CloudFormation (no terminal/cdk).
-  async function onDeploy() {
-    if (!confirm(`Deploy the Mailpoppy backend for ${domain} into your AWS account? This creates a CloudFormation stack (S3, DynamoDB, Lambdas, API, Cognito).`)) return;
+  function onDeploy() {
+    askConfirm(
+      `Deploy the Mailpoppy backend for ${domain} into your AWS account? This creates a CloudFormation stack (S3, DynamoDB, Lambdas, API, Cognito) — real resources in your account.`,
+      runDeploy,
+    );
+  }
+  async function runDeploy() {
     setError(null);
     setBusy(true);
     setStep("deploying");
@@ -206,8 +236,13 @@ export function SetupWizard() {
     };
   }, [step, domain]);
 
-  async function provisionDomain() {
-    if (!confirm(`Set up mail DNS for ${domain}? This verifies the domain in SES and publishes DKIM/MX/DMARC records.`)) return;
+  function provisionDomain() {
+    askConfirm(
+      `Set up mail DNS for ${domain}? This verifies the domain in SES and publishes DKIM/MX/DMARC records.`,
+      runProvision,
+    );
+  }
+  async function runProvision() {
     setError(null);
     setBusy(true);
     setStep("provisioning");
@@ -269,6 +304,7 @@ export function SetupWizard() {
   // ---- Mailboxes ----
   async function loadMailboxes() {
     setMbError(null);
+    setMbNoBackend(false);
     try {
       const res = await listMailboxes(stackName);
       setMailboxes(res.mailboxes);
@@ -276,7 +312,15 @@ export function SetupWizard() {
     } catch (e) {
       setMailboxes(null);
       setMbBackend(null);
-      setMbError(String(e));
+      const msg = String(e);
+      // A 404 here just means the backend stack isn't deployed yet — the
+      // expected state on first launch, not an error. Show the deploy hint
+      // instead of an alarming red banner.
+      if (/\b404\b/.test(msg) && /No deployed Mailpoppy backend/i.test(msg)) {
+        setMbNoBackend(true);
+      } else {
+        setMbError(msg);
+      }
     }
   }
   // Auto-load the mailbox list once the environment is ready.
@@ -313,6 +357,43 @@ export function SetupWizard() {
   return (
     <>
       <style>{`@keyframes mp-spin { to { transform: rotate(360deg); } }`}</style>
+
+      {/* In-app confirmation dialog (native window.confirm is unreliable in the
+          Tauri webview). */}
+      {confirmAction && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div style={{ background: "#fff", borderRadius: 12, padding: 24, maxWidth: 460, boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
+            <p style={{ margin: "0 0 18px", fontSize: 15, lineHeight: 1.5 }}>{confirmAction.message}</p>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button onClick={() => setConfirmAction(null)} style={{ padding: "8px 16px" }}>
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const run = confirmAction.run;
+                  setConfirmAction(null);
+                  run();
+                }}
+                style={{ ...primaryBtn, padding: "8px 16px" }}
+              >
+                Yes, continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ---- Step 0: AWS environment ---- */}
       <section style={box}>
@@ -413,7 +494,11 @@ export function SetupWizard() {
             {...noAutoCap}
           />
         </label>{" "}
-        <button onClick={runPreflight} disabled={!ready || !domain || busy || step !== "start"}>
+        <button
+          onClick={runPreflight}
+          disabled={!ready || !domain || busy || step !== "start"}
+          style={pBtn(!ready || !domain || busy || step !== "start")}
+        >
           1. Check AWS &amp; DNS
         </button>
 
@@ -422,7 +507,7 @@ export function SetupWizard() {
             <div>✅ Account <code style={mono}>{preflight.accountId}</code> · region <code style={mono}>{preflight.region}</code></div>
             <div>✅ Hosted zone <code style={mono}>{preflight.zoneId}</code></div>
             {step === "preflighted" && (
-              <button onClick={onDeploy} disabled={busy} style={{ marginTop: 8 }}>
+              <button onClick={onDeploy} disabled={busy} style={{ ...pBtn(busy), marginTop: 10 }}>
                 2. Deploy backend
               </button>
             )}
@@ -443,7 +528,7 @@ export function SetupWizard() {
               ✅ Backend deployed · API <code style={mono}>{deploy.outputs.ApiBaseUrl}</code> · the Inbox tab is now connected.
               {step === "deployed" && (
                 <div>
-                  <button onClick={provisionDomain} disabled={busy} style={{ marginTop: 8 }}>
+                  <button onClick={provisionDomain} disabled={busy} style={{ ...pBtn(busy), marginTop: 10 }}>
                     3. Set up domain mail (SES + DNS)
                   </button>
                 </div>
@@ -478,7 +563,7 @@ export function SetupWizard() {
                 {...noAutoCap}
               />
             </label>{" "}
-            <button onClick={sendTest} disabled={busy || step !== "verified" || !recipient}>
+            <button onClick={sendTest} disabled={busy || step !== "verified" || !recipient} style={pBtn(busy || step !== "verified" || !recipient)}>
               4. Send deliverability test
             </button>
           </div>
@@ -510,6 +595,13 @@ export function SetupWizard() {
             backend stack must be deployed first.
           </p>
 
+          {mbNoBackend && (
+            <div style={warn}>
+              No backend deployed yet. Set up a domain above and run the <b>Deploy backend</b> step to create it — then come
+              back here to add mailboxes.
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
             <label style={{ fontSize: 13 }}>
               Email address
@@ -539,7 +631,11 @@ export function SetupWizard() {
               <br />
               <input aria-label="Stack name" value={stackName} onChange={(e) => setStackName(e.target.value.trim())} style={{ ...input, minWidth: 200 }} {...noAutoCap} />
             </label>
-            <button onClick={() => void createMb()} disabled={mbBusy || !mbEmail || !mbPassword}>
+            <button
+              onClick={() => void createMb()}
+              disabled={mbBusy || mbNoBackend || !mbEmail || !mbPassword}
+              style={pBtn(mbBusy || mbNoBackend || !mbEmail || !mbPassword)}
+            >
               {mbBusy ? "Creating…" : "Create mailbox"}
             </button>
           </div>
