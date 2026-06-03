@@ -12,7 +12,7 @@ import {
   PutCommand,
   DeleteCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { SESv2Client, SendEmailCommand, type MessageHeader, type Attachment } from "@aws-sdk/client-sesv2";
+import { SESv2Client, SendEmailCommand, type MessageHeader } from "@aws-sdk/client-sesv2";
 import {
   type MessageMeta,
   type Folder,
@@ -25,6 +25,7 @@ import {
   normalizeAddress,
   attachmentS3Key,
   resolveContentType,
+  buildMimeMessage,
 } from "@mailpoppy/core";
 
 /**
@@ -283,35 +284,62 @@ async function sendMessage(owned: string[], body: SendBody): Promise<APIGatewayP
     return json(413, { error: "message exceeds the 40MB SES limit" });
   }
 
-  const headers: MessageHeader[] = [];
-  if (body.inReplyTo) headers.push({ Name: "In-Reply-To", Value: body.inReplyTo });
-  if (body.references) headers.push({ Name: "References", Value: body.references });
-
-  const sesAttachments: Attachment[] = decoded.map((a) => ({
-    RawContent: a.bytes,
-    FileName: a.filename,
-    ContentType: a.contentType,
-  }));
-
-  const sent = await ses.send(
-    new SendEmailCommand({
-      FromEmailAddress: from,
-      Destination: { ToAddresses: to },
-      Content: {
-        Simple: {
-          Subject: { Data: subject, Charset: "UTF-8" },
-          Body: {
-            ...(text ? { Text: { Data: text, Charset: "UTF-8" } } : {}),
-            ...(html ? { Html: { Data: html, Charset: "UTF-8" } } : {}),
-          },
-          ...(headers.length ? { Headers: headers } : {}),
-          ...(sesAttachments.length ? { Attachments: sesAttachments } : {}),
-        },
-      },
-    }),
-  );
-  const messageId = sent.MessageId ?? `local-${Date.now()}`;
   const date = new Date().toISOString();
+  // Our own RFC Message-ID for the message body; SES returns its own id which we
+  // use for storage keys.
+  const headerMessageId = `${Date.now()}.${Math.random().toString(36).slice(2)}@${from.slice(from.lastIndexOf("@") + 1)}`;
+
+  let messageId: string;
+  let rawEml: string;
+  if (decoded.length > 0) {
+    // Attachments → build a proper multipart/mixed MIME message and send it raw.
+    // The SESv2 "Simple" + Attachments path produced messages Gmail refused to
+    // open; a hand-built raw message is universally compatible. We also store this
+    // exact raw as the Sent copy so the Sent folder shows the attachment.
+    rawEml = buildMimeMessage({
+      from,
+      to,
+      subject,
+      text,
+      html,
+      messageId: headerMessageId,
+      date,
+      inReplyTo: body.inReplyTo,
+      references: body.references,
+      attachments: decoded.map((a) => ({ filename: a.filename, contentType: a.contentType, bytes: a.bytes })),
+    });
+    const sent = await ses.send(
+      new SendEmailCommand({
+        FromEmailAddress: from,
+        Destination: { ToAddresses: to },
+        Content: { Raw: { Data: Buffer.from(rawEml, "utf8") } },
+      }),
+    );
+    messageId = sent.MessageId ?? `local-${Date.now()}`;
+  } else {
+    // No attachments → the simple content type is fine (and proven).
+    const headers: MessageHeader[] = [];
+    if (body.inReplyTo) headers.push({ Name: "In-Reply-To", Value: body.inReplyTo });
+    if (body.references) headers.push({ Name: "References", Value: body.references });
+    const sent = await ses.send(
+      new SendEmailCommand({
+        FromEmailAddress: from,
+        Destination: { ToAddresses: to },
+        Content: {
+          Simple: {
+            Subject: { Data: subject, Charset: "UTF-8" },
+            Body: {
+              ...(text ? { Text: { Data: text, Charset: "UTF-8" } } : {}),
+              ...(html ? { Html: { Data: html, Charset: "UTF-8" } } : {}),
+            },
+            ...(headers.length ? { Headers: headers } : {}),
+          },
+        },
+      }),
+    );
+    messageId = sent.MessageId ?? `local-${Date.now()}`;
+    rawEml = buildRawEml({ from, to, subject, text, html, messageId, date, inReplyTo: body.inReplyTo });
+  }
 
   // Store each attachment to S3 so the Sent copy's attachments are downloadable
   // via the same GET /messages/{id}/attachments/{index} endpoint.
@@ -325,9 +353,7 @@ async function sendMessage(owned: string[], body: SendBody): Promise<APIGatewayP
     sentAttachments.push({ filename: a.filename, contentType: a.contentType, sizeBytes: a.bytes.length, s3Key: key });
   }
 
-  // SES keeps no Sent copy — manufacture one (DESIGN §9.2): store a raw .eml in
-  // S3 and an index row so the Sent folder is readable like any other.
-  const rawEml = buildRawEml({ from, to, subject, text, html, messageId, date, inReplyTo: body.inReplyTo });
+  // Store the Sent copy (.eml) + an index row so the Sent folder is readable.
   const s3Key = `${SENT_PREFIX}${messageId}`;
   await s3.send(
     new PutObjectCommand({ Bucket: MAIL_BUCKET, Key: s3Key, Body: rawEml, ContentType: "message/rfc822" }),

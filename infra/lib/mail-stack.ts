@@ -145,8 +145,10 @@ export class MailStack extends Stack {
     indexTable.grantReadWriteData(accessApi);
     mailBucket.grantReadWrite(accessApi);
     settingsTable.grantReadData(accessApi);
+    // SendEmail covers the simple (no-attachment) path; SendRawEmail is required
+    // when we send a hand-built raw MIME message (attachments).
     accessApi.addToRolePolicy(
-      new iam.PolicyStatement({ actions: ["ses:SendEmail"], resources: ["*"] }),
+      new iam.PolicyStatement({ actions: ["ses:SendEmail", "ses:SendRawEmail"], resources: ["*"] }),
     );
 
     const janitor = fn("Janitor", "janitor", {
