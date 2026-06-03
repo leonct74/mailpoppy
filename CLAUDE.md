@@ -335,6 +335,17 @@ as the reference implementation.
   apex TXT, merge with existing TXT values (don't clobber). (Bit us-adjacent in Phase 0.)
 - **Search:** default = DynamoDB metadata + client-side local index (free). Deep search =
   Athena opt-in. **Avoid OpenSearch by default** (hundreds-$/mo floor breaks the cost model).
+- **🪤 Stale prebuilt sidecar binary masks Lambda/template changes.** The sidecar ships as a
+  prebuilt SEA binary that *embeds* the synthesized CFN template + the content-addressed Lambda
+  zip (`src/generated/backend-bundle.ts`). If you edit a Lambda, CDK stack, or `core` code a
+  Lambda imports but **don't** rerun `npm run build:sidecar`, the running app deploys the **old**
+  bundle → `lambdaCodeKey` is unchanged → CloudFormation reports `NO_CHANGE` and the fix never
+  reaches AWS. This is exactly what caused the "attachments still fail" reports (2026-06-03).
+  **After any change to `lambdas/`, `infra/`, or core code used by a Lambda: `npm run build:sidecar`
+  AND fully restart the app** (the Rust shell respawns the sidecar; a hot frontend reload is not
+  enough — and the Tauri opener plugin also needs a full Rust restart). Cross-check the deployed vs.
+  built `lambdaCodeKey` if a deploy unexpectedly says `NO_CHANGE`. Same failure class as ScrutiBank's
+  frozen-PyInstaller-bundle bug.
 
 ## Config/policy model (DESIGN §10)
 
