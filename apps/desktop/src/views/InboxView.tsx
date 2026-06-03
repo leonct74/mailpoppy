@@ -273,7 +273,13 @@ export function InboxView({
               </div>
               {selected.verdicts && (
                 <div style={{ color: "#777", fontSize: 12, marginTop: 4 }}>
-                  SPF {selected.verdicts.spf} · DKIM {selected.verdicts.dkim} · DMARC {selected.verdicts.dmarc} · spam {selected.verdicts.spam}
+                  <span
+                    title="Antivirus scan result from AWS SES. Virus-positive mail is quarantined and never delivered to the inbox."
+                    style={{ color: selected.verdicts.virus === "PASS" ? "#15803d" : selected.verdicts.virus === "FAIL" ? "#b91c1c" : "#777" }}
+                  >
+                    🛡 virus {selected.verdicts.virus}
+                  </span>{" "}
+                  · SPF {selected.verdicts.spf} · DKIM {selected.verdicts.dkim} · DMARC {selected.verdicts.dmarc} · spam {selected.verdicts.spam}
                 </div>
               )}
               {selected.attachments && selected.attachments.length > 0 && (
