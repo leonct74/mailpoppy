@@ -85,20 +85,25 @@ describe("InboxView", () => {
     expect(screen.getByDisplayValue("Re: Hello from test")).toBeInTheDocument();
   });
 
-  it("offers a download for each attachment", async () => {
+  it("downloads an attachment, and falls back to showing the link when the OS can't open it", async () => {
     const withAttachment = msg({
       hasAttachments: true,
       attachments: [{ filename: "report.pdf", contentType: "application/pdf", sizeBytes: 2048, s3Key: "attachments/m1/0-report.pdf" }],
     });
     const client = mockClient();
     client.list = vi.fn(async ({ folder }) => ({ items: folder === "inbox" ? [withAttachment] : [] }));
-    window.open = vi.fn() as unknown as typeof window.open;
+    client.getAttachmentUrl = vi.fn(async () => ({ url: "https://signed.example/report.pdf", filename: "report.pdf" }));
+    // jsdom window.open returns null → openExternal reports "not opened" → fallback link.
+    window.open = vi.fn(() => null) as unknown as typeof window.open;
     render(<InboxView client={client} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Open: Hello from test" }));
     fireEvent.click(await screen.findByRole("button", { name: /report\.pdf/ }));
 
     await waitFor(() => expect(client.getAttachmentUrl).toHaveBeenCalledWith("m1", 0));
+    // The fallback surfaces the presigned link so the user is never stuck.
+    expect(await screen.findByText(/Couldn’t open/i)).toBeInTheDocument();
+    expect(screen.getByDisplayValue("https://signed.example/report.pdf")).toBeInTheDocument();
   });
 
   it("compose sends an HTML body rendered from Markdown, plus a text fallback", async () => {

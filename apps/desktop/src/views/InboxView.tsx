@@ -68,6 +68,9 @@ export function InboxView({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [composeInit, setComposeInit] = useState<ComposeInit | null>(null);
+  // Fallback when the OS can't auto-open a download (e.g. a Tauri build whose
+  // opener plugin isn't active yet): surface the link so the user is never stuck.
+  const [attachmentLink, setAttachmentLink] = useState<{ url: string; filename: string } | null>(null);
 
   function startReply(mode: ReplyMode) {
     if (!selected) return;
@@ -103,6 +106,7 @@ export function InboxView({
     setParsed(null);
     setAllowImages(false); // re-block remote content for each newly opened message
     setShowRaw(false);
+    setAttachmentLink(null);
 
     let eml: string;
     try {
@@ -132,11 +136,14 @@ export function InboxView({
     }
   }
 
-  async function downloadAttachment(messageId: string, index: number) {
+  async function downloadAttachment(messageId: string, index: number, filename: string) {
+    setAttachmentLink(null);
     try {
       const { url } = await mail.getAttachmentUrl(messageId, index);
       // Hand the presigned URL to the OS (window.open is a no-op in the webview).
-      await openExternal(url);
+      const opened = await openExternal(url);
+      // If nothing could open it (Tauri opener not active yet), show the link.
+      if (!opened) setAttachmentLink({ url, filename });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -274,12 +281,47 @@ export function InboxView({
                   {selected.attachments.map((a, i) => (
                     <button
                       key={`${a.filename}-${i}`}
-                      onClick={() => void downloadAttachment(selected.messageId, i)}
+                      onClick={() => void downloadAttachment(selected.messageId, i, a.filename)}
                       style={{ cursor: "pointer", fontSize: 13, border: "1px solid #ddd", borderRadius: 8, padding: "4px 10px", background: "#fafafa" }}
                     >
                       📎 {a.filename} ({Math.max(1, Math.round(a.sizeBytes / 1024))} KB) ⬇
                     </button>
                   ))}
+                </div>
+              )}
+
+              {attachmentLink && (
+                <div style={{ marginTop: 8, fontSize: 13, border: "1px solid #fed7aa", background: "#fff7ed", borderRadius: 8, padding: 10 }}>
+                  <div>
+                    Couldn’t open <strong>{attachmentLink.filename}</strong> automatically. Click below, or copy this link into
+                    your browser to download it (the link is valid for 5 minutes):
+                  </div>
+                  <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <button
+                      onClick={() => void openExternal(attachmentLink.url)}
+                      style={{ cursor: "pointer", padding: "4px 10px" }}
+                    >
+                      Open in browser
+                    </button>
+                    <button
+                      onClick={() => void navigator.clipboard?.writeText(attachmentLink.url)}
+                      style={{ cursor: "pointer", padding: "4px 10px" }}
+                    >
+                      Copy link
+                    </button>
+                    <button
+                      onClick={() => setAttachmentLink(null)}
+                      style={{ cursor: "pointer", padding: "4px 10px", background: "none", border: "none", color: "#777" }}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                  <input
+                    readOnly
+                    value={attachmentLink.url}
+                    onFocus={(e) => e.currentTarget.select()}
+                    style={{ marginTop: 6, width: "100%", fontFamily: "ui-monospace, monospace", fontSize: 11, padding: 4 }}
+                  />
                 </div>
               )}
 
