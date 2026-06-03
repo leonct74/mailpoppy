@@ -6,6 +6,16 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
+  // amazon-cognito-identity-js (via its bundled `buffer` polyfill) references the
+  // Node global `global` — unguarded (`global.TYPED_ARRAY_SUPPORT`). It doesn't
+  // exist in the browser/WebView (where the global is `globalThis`/`window`), so a
+  // bare `global` throws "Can't find variable: global" and blanks the app. Map it
+  // to globalThis in BOTH app code (`define`) and pre-bundled deps
+  // (`optimizeDeps.esbuildOptions.define` — Vite does not apply top-level `define`
+  // to optimized deps). Node-based tests already have `global`, which is why this
+  // only surfaced in the Tauri webview, not in vitest.
+  define: { global: "globalThis" },
+  optimizeDeps: { esbuildOptions: { define: { global: "globalThis" } } },
   // Bind IPv4 explicitly. Without `host`, Vite may bind localhost as IPv6-only
   // (::1) on macOS; the Tauri WKWebView then resolves localhost → 127.0.0.1,
   // gets connection-refused, and shows a blank window. Pin both ends to IPv4.
