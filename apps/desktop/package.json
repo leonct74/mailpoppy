@@ -17,6 +17,7 @@
     "@mailpoppy/api-client": "*",
     "@mailpoppy/core": "*",
     "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-opener": "^2.2.6",
     "amazon-cognito-identity-js": "^6.3.12",
     "dompurify": "^3.1.6",
     "marked": "^12.0.2",

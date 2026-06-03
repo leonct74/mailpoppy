@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Core capability for the main window. The sidecar is spawned from Rust (not over IPC), so no shell permissions are exposed to the webview.",
+  "description": "Core capability for the main window. The sidecar is spawned from Rust (not over IPC), so no shell permissions are exposed to the webview. The opener lets the webview open attachment download URLs (https) in the system browser.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "opener:allow-open-url"]
 }

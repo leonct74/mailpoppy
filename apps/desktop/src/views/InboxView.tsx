@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { MessageMeta, Folder } from "@mailpoppy/core";
 import { makeMailClient, type MailClient, type SendAttachment } from "../lib/mailClient";
 import { filesToAttachments } from "../lib/attachments";
+import { openExternal } from "../lib/openExternal";
 import { parseBody, sanitizeHtml, type ParsedBody } from "../lib/mailBody";
 import { buildReply, type ComposeInit, type ReplyMode } from "../lib/reply";
 import { renderMarkdown } from "../lib/compose";
@@ -134,7 +135,8 @@ export function InboxView({
   async function downloadAttachment(messageId: string, index: number) {
     try {
       const { url } = await mail.getAttachmentUrl(messageId, index);
-      window.open(url, "_blank", "noopener,noreferrer");
+      // Hand the presigned URL to the OS (window.open is a no-op in the webview).
+      await openExternal(url);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }

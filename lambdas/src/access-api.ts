@@ -24,6 +24,7 @@ import {
   folderPrefix,
   normalizeAddress,
   attachmentS3Key,
+  resolveContentType,
 } from "@mailpoppy/core";
 
 /**
@@ -263,12 +264,18 @@ async function sendMessage(owned: string[], body: SendBody): Promise<APIGatewayP
   const html = body.html;
 
   // Decode attachments once (shared between the SES send and the Sent-copy store).
+  // Harden the content type server-side too: a generic/empty type makes Gmail and
+  // others refuse to open the file ("Unsupported file type"), so infer it from
+  // the filename extension when the client didn't send a specific one.
   const inputAttachments = body.attachments ?? [];
-  const decoded = inputAttachments.map((a) => ({
-    filename: a.filename || "attachment",
-    contentType: a.contentType || "application/octet-stream",
-    bytes: Buffer.from(a.contentBase64 ?? "", "base64"),
-  }));
+  const decoded = inputAttachments.map((a) => {
+    const filename = a.filename || "attachment";
+    return {
+      filename,
+      contentType: resolveContentType(a.contentType, filename),
+      bytes: Buffer.from(a.contentBase64 ?? "", "base64"),
+    };
+  });
 
   const attachmentBytes = decoded.reduce((n, a) => n + a.bytes.length, 0);
   const approxBytes = Buffer.byteLength(subject + text + (html ?? ""), "utf8") + attachmentBytes;

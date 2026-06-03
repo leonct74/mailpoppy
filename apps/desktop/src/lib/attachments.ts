@@ -1,5 +1,6 @@
 // Read a browser File into the SendAttachment shape (base64) the access API
 // expects. Works in the Tauri webview and (via the same Web APIs) React Native.
+import { resolveContentType } from "@mailpoppy/core";
 import type { SendAttachment } from "./mailClient";
 
 export function fileToAttachment(file: File): Promise<SendAttachment> {
@@ -12,7 +13,10 @@ export function fileToAttachment(file: File): Promise<SendAttachment> {
       const comma = result.indexOf(",");
       resolve({
         filename: file.name || "attachment",
-        contentType: file.type || "application/octet-stream",
+        // The webview file picker sometimes leaves File.type empty, which would
+        // send the attachment as application/octet-stream and make Gmail refuse
+        // to open it. Infer from the extension in that case.
+        contentType: resolveContentType(file.type, file.name),
         contentBase64: comma >= 0 ? result.slice(comma + 1) : result,
       });
     };

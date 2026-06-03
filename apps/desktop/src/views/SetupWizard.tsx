@@ -552,12 +552,16 @@ export function SetupWizard() {
         {(step === "verified" || step === "sending" || step === "sent") && (
           <div style={{ marginTop: 12, fontSize: 14 }}>
             <div>✅ DKIM verified — ready to send.</div>
+            <p style={{ fontSize: 13, color: "#666", margin: "8px 0 4px" }}>
+              Send a test to a <b>personal inbox you can open</b> — e.g. your Gmail or Outlook address (not an
+              address on this domain). Check it lands in the inbox (not spam) with SPF/DKIM/DMARC = PASS.
+            </p>
             <label>
-              Send a test to{" "}
+              Your personal email address{" "}
               <input
                 value={recipient}
                 onChange={(e) => setRecipient(e.target.value.trim().toLowerCase())}
-                placeholder="you@example.com"
+                placeholder="you@gmail.com"
                 disabled={step !== "verified"}
                 style={input}
                 {...noAutoCap}

@@ -73,6 +73,9 @@ fn kill_sidecar(app: &tauri::AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        // Opens attachment download URLs (presigned S3) in the system browser —
+        // window.open() does nothing in the WKWebView.
+        .plugin(tauri_plugin_opener::init())
         .manage(SidecarState::default())
         .setup(|app| {
             spawn_sidecar(app.handle())?;

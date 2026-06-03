@@ -18,6 +18,7 @@ import {
   normalizeAddress,
   addressDomain,
   attachmentS3Key,
+  resolveContentType,
 } from "@mailpoppy/core";
 
 /**
@@ -106,7 +107,9 @@ export async function handler(event: SESEvent): Promise<void> {
     for (let i = 0; i < parsedAttachments.length; i++) {
       const a = parsedAttachments[i]!;
       const filename = a.filename ?? `attachment-${i}`;
-      const contentType = a.contentType ?? "application/octet-stream";
+      // Some senders attach files as application/octet-stream; infer a real type
+      // from the extension so the client can preview/open it.
+      const contentType = resolveContentType(a.contentType, filename);
       const key = attachmentS3Key(messageId, i, filename);
       await s3.send(
         new PutObjectCommand({ Bucket: MAIL_BUCKET, Key: key, Body: a.content, ContentType: contentType }),
