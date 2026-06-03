@@ -48,7 +48,15 @@ import {
   DeleteBucketCommand,
   type BucketLocationConstraint,
 } from "@aws-sdk/client-s3";
-import { DynamoDBClient, DeleteTableCommand } from "@aws-sdk/client-dynamodb";
+import {
+  DynamoDBClient,
+  DeleteTableCommand,
+  QueryCommand,
+  GetItemCommand,
+  PutItemCommand,
+  DeleteItemCommand,
+} from "@aws-sdk/client-dynamodb";
+import { mailboxPk, quotaSettingsKey, type MailboxStorage } from "@mailpoppy/core";
 import {
   CloudFormationClient,
   DescribeStackResourcesCommand,
@@ -635,6 +643,90 @@ export async function checkReadiness(ctx: AwsContext): Promise<Readiness> {
 
   const ready = credentials.ok && Object.values(permissions).every((v) => v === "ok");
   return { cli, credentials, permissions, ready };
+}
+
+// ---- Mailbox storage quotas (admin) ----
+
+/** Resolve the settings table name from outputs, falling back to the resource list. */
+async function resolveSettingsTableName(
+  ctx: AwsContext,
+  stackName: string,
+  outputs: Record<string, string>,
+): Promise<string | undefined> {
+  if (outputs.SettingsTableName) return outputs.SettingsTableName;
+  const { resources } = await listStackResources(ctx, stackName);
+  return resources.find((r) => r.logicalId === "SettingsTable" && r.type === "AWS::DynamoDB::Table")?.physicalId;
+}
+
+/** A mailbox's current storage usage (sum of sizeBytes) and quota (if set). */
+export async function getMailboxStorage(
+  ctx: AwsContext,
+  args: { stackName?: string; email: string },
+): Promise<MailboxStorage> {
+  const { dynamodb } = clients(ctx);
+  const stackName = args.stackName ?? "MailpoppyMailStack";
+  const email = args.email.trim().toLowerCase();
+  const outputs = await getStackOutputs(ctx, stackName);
+  const indexTable = outputs.IndexTableName;
+  if (!indexTable) throw new Error("IndexTableName not found in stack outputs");
+
+  const pk = mailboxPk(email);
+  let usedBytes = 0;
+  let messageCount = 0;
+  let ExclusiveStartKey: Record<string, { S?: string }> | undefined;
+  do {
+    const out = await dynamodb.send(
+      new QueryCommand({
+        TableName: indexTable,
+        KeyConditionExpression: "pk = :pk",
+        ExpressionAttributeValues: { ":pk": { S: pk } },
+        ProjectionExpression: "sizeBytes",
+        ExclusiveStartKey,
+      }),
+    );
+    for (const item of out.Items ?? []) {
+      usedBytes += Number(item.sizeBytes?.N ?? 0);
+      messageCount += 1;
+    }
+    ExclusiveStartKey = out.LastEvaluatedKey as Record<string, { S?: string }> | undefined;
+  } while (ExclusiveStartKey);
+
+  let quotaBytes: number | null = null;
+  const settingsTable = await resolveSettingsTableName(ctx, stackName, outputs);
+  if (settingsTable) {
+    const q = await dynamodb.send(
+      new GetItemCommand({ TableName: settingsTable, Key: { pk: { S: quotaSettingsKey(email) } } }),
+    );
+    const v = q.Item?.quotaBytes?.N;
+    if (v) quotaBytes = Number(v);
+  }
+  return { email, usedBytes, messageCount, quotaBytes };
+}
+
+/** Set (or, with null, clear) a mailbox's storage quota in bytes. */
+export async function setMailboxQuota(
+  ctx: AwsContext,
+  args: { stackName?: string; email: string; quotaBytes: number | null },
+): Promise<{ ok: true; email: string; quotaBytes: number | null }> {
+  const { dynamodb } = clients(ctx);
+  const stackName = args.stackName ?? "MailpoppyMailStack";
+  const email = args.email.trim().toLowerCase();
+  const outputs = await getStackOutputs(ctx, stackName);
+  const settingsTable = await resolveSettingsTableName(ctx, stackName, outputs);
+  if (!settingsTable) throw new Error("settings table not found — re-deploy the backend to enable quotas");
+
+  const Key = { pk: { S: quotaSettingsKey(email) } };
+  if (args.quotaBytes && args.quotaBytes > 0) {
+    await dynamodb.send(
+      new PutItemCommand({
+        TableName: settingsTable,
+        Item: { pk: { S: quotaSettingsKey(email) }, quotaBytes: { N: String(Math.floor(args.quotaBytes)) } },
+      }),
+    );
+    return { ok: true, email, quotaBytes: Math.floor(args.quotaBytes) };
+  }
+  await dynamodb.send(new DeleteItemCommand({ TableName: settingsTable, Key }));
+  return { ok: true, email, quotaBytes: null };
 }
 
 // ---- Teardown: remove everything Mailpoppy deployed (the inverse of deploy + provision) ----

@@ -11,6 +11,7 @@ import {
   UpdateCommand,
   PutCommand,
   DeleteCommand,
+  GetCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { SESv2Client, SendEmailCommand, type MessageHeader } from "@aws-sdk/client-sesv2";
 import {
@@ -26,6 +27,7 @@ import {
   attachmentS3Key,
   resolveContentType,
   buildMimeMessage,
+  quotaSettingsKey,
 } from "@mailpoppy/core";
 
 /**
@@ -45,6 +47,7 @@ const s3 = new S3Client({});
 const ses = new SESv2Client({});
 
 const INDEX_TABLE = process.env.INDEX_TABLE ?? "";
+const SETTINGS_TABLE = process.env.SETTINGS_TABLE ?? "";
 const MAIL_BUCKET = process.env.MAIL_BUCKET ?? "";
 const BY_MESSAGE_INDEX = process.env.BY_MESSAGE_INDEX ?? "by-message";
 const SENT_PREFIX = process.env.SENT_PREFIX ?? "sent/";
@@ -158,6 +161,43 @@ async function listMessages(
   }
   all.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   return json(200, { items: all.slice(0, limit) });
+}
+
+// Storage usage for the signed-in mailbox: sum of sizeBytes across its rows,
+// plus its quota (if set). Lets the client show "X% of Y used".
+async function getUsage(owned: string[]): Promise<APIGatewayProxyResultV2> {
+  const address = owned[0]!;
+  let usedBytes = 0;
+  let messageCount = 0;
+  let ExclusiveStartKey: Record<string, unknown> | undefined;
+  do {
+    const out = await ddb.send(
+      new QueryCommand({
+        TableName: INDEX_TABLE,
+        KeyConditionExpression: "pk = :pk",
+        ExpressionAttributeValues: { ":pk": mailboxPk(address) },
+        ProjectionExpression: "sizeBytes",
+        ExclusiveStartKey,
+      }),
+    );
+    for (const item of out.Items ?? []) {
+      usedBytes += Number(item.sizeBytes ?? 0);
+      messageCount += 1;
+    }
+    ExclusiveStartKey = out.LastEvaluatedKey as Record<string, unknown> | undefined;
+  } while (ExclusiveStartKey);
+
+  let quotaBytes: number | null = null;
+  if (SETTINGS_TABLE) {
+    try {
+      const q = await ddb.send(new GetCommand({ TableName: SETTINGS_TABLE, Key: { pk: quotaSettingsKey(address) } }));
+      const v = q.Item?.quotaBytes;
+      if (typeof v === "number" && v > 0) quotaBytes = v;
+    } catch {
+      /* usage is still useful without the quota */
+    }
+  }
+  return json(200, { email: address, usedBytes, messageCount, quotaBytes });
 }
 
 async function getRaw(messageId: string, owned: string[]): Promise<APIGatewayProxyResultV2> {
@@ -445,6 +485,8 @@ export async function handler(
 
   try {
     switch (route) {
+      case "GET /usage":
+        return await getUsage(owned);
       case "GET /messages":
         return await listMessages(owned, query);
       case "GET /messages/{id}/raw":

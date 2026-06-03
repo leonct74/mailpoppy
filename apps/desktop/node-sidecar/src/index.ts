@@ -227,6 +227,33 @@ app.post("/mailbox/create", async (req, reply) => {
   }
 });
 
+// ---- Mailbox storage quotas (admin) ----
+
+// Read a mailbox's current storage usage + quota (for "X% of Y used").
+app.get("/mailbox/storage/:stackName/:email", async (req, reply) => {
+  const p = req.params as { stackName: string; email: string };
+  try {
+    return await prov.getMailboxStorage(ctx(), { stackName: p.stackName, email: decodeURIComponent(p.email) });
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
+// Set or clear (quotaBytes: null) a mailbox's storage quota.
+app.post("/mailbox/quota", async (req, reply) => {
+  const b = (req.body ?? {}) as { stackName?: string; email?: string; quotaBytes?: number | null };
+  if (!b.email) return reply.code(400).send({ ok: false, error: "email is required" });
+  try {
+    return await prov.setMailboxQuota(ctx(), {
+      stackName: b.stackName,
+      email: b.email,
+      quotaBytes: b.quotaBytes ?? null,
+    });
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
 // ---- One-click backend deploy (CloudFormation, no terminal/cdk for the user) ----
 
 // Mutating: upload the embedded template + Lambda code and Create/UpdateStack.

@@ -1,7 +1,8 @@
 import type { SESEvent, SESReceipt } from "aws-lambda";
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, PutCommand, QueryCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
+import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { simpleParser, type AddressObject } from "mailparser";
 import {
   type MessageMeta,
@@ -19,6 +20,8 @@ import {
   addressDomain,
   attachmentS3Key,
   resolveContentType,
+  quotaSettingsKey,
+  wouldExceedQuota,
 } from "@mailpoppy/core";
 
 /**
@@ -30,6 +33,7 @@ import {
  * See DESIGN §8 / §9.1.
  */
 const s3 = new S3Client({});
+const ses = new SESv2Client({});
 // removeUndefinedValues: optional MessageMeta fields (from.name, attachments, …)
 // are often undefined; without this the DocumentClient throws on marshalling.
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
@@ -37,6 +41,7 @@ const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
 });
 
 const INDEX_TABLE = process.env.INDEX_TABLE ?? "";
+const SETTINGS_TABLE = process.env.SETTINGS_TABLE ?? "";
 const MAIL_BUCKET = process.env.MAIL_BUCKET ?? "";
 const INBOUND_PREFIX = process.env.INBOUND_PREFIX ?? "inbound/";
 /** Domains this deployment hosts; mail to other recipients is ignored. Empty = accept all. */
@@ -77,6 +82,72 @@ function isHosted(recipient: string): boolean {
 // TODO(Phase 2+): load per-deployment / per-domain policy from the settings table.
 function policyFor(_domain: string): DeploymentPolicy {
   return DEFAULT_POLICY;
+}
+
+/** A mailbox's storage quota in bytes, or null if none is set. */
+async function quotaFor(address: string): Promise<number | null> {
+  if (!SETTINGS_TABLE) return null;
+  try {
+    const out = await ddb.send(new GetCommand({ TableName: SETTINGS_TABLE, Key: { pk: quotaSettingsKey(address) } }));
+    const v = out.Item?.quotaBytes;
+    return typeof v === "number" && v > 0 ? v : null;
+  } catch {
+    return null; // never block delivery on a settings read error
+  }
+}
+
+/** Current storage used by a mailbox = sum of sizeBytes across its rows. */
+async function mailboxUsage(pk: string): Promise<number> {
+  let used = 0;
+  let ExclusiveStartKey: Record<string, unknown> | undefined;
+  do {
+    const out = await ddb.send(
+      new QueryCommand({
+        TableName: INDEX_TABLE,
+        KeyConditionExpression: "pk = :pk",
+        ExpressionAttributeValues: { ":pk": pk },
+        ProjectionExpression: "sizeBytes",
+        ExclusiveStartKey,
+      }),
+    );
+    for (const item of out.Items ?? []) used += Number(item.sizeBytes ?? 0);
+    ExclusiveStartKey = out.LastEvaluatedKey as Record<string, unknown> | undefined;
+  } while (ExclusiveStartKey);
+  return used;
+}
+
+/** A bounce shouldn't itself trigger a bounce — skip system/empty senders. */
+function isSystemSender(address: string): boolean {
+  if (!address) return true;
+  const local = address.split("@")[0] ?? "";
+  return /^(mailer-daemon|postmaster|no-?reply|bounce|abuse)$/i.test(local);
+}
+
+/** Notify the original sender that the mailbox is full (a simple NDR). */
+async function sendQuotaBounce(recipient: string, sender: string, subject: string): Promise<void> {
+  if (isSystemSender(sender)) return;
+  const from = `mailer-daemon@${addressDomain(recipient)}`;
+  try {
+    await ses.send(
+      new SendEmailCommand({
+        FromEmailAddress: from,
+        Destination: { ToAddresses: [sender] },
+        Content: {
+          Simple: {
+            Subject: { Data: `Undeliverable: ${subject}`, Charset: "UTF-8" },
+            Body: {
+              Text: {
+                Data: `Your message to ${recipient} could not be delivered because the mailbox is full and has reached its storage limit. Please try again later, or contact the recipient by another means.`,
+                Charset: "UTF-8",
+              },
+            },
+          },
+        },
+      }),
+    );
+  } catch (e) {
+    console.error(`failed to send quota bounce to ${sender}:`, e);
+  }
 }
 
 export async function handler(event: SESEvent): Promise<void> {
@@ -130,6 +201,19 @@ export async function handler(event: SESEvent): Promise<void> {
         // for audit; the janitor sweeps unindexed inbound objects later.
         console.log(`drop ${messageId} -> ${recipient}: ${decision.reason}`);
         continue;
+      }
+
+      // Enforce the mailbox storage quota: if this message would push the mailbox
+      // over its limit, don't store it and bounce a "mailbox full" notice to the
+      // sender (skipped when no quota is set).
+      const quota = await quotaFor(recipient);
+      if (quota !== null) {
+        const used = await mailboxUsage(mailboxPk(recipient));
+        if (wouldExceedQuota(used, sizeBytes, quota)) {
+          console.log(`quota-full ${messageId} -> ${recipient}: used=${used} +${sizeBytes} > ${quota}`);
+          await sendQuotaBounce(recipient, from.address, subject);
+          continue;
+        }
       }
 
       const meta: MessageMeta = {

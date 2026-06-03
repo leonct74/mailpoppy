@@ -31,6 +31,12 @@ export interface SendInput {
   references?: string;
   attachments?: SendAttachment[];
 }
+export interface MailboxUsage {
+  email: string;
+  usedBytes: number;
+  messageCount: number;
+  quotaBytes: number | null;
+}
 
 /**
  * Talks to the deployment's Cognito-authorized access API (API Gateway).
@@ -83,5 +89,8 @@ export class MailpoppyClient {
   }
   send(input: SendInput): Promise<{ messageId: string }> {
     return this.req(`/send`, { method: "POST", body: JSON.stringify(input) });
+  }
+  getUsage(): Promise<MailboxUsage> {
+    return this.req(`/usage`);
   }
 }

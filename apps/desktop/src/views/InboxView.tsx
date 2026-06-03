@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { MessageMeta, Folder } from "@mailpoppy/core";
-import { makeMailClient, type MailClient, type SendAttachment } from "../lib/mailClient";
+import { formatBytes, usagePercent, usageLevel } from "@mailpoppy/core";
+import { makeMailClient, type MailClient, type SendAttachment, type MailboxUsage } from "../lib/mailClient";
 import { filesToAttachments } from "../lib/attachments";
 import { openExternal } from "../lib/openExternal";
 import { SecurityInfo } from "./SecurityInfo";
@@ -77,6 +78,19 @@ export function InboxView({
     () => typeof localStorage !== "undefined" && localStorage.getItem("mailpoppy.scanNoteDismissed") === "1",
   );
   const [securityOpen, setSecurityOpen] = useState(false);
+  const [usage, setUsage] = useState<MailboxUsage | null>(null);
+
+  async function loadUsage() {
+    try {
+      setUsage(await mail.getUsage());
+    } catch {
+      setUsage(null); // usage is informational; never block the inbox on it
+    }
+  }
+  useEffect(() => {
+    void loadUsage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mail]);
 
   function startReply(mode: ReplyMode) {
     if (!selected) return;
@@ -239,6 +253,34 @@ export function InboxView({
               {f === "inbox" && unreadCount > 0 ? ` (${unreadCount})` : ""}
             </button>
           ))}
+          {usage &&
+            (() => {
+              const pct = usagePercent(usage.usedBytes, usage.quotaBytes);
+              const level = usageLevel(usage.usedBytes, usage.quotaBytes);
+              const color = level === "full" ? "#dc2626" : level === "warn" ? "#d97706" : "#7c3aed";
+              return (
+                <div style={{ marginTop: 14, padding: "8px 10px", fontSize: 12, color: "#555" }} aria-label="Mailbox storage">
+                  {usage.quotaBytes && pct !== null ? (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span>Storage</span>
+                        <span style={{ color }}>{Math.round(pct)}%</span>
+                      </div>
+                      <div style={{ height: 6, background: "#eee", borderRadius: 999, marginTop: 4, overflow: "hidden" }}>
+                        <div style={{ width: `${Math.min(100, pct)}%`, height: "100%", background: color }} />
+                      </div>
+                      <div style={{ marginTop: 4, color: "#888" }}>
+                        {formatBytes(usage.usedBytes)} of {formatBytes(usage.quotaBytes)}
+                      </div>
+                      {level === "full" && <div style={{ color: "#b91c1c", marginTop: 2 }}>Full — new mail is bounced.</div>}
+                      {level === "warn" && <div style={{ color: "#b45309", marginTop: 2 }}>Almost full.</div>}
+                    </>
+                  ) : (
+                    <div>Storage: {formatBytes(usage.usedBytes)} used</div>
+                  )}
+                </div>
+              );
+            })()}
         </nav>
 
         {/* Message list */}

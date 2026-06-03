@@ -3,6 +3,7 @@ import { sidecar } from "../lib/sidecar";
 import { createMailbox, listMailboxes, type Mailbox, type BackendInfo } from "../lib/mailbox";
 import { deployBackend, deployStatus, type DeployStatus } from "../lib/deploy";
 import { saveDeploymentConfig } from "../lib/deploymentConfig";
+import { MailboxStorageRow } from "./MailboxStorageRow";
 
 // Phase 1 setup wizard.
 // Step 0 verifies the AWS environment (credentials + per-service permissions, + detects
@@ -681,11 +682,9 @@ export function SetupWizard() {
               {mailboxes.length === 0 ? (
                 <p style={{ color: "#666", fontSize: 13 }}>No mailboxes yet.</p>
               ) : (
-                <ul style={{ margin: "6px 0 0 18px" }}>
+                <ul style={{ margin: "8px 0 0", padding: 0 }}>
                   {mailboxes.map((m) => (
-                    <li key={m.email}>
-                      <code style={mono}>{m.email}</code> <span style={{ color: "#999" }}>· {m.status}</span>
-                    </li>
+                    <MailboxStorageRow key={m.email} email={m.email} status={m.status} stackName={stackName} />
                   ))}
                 </ul>
               )}

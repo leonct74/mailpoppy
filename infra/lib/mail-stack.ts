@@ -144,16 +144,22 @@ export class MailStack extends Stack {
 
     const inboundProcessor = fn("InboundProcessor", "inbound-processor", {
       INDEX_TABLE: indexTable.tableName,
+      SETTINGS_TABLE: settingsTable.tableName,
       MAIL_BUCKET: mailBucket.bucketName,
       INBOUND_PREFIX: "inbound/",
       HOSTED_DOMAINS: mailDomain.valueAsString,
     });
     mailBucket.grantReadWrite(inboundProcessor); // read the raw .eml + write extracted attachments
-    indexTable.grantWriteData(inboundProcessor);
+    indexTable.grantReadWriteData(inboundProcessor); // write rows + read for quota usage
     settingsTable.grantReadData(inboundProcessor);
+    // Send a "mailbox full" bounce to the sender when a quota is exceeded.
+    inboundProcessor.addToRolePolicy(
+      new iam.PolicyStatement({ actions: ["ses:SendEmail", "ses:SendRawEmail"], resources: ["*"] }),
+    );
 
     const accessApi = fn("AccessApi", "access-api", {
       INDEX_TABLE: indexTable.tableName,
+      SETTINGS_TABLE: settingsTable.tableName,
       MAIL_BUCKET: mailBucket.bucketName,
       BY_MESSAGE_INDEX,
       SENT_PREFIX: "sent/",
@@ -216,6 +222,7 @@ export class MailStack extends Stack {
         allowHeaders: ["authorization", "content-type"],
       },
     });
+    httpApi.addRoutes({ path: "/usage", methods: [HttpMethod.GET], integration });
     httpApi.addRoutes({ path: "/messages", methods: [HttpMethod.GET], integration });
     httpApi.addRoutes({ path: "/messages/{id}/raw", methods: [HttpMethod.GET], integration });
     httpApi.addRoutes({ path: "/messages/{id}/attachments/{index}", methods: [HttpMethod.GET], integration });
@@ -324,6 +331,7 @@ export class MailStack extends Stack {
     new CfnOutput(this, "UserPoolClientId", { value: userPoolClient.userPoolClientId });
     new CfnOutput(this, "MailBucketName", { value: mailBucket.bucketName });
     new CfnOutput(this, "IndexTableName", { value: indexTable.tableName });
+    new CfnOutput(this, "SettingsTableName", { value: settingsTable.tableName });
     new CfnOutput(this, "NotificationsTopicArn", { value: notifications.topicArn });
     new CfnOutput(this, "RuleSetName", { value: ruleSet.receiptRuleSetName });
     new CfnOutput(this, "DeployRegion", { value: this.region });

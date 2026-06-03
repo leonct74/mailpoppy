@@ -36,6 +36,12 @@ export interface AttachmentLink {
   filename?: string;
   contentType?: string;
 }
+export interface MailboxUsage {
+  email: string;
+  usedBytes: number;
+  messageCount: number;
+  quotaBytes: number | null;
+}
 
 /** The exact surface InboxView depends on — satisfied by both clients below. */
 export interface MailClient {
@@ -45,6 +51,7 @@ export interface MailClient {
   setFlags(messageId: string, flags: Partial<MessageFlags>): Promise<MessageMeta>;
   move(messageId: string, folder: Folder): Promise<MessageMeta>;
   send(input: SendInput): Promise<{ messageId: string }>;
+  getUsage(): Promise<MailboxUsage>;
 }
 
 // ---- Demo client (in-memory) ------------------------------------------------
@@ -190,6 +197,11 @@ export class DemoMailClient implements MailClient {
       }),
     );
     return { messageId };
+  }
+
+  async getUsage(): Promise<MailboxUsage> {
+    const usedBytes = this.store.reduce((n, m) => n + (m.sizeBytes ?? 0), 0);
+    return { email: MAILBOX, usedBytes, messageCount: this.store.length, quotaBytes: 1024 ** 3 };
   }
 
   private find(messageId: string): MessageMeta | undefined {
