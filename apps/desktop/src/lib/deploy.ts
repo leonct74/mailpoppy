@@ -19,7 +19,11 @@ export interface DeployStatus {
   outputs?: Record<string, string>;
 }
 
-export function deployBackend(input: { domain: string; stackName?: string }): Promise<DeployStarted> {
+export function deployBackend(input: {
+  domain: string;
+  stackName?: string;
+  enableMalwareProtection?: boolean;
+}): Promise<DeployStarted> {
   return sidecar("/deploy/backend", {
     method: "POST",
     headers: { "content-type": "application/json" },

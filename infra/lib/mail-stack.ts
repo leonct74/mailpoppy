@@ -4,13 +4,16 @@ import {
   RemovalPolicy,
   Duration,
   CfnParameter,
+  CfnCondition,
   CfnOutput,
+  Fn,
 } from "aws-cdk-lib";
 import type { Construct } from "constructs";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as guardduty from "aws-cdk-lib/aws-guardduty";
 import * as ses from "aws-cdk-lib/aws-ses";
 import * as sesActions from "aws-cdk-lib/aws-ses-actions";
 import * as sns from "aws-cdk-lib/aws-sns";
@@ -55,6 +58,19 @@ export class MailStack extends Stack {
     const codeKeyParam = new CfnParameter(this, "LambdaCodeKey", {
       type: "String",
       description: "S3 key of the prebuilt Lambda code zip (all handlers).",
+    });
+    // Optional, recommended: enable GuardDuty Malware Protection scanning of the
+    // mail bucket. Off by default (it's a small paid AWS feature). When "true",
+    // GuardDuty scans stored objects and tags them; the access API blocks
+    // downloads of anything tagged THREATS_FOUND.
+    const enableMalware = new CfnParameter(this, "EnableMalwareProtection", {
+      type: "String",
+      allowedValues: ["true", "false"],
+      default: "false",
+      description: "Scan stored mail/attachments with GuardDuty Malware Protection (recommended).",
+    });
+    const malwareEnabled = new CfnCondition(this, "MalwareProtectionEnabled", {
+      expression: Fn.conditionEquals(enableMalware.valueAsString, "true"),
     });
     const lambdaCode = lambda.Code.fromBucket(
       s3.Bucket.fromBucketName(this, "LambdaCodeBucketRef", codeBucketParam.valueAsString),
@@ -219,7 +235,90 @@ export class MailStack extends Stack {
     const notifications = new sns.Topic(this, "MailNotifications");
     notifications.addSubscription(new subs.LambdaSubscription(suppression));
 
+    // ---- Optional: GuardDuty Malware Protection for S3 (deep file scanning) --
+    // Created only when EnableMalwareProtection=true. The role + permissions are
+    // exactly those AWS documents for Malware Protection for S3 with object
+    // tagging (no KMS statement — the mail bucket uses SSE-S3, not KMS).
+    const eventsRuleArn = `arn:aws:events:${this.region}:${this.account}:rule/DO-NOT-DELETE-AmazonGuardDutyMalwareProtectionS3*`;
+    const scanRole = new iam.CfnRole(this, "MalwareScanRole", {
+      assumeRolePolicyDocument: {
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Effect: "Allow",
+            Principal: { Service: "malware-protection-plan.guardduty.amazonaws.com" },
+            Action: "sts:AssumeRole",
+          },
+        ],
+      },
+      policies: [
+        {
+          policyName: "MalwareScanPolicy",
+          policyDocument: {
+            Version: "2012-10-17",
+            Statement: [
+              {
+                Sid: "AllowManagedRuleToSendS3EventsToGuardDuty",
+                Effect: "Allow",
+                Action: ["events:PutRule", "events:DeleteRule", "events:PutTargets", "events:RemoveTargets"],
+                Resource: [eventsRuleArn],
+                Condition: { StringLike: { "events:ManagedBy": "malware-protection-plan.guardduty.amazonaws.com" } },
+              },
+              {
+                Sid: "AllowGuardDutyToMonitorEventBridgeManagedRule",
+                Effect: "Allow",
+                Action: ["events:DescribeRule", "events:ListTargetsByRule"],
+                Resource: [eventsRuleArn],
+              },
+              {
+                Sid: "AllowPostScanTag",
+                Effect: "Allow",
+                Action: ["s3:PutObjectTagging", "s3:GetObjectTagging", "s3:PutObjectVersionTagging", "s3:GetObjectVersionTagging"],
+                Resource: [`${mailBucket.bucketArn}/*`],
+              },
+              {
+                Sid: "AllowEnableS3EventBridgeEvents",
+                Effect: "Allow",
+                Action: ["s3:PutBucketNotification", "s3:GetBucketNotification"],
+                Resource: [mailBucket.bucketArn],
+              },
+              {
+                Sid: "AllowPutValidationObject",
+                Effect: "Allow",
+                Action: ["s3:PutObject"],
+                Resource: [`${mailBucket.bucketArn}/malware-protection-resource-validation-object`],
+              },
+              {
+                Sid: "AllowCheckBucketOwnership",
+                Effect: "Allow",
+                Action: ["s3:ListBucket"],
+                Resource: [mailBucket.bucketArn],
+              },
+              {
+                Sid: "AllowMalwareScan",
+                Effect: "Allow",
+                Action: ["s3:GetObject", "s3:GetObjectVersion"],
+                Resource: [`${mailBucket.bucketArn}/*`],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    scanRole.cfnOptions.condition = malwareEnabled;
+
+    const malwarePlan = new guardduty.CfnMalwareProtectionPlan(this, "MalwareProtectionPlan", {
+      role: scanRole.attrArn,
+      protectedResource: { s3Bucket: { bucketName: mailBucket.bucketName } },
+      actions: { tagging: { status: "ENABLED" } },
+    });
+    malwarePlan.cfnOptions.condition = malwareEnabled;
+    malwarePlan.addDependency(scanRole);
+
     // ---- Outputs (the desktop app reads these to configure the client) -----
+    new CfnOutput(this, "MalwareProtection", {
+      value: Fn.conditionIf(malwareEnabled.logicalId, "enabled", "disabled").toString(),
+    });
     new CfnOutput(this, "ApiBaseUrl", { value: httpApi.apiEndpoint });
     new CfnOutput(this, "UserPoolId", { value: userPool.userPoolId });
     new CfnOutput(this, "UserPoolClientId", { value: userPoolClient.userPoolClientId });

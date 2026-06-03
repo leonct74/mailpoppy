@@ -109,6 +109,7 @@ export function SetupWizard() {
 
   // Backend deploy (CloudFormation)
   const [deploy, setDeploy] = useState<DeployStatus | null>(null);
+  const [enableMalware, setEnableMalware] = useState(true); // recommended → default on
   const deployPollRef = useRef<number | null>(null);
 
   // Mailboxes
@@ -184,7 +185,7 @@ export function SetupWizard() {
     setBusy(true);
     setStep("deploying");
     try {
-      await deployBackend({ domain });
+      await deployBackend({ domain, enableMalwareProtection: enableMalware });
     } catch (e) {
       fail(e, "preflighted");
       return;
@@ -507,9 +508,19 @@ export function SetupWizard() {
             <div>✅ Account <code style={mono}>{preflight.accountId}</code> · region <code style={mono}>{preflight.region}</code></div>
             <div>✅ Hosted zone <code style={mono}>{preflight.zoneId}</code></div>
             {step === "preflighted" && (
-              <button onClick={onDeploy} disabled={busy} style={{ ...pBtn(busy), marginTop: 10 }}>
-                2. Deploy backend
-              </button>
+              <div style={{ marginTop: 10 }}>
+                <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, marginBottom: 8, maxWidth: 520 }}>
+                  <input type="checkbox" checked={enableMalware} onChange={(e) => setEnableMalware(e.target.checked)} style={{ marginTop: 3 }} />
+                  <span>
+                    <b>Scan attachments for malware</b> <span style={{ color: "#15803d" }}>(recommended)</span> — adds AWS
+                    GuardDuty Malware Protection on your mail storage; infected files are blocked from download. Small AWS
+                    usage cost (a personal mailbox is usually within the free tier).
+                  </span>
+                </label>
+                <button onClick={onDeploy} disabled={busy} style={pBtn(busy)}>
+                  2. Deploy backend
+                </button>
+              </div>
             )}
           </div>
         )}

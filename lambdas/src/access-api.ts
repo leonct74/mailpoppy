@@ -2,7 +2,7 @@ import type {
   APIGatewayProxyEventV2WithJWTAuthorizer,
   APIGatewayProxyResultV2,
 } from "aws-lambda";
-import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand, PutObjectCommand, GetObjectTaggingCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
@@ -181,6 +181,19 @@ async function getAttachment(
   const index = Number(indexStr);
   const att = Number.isInteger(index) && index >= 0 ? attachments[index] : undefined;
   if (!att?.s3Key) return json(404, { error: "attachment not found" });
+
+  // Block downloads GuardDuty Malware Protection flagged as malware. This is a
+  // no-op when malware scanning is disabled (objects then have no scan tag) and
+  // fail-open on a tag-read error so a transient glitch can't hide clean mail.
+  try {
+    const tagging = await s3.send(new GetObjectTaggingCommand({ Bucket: MAIL_BUCKET, Key: att.s3Key }));
+    const scan = tagging.TagSet?.find((t) => t.Key === "GuardDutyMalwareScanStatus")?.Value;
+    if (scan === "THREATS_FOUND") {
+      return json(403, { error: "This attachment was flagged as malware by the scanner and can't be downloaded." });
+    }
+  } catch {
+    /* best-effort: don't block a legitimate download on a tagging read error */
+  }
 
   // Hand back a short-lived presigned S3 URL — the client downloads directly
   // from S3 (avoids streaming large files through API Gateway / Lambda).

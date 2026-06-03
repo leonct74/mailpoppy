@@ -357,7 +357,7 @@ export interface DeployResult {
  */
 export async function deployBackend(
   ctx: AwsContext,
-  args: { domain: string; stackName?: string },
+  args: { domain: string; stackName?: string; enableMalwareProtection?: boolean },
 ): Promise<DeployResult> {
   const { s3, cloudformation } = clients(ctx);
   const region = ctx.region;
@@ -390,6 +390,7 @@ export async function deployBackend(
     { ParameterKey: "MailDomain", ParameterValue: domain },
     { ParameterKey: "LambdaCodeBucket", ParameterValue: bucket },
     { ParameterKey: "LambdaCodeKey", ParameterValue: lambdaCodeKey },
+    { ParameterKey: "EnableMalwareProtection", ParameterValue: args.enableMalwareProtection ? "true" : "false" },
   ];
   const Capabilities: Capability[] = ["CAPABILITY_IAM", "CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"];
 
