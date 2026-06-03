@@ -113,6 +113,23 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   `https://tauri.localhost`. The sidecar binary is git-ignored (per-platform build artifact).
   **Build it with `npm run build:sidecar` (or `tauri:build`) — never commit it.** Windows/Linux
   targets + signing/notarization are Phase 5.
+- ✅ **Mailbox management (Cognito users)** — a mailbox = a Cognito user in the deployed backend's
+  user pool (so it requires the CDK stack, not just the wizard's SES/DNS/S3 wiring). Sidecar:
+  `prov.createMailbox`/`listMailboxes` (`@aws-sdk/client-cognito-identity-provider`:
+  AdminCreateUser SUPPRESS + AdminSetUserPassword permanent + ListUsers); routes
+  `POST /mailbox/create` {stackName?,email,password} + `GET /mailbox/list/:stackName` resolve the
+  pool from CFN outputs and 404 with a "deploy the backend first" message if absent. Desktop:
+  `lib/mailbox.ts` + a **Mailboxes** section in `SetupWizard.tsx` (create/list; on create it
+  `saveDeploymentConfig` so the Inbox tab is immediately connectable). IAM: `MailboxAdmin` stmt on
+  `userpool/*` (accessanalyzer clean).
+- 🛠️ **Setup wizard UX hardening (2026-06-03, from user testing)**: Step 0 shows a spinner +
+  **auto-retries** `/aws/readiness` for ~10s while the sidecar boots (no premature "can't reach
+  helper"); credentials guidance now explains `AWS_PROFILE` is a **profile name** in
+  `~/.aws/credentials` (run `aws configure list-profiles`), **not** the account number, and that a
+  `[default]` profile can be omitted; domain/email inputs are **force-lowercased** + `autoCapitalize=off`
+  (a capitalized domain previously broke the Route53 lookup); domain placeholder is `yourdomain.com`.
+  MigrationView clarifies the IMAP password is the **source/old account's** (WorkMail), not the new
+  mailbox's.
 - ✅ **Phase 4 — WorkMail/IMAP migration (live-verified 2026-06-02)**. The desktop sidecar
   imports existing mail into the deployed backend, producing rows **identical** to the inbound
   Lambda's so imported mail shows up in the normal inbox. Pieces:

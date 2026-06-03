@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { sidecar } from "../lib/sidecar";
+import { createMailbox, listMailboxes, type Mailbox, type BackendInfo } from "../lib/mailbox";
+import { saveDeploymentConfig } from "../lib/deploymentConfig";
 
 // Phase 1 setup wizard.
 // Step 0 verifies the AWS environment (credentials + per-service permissions, + detects
 // the optional CLI) so provisioning never fails halfway. Then, once ready:
 //   1. preflight → 2. provision → poll DKIM → 3. send deliverability test.
+// A "Mailboxes" section manages Cognito users in the deployed backend.
 
 interface Readiness {
   cli: { installed: boolean; version?: string };
@@ -33,17 +36,39 @@ const SERVICES = ["route53", "ses", "sesv2", "s3"] as const;
 const box: React.CSSProperties = { border: "1px solid #ddd", borderRadius: 12, padding: 20, marginTop: 16 };
 const mono: React.CSSProperties = { fontFamily: "ui-monospace, monospace" };
 const warn: React.CSSProperties = { marginTop: 10, background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, padding: 10 };
+const input: React.CSSProperties = { padding: 6, minWidth: 240 };
+const noAutoCap = { autoCapitalize: "off", autoCorrect: "off", spellCheck: false } as const;
 
 const permIcon = (v: "ok" | "denied" | "error") => (v === "ok" ? "✅" : v === "denied" ? "⛔" : "⚠️");
+
+function Spinner() {
+  return (
+    <span
+      aria-hidden
+      style={{
+        display: "inline-block",
+        width: 16,
+        height: 16,
+        border: "2px solid #ddd",
+        borderTopColor: "#7c3aed",
+        borderRadius: "50%",
+        animation: "mp-spin 0.8s linear infinite",
+        verticalAlign: "-3px",
+        marginRight: 8,
+      }}
+    />
+  );
+}
 
 export function SetupWizard() {
   // Step 0 — environment readiness
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [checking, setChecking] = useState(true);
+  const retryRef = useRef<number | null>(null);
 
   // Steps 1–3
   const [domain, setDomain] = useState("");
-  const [recipient, setRecipient] = useState("leonct74@gmail.com");
+  const [recipient, setRecipient] = useState("");
   const [step, setStep] = useState<Step>("start");
   const [preflight, setPreflight] = useState<Preflight | null>(null);
   const [provision, setProvision] = useState<ProvisionResult | null>(null);
@@ -53,19 +78,41 @@ export function SetupWizard() {
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
 
-  async function loadReadiness() {
+  // Mailboxes
+  const [stackName, setStackName] = useState("MailpoppyMailStack");
+  const [mbEmail, setMbEmail] = useState("");
+  const [mbPassword, setMbPassword] = useState("");
+  const [mailboxes, setMailboxes] = useState<Mailbox[] | null>(null);
+  const [mbBackend, setMbBackend] = useState<BackendInfo | null>(null);
+  const [mbBusy, setMbBusy] = useState(false);
+  const [mbError, setMbError] = useState<string | null>(null);
+  const [mbCreated, setMbCreated] = useState<string | null>(null);
+
+  // The sidecar may still be booting when the view mounts; retry a few times
+  // before declaring it unreachable so the user sees a loader, not an error.
+  async function loadReadiness(attempt = 0) {
     setChecking(true);
     setError(null);
     try {
       setReadiness(await sidecar<Readiness>("/aws/readiness"));
-    } catch (e) {
-      setError(`Could not reach the provisioning sidecar — is it running? ${String(e)}`);
-    } finally {
       setChecking(false);
+    } catch (e) {
+      if (attempt < 8) {
+        retryRef.current = window.setTimeout(() => void loadReadiness(attempt + 1), 1200);
+      } else {
+        setError(
+          `Could not reach the local provisioning helper after several tries. Make sure the app's sidecar is running (it starts automatically with the desktop app). ${String(e)}`,
+        );
+        setChecking(false);
+      }
     }
   }
   useEffect(() => {
     void loadReadiness();
+    return () => {
+      if (retryRef.current) window.clearTimeout(retryRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function fail(e: unknown, back?: Step) {
@@ -147,12 +194,63 @@ export function SetupWizard() {
 
   const ready = readiness?.ready === true;
 
+  // ---- Mailboxes ----
+  async function loadMailboxes() {
+    setMbError(null);
+    try {
+      const res = await listMailboxes(stackName);
+      setMailboxes(res.mailboxes);
+      setMbBackend({ region: res.region, userPoolId: res.userPoolId, clientId: res.clientId, apiBaseUrl: res.apiBaseUrl });
+    } catch (e) {
+      setMailboxes(null);
+      setMbBackend(null);
+      setMbError(String(e));
+    }
+  }
+  // Auto-load the mailbox list once the environment is ready.
+  useEffect(() => {
+    if (ready) void loadMailboxes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, stackName]);
+
+  async function createMb() {
+    setMbBusy(true);
+    setMbError(null);
+    setMbCreated(null);
+    try {
+      const res = await createMailbox({ email: mbEmail, password: mbPassword, stackName });
+      setMbCreated(res.mailbox.email);
+      setMbPassword("");
+      // Persist the backend config so the Inbox tab is ready to sign in.
+      if (res.apiBaseUrl && res.userPoolId && res.clientId) {
+        saveDeploymentConfig({
+          apiBaseUrl: res.apiBaseUrl,
+          userPoolId: res.userPoolId,
+          clientId: res.clientId,
+          region: res.region,
+        });
+      }
+      await loadMailboxes();
+    } catch (e) {
+      setMbError(String(e));
+    } finally {
+      setMbBusy(false);
+    }
+  }
+
   return (
     <>
+      <style>{`@keyframes mp-spin { to { transform: rotate(360deg); } }`}</style>
+
       {/* ---- Step 0: AWS environment ---- */}
       <section style={box}>
         <h2>Step 0 · AWS environment</h2>
-        {checking && <p style={{ fontSize: 14 }}>Checking your AWS environment…</p>}
+        {checking && (
+          <div style={{ display: "flex", alignItems: "center", fontSize: 14, color: "#555" }}>
+            <Spinner />
+            Starting Mailpoppy and checking your AWS environment… <span style={{ color: "#999", marginLeft: 6 }}>(this can take a few seconds)</span>
+          </div>
+        )}
         {readiness && (
           <div style={{ fontSize: 14 }}>
             <div>
@@ -184,13 +282,28 @@ export function SetupWizard() {
                 <ul style={{ margin: "6px 0 0 18px" }}>
                   {!readiness.credentials.ok && (
                     <li>
-                      Make AWS credentials available, then re-check: launch the sidecar with{" "}
-                      <code style={mono}>AWS_PROFILE=&lt;profile&gt; AWS_REGION=eu-west-1</code>, or{" "}
-                      {readiness.cli.installed ? (
-                        <>run <code style={mono}>aws sso login</code> / <code style={mono}>aws configure</code>.</>
-                      ) : (
-                        <>install the AWS CLI and run <code style={mono}>aws configure</code> (or set <code style={mono}>AWS_*</code> env vars).</>
-                      )}
+                      <b>Make AWS credentials available, then re-check.</b>
+                      <div style={{ marginTop: 4 }}>
+                        The app uses your AWS credential profiles in{" "}
+                        <code style={mono}>~/.aws/credentials</code> and <code style={mono}>~/.aws/config</code>. To target a
+                        specific one, start the app with{" "}
+                        <code style={mono}>AWS_PROFILE=&lt;profile-name&gt; AWS_REGION=eu-west-1</code>.
+                      </div>
+                      <ul style={{ margin: "4px 0 0 18px" }}>
+                        <li>
+                          <code style={mono}>&lt;profile-name&gt;</code> is the <b>name</b> in brackets in those files (e.g.{" "}
+                          <code style={mono}>[default]</code> → <code style={mono}>default</code>) — <b>not</b> your AWS account
+                          number. List them with <code style={mono}>aws configure list-profiles</code>.
+                        </li>
+                        <li>
+                          If you have a <code style={mono}>[default]</code> profile, you can omit <code style={mono}>AWS_PROFILE</code> entirely.
+                        </li>
+                        <li>
+                          No profiles yet? Run <code style={mono}>aws configure</code>
+                          {readiness.cli.installed ? "" : " (after installing the AWS CLI)"} or{" "}
+                          <code style={mono}>aws sso login</code>.
+                        </li>
+                      </ul>
                     </li>
                   )}
                   {readiness.credentials.ok &&
@@ -202,7 +315,7 @@ export function SetupWizard() {
                       </li>
                     ))}
                 </ul>
-                <button onClick={loadReadiness} disabled={checking} style={{ marginTop: 8 }}>
+                <button onClick={() => void loadReadiness()} disabled={checking} style={{ marginTop: 8 }}>
                   Re-check
                 </button>
               </div>
@@ -221,10 +334,11 @@ export function SetupWizard() {
           Domain{" "}
           <input
             value={domain}
-            onChange={(e) => setDomain(e.target.value.trim())}
-            placeholder="ollydigital.com"
+            onChange={(e) => setDomain(e.target.value.trim().toLowerCase())}
+            placeholder="yourdomain.com"
             disabled={!ready || step !== "start"}
-            style={{ padding: 6, minWidth: 240 }}
+            style={input}
+            {...noAutoCap}
           />
         </label>{" "}
         <button onClick={runPreflight} disabled={!ready || !domain || busy || step !== "start"}>
@@ -251,7 +365,8 @@ export function SetupWizard() {
 
         {step === "verifying" && (
           <div style={{ marginTop: 12, fontSize: 14 }}>
-            ⏳ Verifying DKIM… <code style={mono}>{status?.dkim ?? "pending"}</code> (polling every 4s).
+            <Spinner />
+            Verifying DKIM… <code style={mono}>{status?.dkim ?? "pending"}</code> (polling every 4s).
           </div>
         )}
 
@@ -262,18 +377,25 @@ export function SetupWizard() {
               Send a test to{" "}
               <input
                 value={recipient}
-                onChange={(e) => setRecipient(e.target.value.trim())}
+                onChange={(e) => setRecipient(e.target.value.trim().toLowerCase())}
+                placeholder="you@example.com"
                 disabled={step !== "verified"}
-                style={{ padding: 6, minWidth: 240 }}
+                style={input}
+                {...noAutoCap}
               />
             </label>{" "}
-            <button onClick={sendTest} disabled={busy || step !== "verified"}>
+            <button onClick={sendTest} disabled={busy || step !== "verified" || !recipient}>
               3. Send deliverability test
             </button>
           </div>
         )}
 
-        {step === "sending" && <p style={{ fontSize: 14 }}>📤 Sending…</p>}
+        {step === "sending" && (
+          <p style={{ fontSize: 14 }}>
+            <Spinner />
+            Sending…
+          </p>
+        )}
 
         {step === "sent" && (
           <div style={{ marginTop: 12, fontSize: 14 }}>
@@ -284,6 +406,88 @@ export function SetupWizard() {
 
         {error && <p style={{ color: "crimson" }}>{error}</p>}
       </section>
+
+      {/* ---- Mailboxes (Cognito users in the deployed backend) ---- */}
+      {ready && (
+        <section style={box}>
+          <h2>Mailboxes</h2>
+          <p style={{ fontSize: 13, color: "#666", marginTop: 0 }}>
+            A mailbox is a user that can sign in to the Inbox. Mailboxes live in your deployed backend (Cognito), so the
+            backend stack must be deployed first.
+          </p>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <label style={{ fontSize: 13 }}>
+              Email address
+              <br />
+              <input
+                aria-label="Mailbox email"
+                value={mbEmail}
+                onChange={(e) => setMbEmail(e.target.value.trim().toLowerCase())}
+                placeholder="you@yourdomain.com"
+                style={input}
+                {...noAutoCap}
+              />
+            </label>
+            <label style={{ fontSize: 13 }}>
+              Password
+              <br />
+              <input
+                aria-label="Mailbox password"
+                type="password"
+                value={mbPassword}
+                onChange={(e) => setMbPassword(e.target.value)}
+                style={input}
+              />
+            </label>
+            <label style={{ fontSize: 13 }}>
+              Stack name
+              <br />
+              <input aria-label="Stack name" value={stackName} onChange={(e) => setStackName(e.target.value.trim())} style={{ ...input, minWidth: 200 }} {...noAutoCap} />
+            </label>
+            <button onClick={() => void createMb()} disabled={mbBusy || !mbEmail || !mbPassword}>
+              {mbBusy ? "Creating…" : "Create mailbox"}
+            </button>
+          </div>
+          <p style={{ fontSize: 12, color: "#999", marginTop: 6 }}>
+            Password must meet the pool policy (min 8 chars, with upper &amp; lower case, a number and a symbol).
+          </p>
+
+          {mbCreated && (
+            <div style={{ ...box, marginTop: 10, borderColor: "#bbf7d0", background: "#f0fdf4" }}>
+              ✅ Mailbox <b>{mbCreated}</b> created. The <b>Inbox</b> tab is now connected to this backend — go there and sign in
+              as <code style={mono}>{mbCreated}</code>.
+            </div>
+          )}
+          {mbError && (
+            <div style={{ ...warn, background: "#fef2f2", borderColor: "#fecaca", color: "#b91c1c" }}>{mbError}</div>
+          )}
+
+          {mailboxes && (
+            <div style={{ marginTop: 12, fontSize: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <strong>Existing mailboxes ({mailboxes.length})</strong>
+                {mbBackend && (
+                  <span style={{ color: "#666", fontSize: 12 }}>
+                    pool <code style={mono}>{mbBackend.userPoolId}</code> · {mbBackend.region}
+                  </span>
+                )}
+              </div>
+              {mailboxes.length === 0 ? (
+                <p style={{ color: "#666", fontSize: 13 }}>No mailboxes yet.</p>
+              ) : (
+                <ul style={{ margin: "6px 0 0 18px" }}>
+                  {mailboxes.map((m) => (
+                    <li key={m.email}>
+                      <code style={mono}>{m.email}</code> <span style={{ color: "#999" }}>· {m.status}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </section>
+      )}
     </>
   );
 }

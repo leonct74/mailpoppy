@@ -45,6 +45,12 @@ import {
   DescribeStackResourcesCommand,
   DescribeStacksCommand,
 } from "@aws-sdk/client-cloudformation";
+import {
+  CognitoIdentityProviderClient,
+  AdminCreateUserCommand,
+  AdminSetUserPasswordCommand,
+  ListUsersCommand,
+} from "@aws-sdk/client-cognito-identity-provider";
 import { record } from "./ledger";
 
 export interface AwsContext {
@@ -63,6 +69,7 @@ function clients(ctx: AwsContext) {
     ses: new SESClient(base),
     s3: new S3Client(base),
     cloudformation: new CloudFormationClient(base),
+    cognito: new CognitoIdentityProviderClient(base),
   };
 }
 
@@ -301,6 +308,64 @@ export async function getStackOutputs(
     if (o.OutputKey) map[o.OutputKey] = o.OutputValue ?? "";
   }
   return map;
+}
+
+// ---- Mailboxes (Cognito users in the deployed backend's user pool) ----
+
+export interface MailboxInfo {
+  email: string;
+  status: string;
+  createdAt?: string;
+}
+
+/**
+ * Create a mailbox = a confirmed Cognito user in the backend's user pool, with a
+ * permanent password (no forced reset) so the desktop/mobile client can sign in
+ * immediately. Idempotent-ish: re-creating an existing user just resets the
+ * password. `email` is normalized to lowercase.
+ */
+export async function createMailbox(
+  ctx: AwsContext,
+  args: { userPoolId: string; email: string; password: string },
+): Promise<MailboxInfo> {
+  const { cognito } = clients(ctx);
+  const email = args.email.trim().toLowerCase();
+  try {
+    await cognito.send(
+      new AdminCreateUserCommand({
+        UserPoolId: args.userPoolId,
+        Username: email,
+        MessageAction: "SUPPRESS", // no invite email; the admin sets the password here
+        UserAttributes: [
+          { Name: "email", Value: email },
+          { Name: "email_verified", Value: "true" },
+        ],
+      }),
+    );
+  } catch (e) {
+    // If the user already exists we still (re)set the password below.
+    if (!/UsernameExistsException/i.test((e as Error).name ?? "")) throw e;
+  }
+  await cognito.send(
+    new AdminSetUserPasswordCommand({
+      UserPoolId: args.userPoolId,
+      Username: email,
+      Password: args.password,
+      Permanent: true,
+    }),
+  );
+  return { email, status: "CONFIRMED" };
+}
+
+/** List the mailboxes (users) in the backend's user pool. */
+export async function listMailboxes(ctx: AwsContext, userPoolId: string): Promise<MailboxInfo[]> {
+  const { cognito } = clients(ctx);
+  const out = await cognito.send(new ListUsersCommand({ UserPoolId: userPoolId, Limit: 60 }));
+  return (out.Users ?? []).map((u) => ({
+    email: u.Attributes?.find((a) => a.Name === "email")?.Value ?? u.Username ?? "",
+    status: u.UserStatus ?? "",
+    createdAt: u.UserCreateDate?.toISOString(),
+  }));
 }
 
 /** Poll DKIM/identity verification (the gate before sending). */

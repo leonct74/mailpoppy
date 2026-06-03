@@ -92,6 +92,17 @@
       "Effect": "Allow",
       "Action": ["dynamodb:PutItem", "dynamodb:BatchWriteItem"],
       "Resource": "arn:aws:dynamodb:*:*:table/MailpoppyMailStack-*"
+    },
+    {
+      "Sid": "MailboxAdmin",
+      "Effect": "Allow",
+      "Action": [
+        "cognito-idp:AdminCreateUser",
+        "cognito-idp:AdminSetUserPassword",
+        "cognito-idp:AdminGetUser",
+        "cognito-idp:ListUsers"
+      ],
+      "Resource": "arn:aws:cognito-idp:*:*:userpool/*"
     }
   ]
 }

@@ -98,8 +98,10 @@ export function MigrationView({
       <h2 style={{ margin: 0 }}>Bring your old mail across</h2>
       <p style={{ color: "#666", margin: "4px 0 0", fontSize: 13 }}>
         Import existing mail from AWS WorkMail (or any IMAP server) into your Mailpoppy mailbox before the
-        source is shut down. Your IMAP password stays on this machine — it is sent only to the local
-        provisioning helper, never to us.
+        source is shut down. Enter the credentials of the <b>old account you're migrating from</b> — for
+        WorkMail that's your WorkMail username and password (or an app-specific password if MFA is enabled),
+        <b> not</b> your new Mailpoppy mailbox password. These credentials stay on this machine — they're sent
+        only to the local helper, never to us.
       </p>
 
       <div style={box}>
@@ -117,12 +119,12 @@ export function MigrationView({
             <input aria-label="IMAP username" style={input} value={user} onChange={(e) => setUser(e.target.value)} />
           </label>
           <label style={field}>
-            Password
+            Password <span style={{ color: "#999", fontWeight: 400 }}>(of the old account)</span>
             <input aria-label="IMAP password" type="password" style={input} value={password} onChange={(e) => setPassword(e.target.value)} />
           </label>
           <label style={field}>
             Destination mailbox
-            <input aria-label="Destination mailbox" style={input} value={mailbox} placeholder="you@yourdomain.com" onChange={(e) => setMailbox(e.target.value)} />
+            <input aria-label="Destination mailbox" style={input} value={mailbox} placeholder="you@yourdomain.com" onChange={(e) => setMailbox(e.target.value.trim().toLowerCase())} />
           </label>
           <label style={field}>
             Stack name

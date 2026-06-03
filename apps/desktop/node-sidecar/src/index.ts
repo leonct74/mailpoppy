@@ -175,6 +175,58 @@ app.post("/migrate/imap/run", async (req, reply) => {
   }
 });
 
+// ---- Mailboxes (Cognito users in the deployed backend's user pool) ----
+
+const NO_BACKEND =
+  "No deployed Mailpoppy backend was found. Deploy it first (cd infra && npx cdk deploy --parameters MailDomain=<domain>), then create mailboxes.";
+
+async function resolveBackend(stackName: string) {
+  const c = ctx();
+  let outputs: Record<string, string>;
+  try {
+    outputs = await prov.getStackOutputs(c, stackName);
+  } catch (e) {
+    if (/does not exist|ValidationError/i.test((e as Error).message ?? "")) return null;
+    throw e;
+  }
+  if (!outputs.UserPoolId) return null;
+  return {
+    region: c.region,
+    userPoolId: outputs.UserPoolId,
+    clientId: outputs.UserPoolClientId,
+    apiBaseUrl: outputs.ApiBaseUrl,
+  };
+}
+
+// List existing mailboxes in the backend's user pool.
+app.get("/mailbox/list/:stackName", async (req, reply) => {
+  const stackName = (req.params as { stackName: string }).stackName;
+  const backend = await resolveBackend(stackName);
+  if (!backend) return reply.code(404).send({ ok: false, error: NO_BACKEND });
+  const mailboxes = await prov.listMailboxes(ctx(), backend.userPoolId);
+  return { ok: true, ...backend, mailboxes };
+});
+
+// Create a mailbox (Cognito user + permanent password). The UI confirms first.
+app.post("/mailbox/create", async (req, reply) => {
+  const b = (req.body ?? {}) as { stackName?: string; email?: string; password?: string };
+  if (!b.email || !b.password) {
+    return reply.code(400).send({ ok: false, error: "email and password are required" });
+  }
+  const backend = await resolveBackend(b.stackName ?? "MailpoppyMailStack");
+  if (!backend) return reply.code(404).send({ ok: false, error: NO_BACKEND });
+  try {
+    const mailbox = await prov.createMailbox(ctx(), {
+      userPoolId: backend.userPoolId,
+      email: b.email,
+      password: b.password,
+    });
+    return { ok: true, mailbox, ...backend };
+  } catch (err) {
+    return reply.code(400).send({ ok: false, error: (err as Error).message });
+  }
+});
+
 const port = Number(process.env.PORT ?? 8787);
 app
   .listen({ port, host: "127.0.0.1" })
