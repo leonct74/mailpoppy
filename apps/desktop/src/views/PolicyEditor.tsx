@@ -63,6 +63,7 @@ export function PolicyEditor({ stackName, load, save }: PolicyEditorProps) {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   function applyPolicy(p: SpamPolicy) {
     setOnVirus(p.onVirus);
@@ -119,35 +120,8 @@ export function PolicyEditor({ stackName, load, save }: PolicyEditorProps) {
 
       {!loading && (
         <>
+          {/* Everyday controls: per-sender allow/block lists. */}
           <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
-            <label style={{ fontSize: 13, fontWeight: 600 }}>
-              Spam → <br />
-              <select aria-label="Spam action" value={onSpam} onChange={(e) => setOnSpam(e.target.value as SpamPolicy["onSpam"])} style={sel}>
-                {SPAM_OPTS.map((o) => (
-                  <option key={o.v} value={o.v}>{o.label}</option>
-                ))}
-              </select>
-            </label>
-            <label style={{ fontSize: 13, fontWeight: 600 }}>
-              Failed SPF/DKIM/DMARC → <br />
-              <select aria-label="Auth-fail action" value={onAuthFail} onChange={(e) => setOnAuthFail(e.target.value as SpamPolicy["onAuthFail"])} style={sel}>
-                {AUTH_OPTS.map((o) => (
-                  <option key={o.v} value={o.v}>{o.label}</option>
-                ))}
-              </select>
-            </label>
-            <label style={{ fontSize: 13, fontWeight: 600 }}>
-              Virus → <br />
-              <select aria-label="Virus action" value={onVirus} onChange={(e) => setOnVirus(e.target.value as SpamPolicy["onVirus"])} style={sel}>
-                {VIRUS_OPTS.map((o) => (
-                  <option key={o.v} value={o.v}>{o.label}</option>
-                ))}
-              </select>
-              <div style={{ fontWeight: 400, color: "#999", fontSize: 11 }}>A virus is never delivered to the inbox.</div>
-            </label>
-          </div>
-
-          <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 14 }}>
             <label style={{ fontSize: 13, fontWeight: 600, flex: 1, minWidth: 240 }}>
               Allow list <span style={{ fontWeight: 400, color: "#999" }}>(always inbox, skips spam/auth checks)</span>
               <textarea aria-label="Allow list" value={allowText} onChange={(e) => setAllowText(e.target.value)} rows={4} style={ta} placeholder={"boss@partner.com\npartner.com"} autoCapitalize="off" autoCorrect="off" spellCheck={false} />
@@ -171,7 +145,56 @@ export function PolicyEditor({ stackName, load, save }: PolicyEditorProps) {
             </div>
           )}
 
-          <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
+          {/* Advanced: per-verdict actions. Hidden by default with a "leave the
+              defaults" recommendation so a non-technical admin won't break delivery. */}
+          <div style={{ marginTop: 16, borderTop: "1px solid #eee", paddingTop: 12 }}>
+            <button
+              onClick={() => setShowAdvanced((v) => !v)}
+              aria-expanded={showAdvanced}
+              style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "#7c3aed", fontWeight: 600, fontSize: 14 }}
+            >
+              {showAdvanced ? "▾" : "▸"} Advanced: spam &amp; virus handling
+            </button>
+
+            {showAdvanced && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e", borderRadius: 8, padding: "8px 12px", fontSize: 13 }}>
+                  <b>Recommended: leave these at their defaults.</b> Virus mail is quarantined and spam goes to Junk —
+                  this suits almost everyone. Changing them can cause wanted mail to be hidden or lost. Only adjust these
+                  if you know exactly why.
+                </div>
+                <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 12 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600 }}>
+                    Spam → <br />
+                    <select aria-label="Spam action" value={onSpam} onChange={(e) => setOnSpam(e.target.value as SpamPolicy["onSpam"])} style={sel}>
+                      {SPAM_OPTS.map((o) => (
+                        <option key={o.v} value={o.v}>{o.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ fontSize: 13, fontWeight: 600 }}>
+                    Failed SPF/DKIM/DMARC → <br />
+                    <select aria-label="Auth-fail action" value={onAuthFail} onChange={(e) => setOnAuthFail(e.target.value as SpamPolicy["onAuthFail"])} style={sel}>
+                      {AUTH_OPTS.map((o) => (
+                        <option key={o.v} value={o.v}>{o.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ fontSize: 13, fontWeight: 600 }}>
+                    Virus → <br />
+                    <select aria-label="Virus action" value={onVirus} onChange={(e) => setOnVirus(e.target.value as SpamPolicy["onVirus"])} style={sel}>
+                      {VIRUS_OPTS.map((o) => (
+                        <option key={o.v} value={o.v}>{o.label}</option>
+                      ))}
+                    </select>
+                    <div style={{ fontWeight: 400, color: "#999", fontSize: 11 }}>A virus is never delivered to the inbox.</div>
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>
             <button onClick={() => void onSave()} disabled={saving} style={btn(saving)}>
               {saving ? "Saving…" : "Save mail rules"}
             </button>

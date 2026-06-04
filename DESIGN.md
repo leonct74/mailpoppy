@@ -240,10 +240,15 @@ sorts into four buckets:
   the action per verdict. Safe defaults: **virus → reject/quarantine (never inbox)**,
   spam → Junk, auth-fail → tag + Junk. Sender allow/block lists. Optional paid upgrade to
   heavier filtering. ✅ **built (2026-06-04)**: the policy is editable in the wizard
-  (`views/PolicyEditor.tsx` — per-verdict actions + allow/block lists), stored as a JSON doc in the
-  settings table (`policy#default`), and enforced by the `inbound-processor`'s existing
-  `classifyDelivery` (precedence: block → allow → virus → spam → auth → clean). Normalization +
-  fail-safe-to-defaults in `@mailpoppy/core/policy.ts`. *(Per-domain override is a later nicety.)*
+  (`views/PolicyEditor.tsx`), stored as a JSON doc in the settings table (`policy#default`), and
+  enforced by the `inbound-processor`'s existing `classifyDelivery` (precedence: block → allow →
+  virus → spam → auth → clean). Normalization + fail-safe-to-defaults in
+  `@mailpoppy/core/policy.ts`. **UX:** allow/block lists are the everyday, always-visible control;
+  the **per-verdict actions** (spam/auth/virus → junk/tag/reject) sit behind a collapsed
+  **"Advanced"** disclosure with a "leave the defaults" recommendation, so a non-technical admin
+  can't accidentally break delivery (the safe defaults save unchanged if Advanced is never opened).
+  *(Policy is deployment-wide across all mailboxes/domains; per-domain override + per-user lists are
+  later niceties.)*
 - **Attachments** — stored in **S3** inside the raw `.eml` (MVP) → extract to separate objects
   later for previews/lazy-load. Hard ceiling ~40 MB (AWS). Optional admin soft-cap below that.
   Later: "send large files as S3 link." Storage ≈ $0.023/GB-mo billed to the *user's* AWS

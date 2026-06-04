@@ -14,30 +14,47 @@ const policy: SpamPolicy = {
 };
 
 describe("PolicyEditor", () => {
-  it("loads and shows the current policy", async () => {
+  it("shows the allow/block lists by default and hides verdict actions behind Advanced", async () => {
     render(<PolicyEditor stackName="MailpoppyMailStack" load={async () => policy} />);
 
-    expect(await screen.findByLabelText("Spam action")).toHaveValue("junk");
-    expect(screen.getByLabelText("Virus action")).toHaveValue("quarantine");
-    expect(screen.getByLabelText("Allow list")).toHaveValue("boss@partner.com");
+    // Everyday controls are visible immediately.
+    expect(await screen.findByLabelText("Allow list")).toHaveValue("boss@partner.com");
     expect(screen.getByLabelText("Block list")).toHaveValue("bad.com");
+    // Verdict dropdowns are NOT shown until Advanced is opened.
+    expect(screen.queryByLabelText("Spam action")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Advanced: spam/i }));
+
+    expect(screen.getByText(/leave these at their defaults/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Spam action")).toHaveValue("junk");
+    expect(screen.getByLabelText("Virus action")).toHaveValue("quarantine");
   });
 
-  it("saves edited actions and lists", async () => {
+  it("saves edited actions (via Advanced) and lists", async () => {
     const save = vi.fn(async (input: { stackName: string; policy: SpamPolicy }) => ({ ok: true as const, policy: input.policy }));
     render(<PolicyEditor stackName="MailpoppyMailStack" load={async () => policy} save={save} />);
 
-    fireEvent.change(await screen.findByLabelText("Spam action"), { target: { value: "reject" } });
-    fireEvent.change(screen.getByLabelText("Block list"), { target: { value: "bad.com\nspammer@evil.com" } });
+    fireEvent.change(await screen.findByLabelText("Block list"), { target: { value: "bad.com\nspammer@evil.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /Advanced: spam/i }));
+    fireEvent.change(screen.getByLabelText("Spam action"), { target: { value: "reject" } });
     fireEvent.click(screen.getByRole("button", { name: /Save mail rules/i }));
 
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     const arg = save.mock.calls[0]![0];
-    expect(arg.stackName).toBe("MailpoppyMailStack");
     expect(arg.policy.onSpam).toBe("reject");
     expect(arg.policy.blockList).toEqual(["bad.com", "spammer@evil.com"]);
     expect(arg.policy.allowList).toEqual(["boss@partner.com"]);
     expect(await screen.findByText(/Saved/i)).toBeInTheDocument();
+  });
+
+  it("saves the safe defaults unchanged when Advanced is never opened", async () => {
+    const save = vi.fn(async (input: { stackName: string; policy: SpamPolicy }) => ({ ok: true as const, policy: input.policy }));
+    render(<PolicyEditor stackName="MailpoppyMailStack" load={async () => policy} save={save} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Save mail rules/i }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    const arg = save.mock.calls[0]![0];
+    expect(arg.policy).toMatchObject({ onVirus: "quarantine", onSpam: "junk", onAuthFail: "junk" });
   });
 
   it("warns about entries that aren't a valid address or domain", async () => {
