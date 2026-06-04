@@ -70,7 +70,8 @@ export function AdminPrivacyNotice() {
             </li>
             <li>
               <b>Nothing is hidden.</b> The <b>AWS Resources</b> tab shows exactly what Mailpoppy created in your
-              account, and everything runs in your account where you can review it.
+              account. Everything runs in your own account — and if you want a full access log, you can switch on AWS
+              CloudTrail there yourself.
             </li>
           </ul>
           <p style={{ margin: 0, fontSize: 13, color: "#475569" }}>
