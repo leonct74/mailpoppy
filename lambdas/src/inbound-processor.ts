@@ -1,8 +1,9 @@
 import type { SESEvent, SESReceipt } from "aws-lambda";
-import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand, QueryCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
+import { CognitoIdentityProviderClient, ListUsersCommand } from "@aws-sdk/client-cognito-identity-provider";
 import { simpleParser, type AddressObject } from "mailparser";
 import {
   type MessageMeta,
@@ -25,6 +26,7 @@ import {
   wouldExceedQuota,
   policySettingsKey,
   normalizeSpamPolicy,
+  isKnownMailbox,
 } from "@mailpoppy/core";
 
 /**
@@ -37,6 +39,7 @@ import {
  */
 const s3 = new S3Client({});
 const ses = new SESv2Client({});
+const cognito = new CognitoIdentityProviderClient({});
 // removeUndefinedValues: optional MessageMeta fields (from.name, attachments, …)
 // are often undefined; without this the DocumentClient throws on marshalling.
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
@@ -46,6 +49,7 @@ const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
 const INDEX_TABLE = process.env.INDEX_TABLE ?? "";
 const SETTINGS_TABLE = process.env.SETTINGS_TABLE ?? "";
 const MAIL_BUCKET = process.env.MAIL_BUCKET ?? "";
+const USER_POOL_ID = process.env.USER_POOL_ID ?? "";
 const INBOUND_PREFIX = process.env.INBOUND_PREFIX ?? "inbound/";
 /** Domains this deployment hosts; mail to other recipients is ignored. Empty = accept all. */
 const HOSTED_DOMAINS = (process.env.HOSTED_DOMAINS ?? "")
@@ -166,9 +170,75 @@ async function sendQuotaBounce(recipient: string, sender: string, subject: strin
   }
 }
 
+// Cache the mailbox set briefly across warm invocations (a freshly-created
+// mailbox becomes deliverable within this TTL).
+let mailboxCache: { at: number; set: Set<string> } | null = null;
+const MAILBOX_TTL_MS = 60_000;
+
+/** The set of real mailbox addresses (Cognito users). Empty set if it can't be read. */
+async function loadMailboxAddresses(): Promise<Set<string>> {
+  if (!USER_POOL_ID) return new Set();
+  if (mailboxCache && Date.now() - mailboxCache.at < MAILBOX_TTL_MS) return mailboxCache.set;
+  const set = new Set<string>();
+  try {
+    let PaginationToken: string | undefined;
+    do {
+      const out = await cognito.send(new ListUsersCommand({ UserPoolId: USER_POOL_ID, Limit: 60, PaginationToken }));
+      for (const u of out.Users ?? []) {
+        const email = u.Attributes?.find((a) => a.Name === "email")?.Value ?? u.Username;
+        if (email) set.add(normalizeAddress(email));
+      }
+      PaginationToken = out.PaginationToken;
+    } while (PaginationToken);
+    mailboxCache = { at: Date.now(), set };
+  } catch (e) {
+    console.error("failed to list mailboxes (treating none as known):", e);
+  }
+  return set;
+}
+
+/**
+ * Only bounce to a sender we can trust (passed SPF, DKIM, or DMARC). Spam to
+ * random addresses usually has a forged From; bouncing it would send backscatter
+ * to an innocent third party and harm our domain's reputation, so we drop it
+ * silently instead.
+ */
+function senderAuthenticated(v: AuthVerdicts): boolean {
+  return v.spf === "PASS" || v.dkim === "PASS" || v.dmarc === "PASS";
+}
+
+/** Notify the sender that the recipient address doesn't exist (a simple NDR). */
+async function sendUnknownRecipientBounce(recipient: string, sender: string, subject: string): Promise<void> {
+  if (isSystemSender(sender)) return;
+  const from = `mailer-daemon@${addressDomain(recipient)}`;
+  try {
+    await ses.send(
+      new SendEmailCommand({
+        FromEmailAddress: from,
+        Destination: { ToAddresses: [sender] },
+        Content: {
+          Simple: {
+            Subject: { Data: `Undeliverable: ${subject}`, Charset: "UTF-8" },
+            Body: {
+              Text: {
+                Data: `Your message to ${recipient} could not be delivered because that mailbox does not exist. Please check the address and try again.`,
+                Charset: "UTF-8",
+              },
+            },
+          },
+        },
+      }),
+    );
+  } catch (e) {
+    console.error(`failed to send unknown-recipient bounce to ${sender}:`, e);
+  }
+}
+
 export async function handler(event: SESEvent): Promise<void> {
   // One deployment-wide policy per invocation (allow/block + verdict actions).
   const policy: DeploymentPolicy = { ...DEFAULT_POLICY, spam: await loadSpamPolicy() };
+  // The real mailboxes (Cognito users). Mail to anything else is rejected.
+  const knownMailboxes = await loadMailboxAddresses();
 
   for (const rec of event.Records) {
     const { mail, receipt } = rec.ses;
@@ -190,6 +260,32 @@ export async function handler(event: SESEvent): Promise<void> {
         messageId: parsed.messageId ?? messageId,
       }) || messageId;
 
+    const date = (parsed.date ?? new Date()).toISOString();
+    const subject = parsed.subject ?? "(no subject)";
+    const snippet = (parsed.text ?? "").replace(/\s+/g, " ").trim().slice(0, 140);
+
+    // Which hosted recipients are real mailboxes? If the mailbox list couldn't be
+    // read (empty set), fall back to delivering to all hosted recipients — never
+    // reject mail because of a transient lookup failure.
+    const hosted = (receipt.recipients ?? []).map(normalizeAddress).filter(isHosted);
+    const enforceKnown = knownMailboxes.size > 0;
+    const known = enforceKnown ? hosted.filter((r) => isKnownMailbox(r, knownMailboxes)) : hosted;
+    const unknown = enforceKnown ? hosted.filter((r) => !isKnownMailbox(r, knownMailboxes)) : [];
+
+    // Mail addressed only to non-existent mailboxes: store nothing (no DynamoDB
+    // row), DELETE the raw object SES wrote to S3, and bounce a genuine sender.
+    // Forged spam (failed auth) is dropped silently to avoid backscatter.
+    if (known.length === 0) {
+      for (const r of unknown) {
+        console.log(`reject ${messageId} -> ${r}: no-such-mailbox`);
+        if (senderAuthenticated(verdicts)) await sendUnknownRecipientBounce(r, from.address, subject);
+      }
+      await s3
+        .send(new DeleteObjectCommand({ Bucket: MAIL_BUCKET, Key: key }))
+        .catch((e) => console.error(`failed to delete unstored inbound object ${key}:`, e));
+      continue;
+    }
+
     // Extract each attachment to its own S3 object so the client can download it
     // on demand (one copy per message, shared across recipients).
     const attachments: AttachmentMeta[] = [];
@@ -200,20 +296,15 @@ export async function handler(event: SESEvent): Promise<void> {
       // Some senders attach files as application/octet-stream; infer a real type
       // from the extension so the client can preview/open it.
       const contentType = resolveContentType(a.contentType, filename);
-      const key = attachmentS3Key(messageId, i, filename);
+      const aKey = attachmentS3Key(messageId, i, filename);
       await s3.send(
-        new PutObjectCommand({ Bucket: MAIL_BUCKET, Key: key, Body: a.content, ContentType: contentType }),
+        new PutObjectCommand({ Bucket: MAIL_BUCKET, Key: aKey, Body: a.content, ContentType: contentType }),
       );
-      attachments.push({ filename, contentType, sizeBytes: a.size ?? a.content?.length ?? 0, s3Key: key });
+      attachments.push({ filename, contentType, sizeBytes: a.size ?? a.content?.length ?? 0, s3Key: aKey });
     }
 
-    const date = (parsed.date ?? new Date()).toISOString();
-    const subject = parsed.subject ?? "(no subject)";
-    const snippet = (parsed.text ?? "").replace(/\s+/g, " ").trim().slice(0, 140);
-
-    // Fan out: one row per recipient that this deployment actually hosts.
-    const recipients = (receipt.recipients ?? []).map(normalizeAddress).filter(isHosted);
-    for (const recipient of recipients) {
+    // Deliver to each real recipient (apply spam/auth policy + storage quota).
+    for (const recipient of known) {
       const decision = classifyDelivery(from.address, verdicts, policy);
       if (decision.folder === null) {
         // Rejected by policy (virus/spam/block-list). Raw object is left in S3

@@ -198,7 +198,10 @@ s3://<deployment-bucket>/
 3. The receipt rule **writes the raw `.eml` to S3** and triggers the **inbound Lambda**.
 4. Lambda parses MIME, computes the thread (`Message-ID`/`In-Reply-To`/`References`), and
    **writes a metadata record to DynamoDB** (`unread:true, folder:inbox, …`); applies the
-   admin's verdict policy (e.g. virus → quarantine, spam → Junk).
+   admin's verdict policy (e.g. virus → quarantine, spam → Junk). **Unknown recipients are
+   rejected**: if the address isn't a real mailbox (Cognito user) the message is stored nowhere
+   (the raw S3 object is deleted) and an authenticated sender gets a "no such mailbox" bounce —
+   forged spam is dropped silently (no backscatter). ✅ built + live-verified 2026-06-04.
 5. *(Optional)* applies forwarding rules; *(mobile, later)* publishes SNS → push notification.
 6. The **client**, on refresh, queries DynamoDB via the access API → shows the inbox list.
    Opening a message fetches the raw file from S3, renders it (safe HTML), and flips
@@ -618,7 +621,13 @@ live-verified on ollydigital.com:**
   Outlook/Hotmail Junk placement on a fresh domain.
 - **Admin mail rules** (2026-06-04) — allow/block lists + per-verdict actions (spam/auth/virus →
   junk/tag/reject), stored in the settings table and enforced by the inbound-processor (§10). Turns
-  the hardcoded default policy into something the admin actually controls.
+  the hardcoded default policy into something the admin actually controls. (Per-verdict actions sit
+  behind an "Advanced / keep the defaults" disclosure so non-technical admins don't break delivery.)
+- **Reject unknown recipients** (2026-06-04) — mail to an address with no mailbox is bounced to the
+  sender (if authenticated) and stored nowhere; the raw S3 object is deleted. The inbound-processor
+  resolves real mailboxes via Cognito `ListUsers` (cached), fails safe to deliver-all if the list
+  can't be read. Catch-all was deliberately rejected as an anti-pattern (spam magnet + backscatter +
+  silent-misroute legal risk).
 - *(Also fixed in this pass: attachment send/receive — raw-MIME `Content.Raw` send so Gmail can
   open them, + `tauri-plugin-opener` and a fallback link so received attachments download. The
   "still failing" symptom was a **stale prebuilt sidecar binary** masking re-deploys — always

@@ -148,13 +148,18 @@ export class MailStack extends Stack {
       MAIL_BUCKET: mailBucket.bucketName,
       INBOUND_PREFIX: "inbound/",
       HOSTED_DOMAINS: mailDomain.valueAsString,
+      USER_POOL_ID: userPool.userPoolId, // resolve real mailboxes → reject unknown recipients
     });
-    mailBucket.grantReadWrite(inboundProcessor); // read the raw .eml + write extracted attachments
+    mailBucket.grantReadWrite(inboundProcessor); // read the raw .eml + write/delete attachments + raw
     indexTable.grantReadWriteData(inboundProcessor); // write rows + read for quota usage
     settingsTable.grantReadData(inboundProcessor);
-    // Send a "mailbox full" bounce to the sender when a quota is exceeded.
+    // Send a "mailbox full" / "no such mailbox" bounce to the sender.
     inboundProcessor.addToRolePolicy(
       new iam.PolicyStatement({ actions: ["ses:SendEmail", "ses:SendRawEmail"], resources: ["*"] }),
+    );
+    // List mailboxes (Cognito users) to tell a real recipient from an unknown one.
+    inboundProcessor.addToRolePolicy(
+      new iam.PolicyStatement({ actions: ["cognito-idp:ListUsers"], resources: [userPool.userPoolArn] }),
     );
 
     const accessApi = fn("AccessApi", "access-api", {

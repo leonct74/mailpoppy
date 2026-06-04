@@ -10,6 +10,7 @@ import {
   deriveThreadId,
   mapVerdict,
   addressMatchesList,
+  isKnownMailbox,
   classifyDelivery,
 } from "./mailbox";
 import { DEFAULT_POLICY, type DeploymentPolicy, type AuthVerdicts } from "./types";
@@ -117,6 +118,20 @@ describe("addressMatchesList", () => {
   it("is case-insensitive and ignores empty entries", () => {
     expect(addressMatchesList("A@X.com", ["a@x.COM"])).toBe(true);
     expect(addressMatchesList("a@x.com", ["", "  "])).toBe(false);
+  });
+});
+
+describe("isKnownMailbox", () => {
+  const known = ["marco@ollydigital.com", "Anna@Ollydigital.com"];
+  it("matches a real mailbox case-insensitively", () => {
+    expect(isKnownMailbox("marco@ollydigital.com", known)).toBe(true);
+    expect(isKnownMailbox("MARCO@OLLYDIGITAL.COM", known)).toBe(true);
+    expect(isKnownMailbox("anna@ollydigital.com", known)).toBe(true);
+  });
+  it("rejects an unknown address", () => {
+    expect(isKnownMailbox("info@ollydigital.com", known)).toBe(false);
+    expect(isKnownMailbox("", known)).toBe(false);
+    expect(isKnownMailbox("marco@ollydigital.com", [])).toBe(false);
   });
 });
 

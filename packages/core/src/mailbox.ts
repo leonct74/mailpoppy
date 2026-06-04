@@ -162,6 +162,21 @@ export function addressMatchesList(address: string, list: readonly string[]): bo
   });
 }
 
+/**
+ * Is `address` one of the deployment's real mailboxes? Case-insensitive exact
+ * match against the known mailbox addresses (Cognito users). Used by the
+ * inbound-processor to reject mail to addresses that don't exist instead of
+ * silently capturing it.
+ */
+export function isKnownMailbox(address: string, known: Iterable<string>): boolean {
+  const addr = normalizeAddress(address);
+  if (!addr) return false;
+  for (const k of known) {
+    if (normalizeAddress(k) === addr) return true;
+  }
+  return false;
+}
+
 // ---- Delivery decision (verdict + policy → folder) --------------------------
 
 export interface DeliveryDecision {

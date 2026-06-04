@@ -327,10 +327,34 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
     warnings; re-renders the server-normalized lists after save. `lib/policy.ts` client; 3 tests.
   - **IAM/infra**: none — the settings table is covered by the provisioning `StackTables` stmt, and
     the inbound-processor already has `grantReadWriteData` on it (from quotas).
-  - ⚠️ **Live-verify pending a redeploy**: enforcement runs in the *deployed* inbound-processor, so
-    the new code only takes effect after the backend is re-deployed (the Lambda bundle hash changed,
-    so a deploy WILL update it). Not yet fired on the user's stack — offer it (block-list a sender →
-    send → confirm dropped) with confirmation.
+  - ✅ **Live-verified 2026-06-04** on the user's stack (after a sidecar `UpdateStack`, GuardDuty
+    preserved): block-list `boxord.com` → a message from `noreply@boxord.com` logged
+    `drop … block-list` and **no row stored**; cleared the list → the same sender delivered to
+    **inbox**. Test mailbox/objects cleaned up; policy doc deleted (back to no-doc defaults).
+  - **UX**: per-verdict actions are tucked behind a collapsed **"Advanced"** disclosure with a
+    "leave the defaults" recommendation (safe defaults save unchanged if never opened); allow/block
+    lists are the everyday, always-visible control.
+- ✅ **Reject mail to non-existent mailboxes (2026-06-04)** — user requirement: mail to an address
+  with no mailbox (e.g. `info@` when only `marco@` exists) must be **bounced to the sender and stored
+  nowhere** (not S3, not DynamoDB).
+  - **Core** (`mailbox.ts::isKnownMailbox`): case-insensitive membership test; unit-tested.
+  - **Lambda** (`inbound-processor.ts`): `loadMailboxAddresses()` lists the pool's Cognito users
+    (`USER_POOL_ID` env, `cognito-idp:ListUsers`, cached 60s). Recipients are split into known/unknown;
+    if a message has **no** known recipient → store nothing, **`DeleteObjectCommand`** the raw `.eml`
+    SES wrote to S3, and bounce the sender. **Backscatter guard:** the bounce only fires when the
+    sender passed SPF/DKIM/DMARC (`senderAuthenticated`); forged spam is dropped silently.
+    **Fail-safe:** if the mailbox list can't be read (empty set), fall back to delivering to all
+    hosted recipients — never reject mail because of a transient lookup failure.
+  - **Infra** (`mail-stack.ts`): inbound-processor gained `USER_POOL_ID` env + a `cognito-idp:ListUsers`
+    statement on the user pool. (`mailBucket.grantReadWrite` already covers `s3:DeleteObject`.)
+    `lambdas/package.json` gained `@aws-sdk/client-cognito-identity-provider`.
+  - ✅ **Live-verified 2026-06-04** (sidecar redeploy → `UPDATE_COMPLETE`, GuardDuty preserved):
+    mail to `info@ollydigital.com` → `reject … no-such-mailbox`, **Count=0 in DynamoDB**, raw `.eml`
+    **404 in S3** (deleted), bounce sent with no error; mail to `marco@` still delivered to inbox.
+    Test data cleaned up.
+  - *(Catch-all was deliberately NOT built — discussed as an anti-pattern/backscatter+legal risk; the
+    "reject unknown" behavior above is the chosen handling. Aliases — extra addresses → one mailbox —
+    remain a possible later feature.)*
 
 ## Architecture (concise)
 
