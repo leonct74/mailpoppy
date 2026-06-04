@@ -103,7 +103,13 @@ export function App() {
   return (
     <main style={{ fontFamily: "system-ui, sans-serif", maxWidth: 980, margin: "0 auto", padding: 24 }}>
       <h1 style={{ marginBottom: 4 }}>🌸 Mailpoppy</h1>
-      <p style={{ color: "#666", marginTop: 0 }}>Host email for your own domains inside your own AWS account.</p>
+      <p
+        style={{ color: "#475569", marginTop: 0, fontSize: 14, maxWidth: 720 }}
+        title="Mailpoppy reads your AWS credentials from your machine's own configuration (~/.aws profile, SSO, or environment) using AWS's official SDK — the same way the AWS CLI does — and uses them only on this computer. They are never copied, uploaded, or stored: not on Mailpoppy's servers, not in any cloud."
+      >
+        🔒 Your AWS credentials never leave this computer — Mailpoppy reads them locally (like the AWS CLI) and never
+        copies, uploads, or stores them anywhere.
+      </p>
 
       <nav style={{ display: "flex", gap: 8, marginTop: 12 }}>
         <button style={tabBtn(tab === "setup")} onClick={() => setTab("setup")}>Setup</button>
