@@ -6,3 +6,4 @@ export * from "./mime";
 export * from "./storage";
 export * from "./sesAccount";
 export * from "./mailFrom";
+export * from "./policy";

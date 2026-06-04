@@ -324,6 +324,34 @@ app.post("/ses/mail-from", async (req, reply) => {
   }
 });
 
+// ---- Spam / auth policy (allow-block lists + per-verdict actions) ----
+
+// Read the deployment's mail-filtering policy (defaults if never set).
+app.get("/policy/spam/:stackName", async (req, reply) => {
+  const stackName = (req.params as { stackName: string }).stackName;
+  try {
+    return await prov.getSpamPolicy(ctx(), { stackName });
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
+// Update the deployment's mail-filtering policy (normalized server-side).
+app.post("/policy/spam", async (req, reply) => {
+  const b = (req.body ?? {}) as { stackName?: string; policy?: unknown };
+  if (!b.policy || typeof b.policy !== "object") {
+    return reply.code(400).send({ ok: false, error: "policy is required" });
+  }
+  try {
+    return await prov.setSpamPolicy(ctx(), {
+      stackName: b.stackName,
+      policy: b.policy as Parameters<typeof prov.setSpamPolicy>[1]["policy"],
+    });
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
 // ---- Teardown: remove everything Mailpoppy deployed for a domain ----
 
 // Mutating + DESTRUCTIVE: deletes the stack, its RETAINed data (mail bucket,

@@ -10,6 +10,7 @@ import {
   type EmailAddress,
   type AttachmentMeta,
   type DeploymentPolicy,
+  type SpamPolicy,
   DEFAULT_POLICY,
   mailboxPk,
   messageSk,
@@ -22,6 +23,8 @@ import {
   resolveContentType,
   quotaSettingsKey,
   wouldExceedQuota,
+  policySettingsKey,
+  normalizeSpamPolicy,
 } from "@mailpoppy/core";
 
 /**
@@ -79,9 +82,22 @@ function isHosted(recipient: string): boolean {
   return HOSTED_DOMAINS.includes(addressDomain(recipient));
 }
 
-// TODO(Phase 2+): load per-deployment / per-domain policy from the settings table.
-function policyFor(_domain: string): DeploymentPolicy {
-  return DEFAULT_POLICY;
+/**
+ * Load the admin's spam/auth policy (allow/block lists + per-verdict actions)
+ * from the settings table. Deployment-wide for now (per-domain override later).
+ * Fail-safe: any missing/malformed doc or read error falls back to safe defaults
+ * so delivery is never blocked by a settings problem.
+ */
+async function loadSpamPolicy(): Promise<SpamPolicy> {
+  if (!SETTINGS_TABLE) return DEFAULT_POLICY.spam;
+  try {
+    const out = await ddb.send(new GetCommand({ TableName: SETTINGS_TABLE, Key: { pk: policySettingsKey() } }));
+    const json = out.Item?.json;
+    if (typeof json !== "string") return DEFAULT_POLICY.spam;
+    return normalizeSpamPolicy(JSON.parse(json) as Partial<SpamPolicy>);
+  } catch {
+    return DEFAULT_POLICY.spam;
+  }
 }
 
 /** A mailbox's storage quota in bytes, or null if none is set. */
@@ -151,6 +167,9 @@ async function sendQuotaBounce(recipient: string, sender: string, subject: strin
 }
 
 export async function handler(event: SESEvent): Promise<void> {
+  // One deployment-wide policy per invocation (allow/block + verdict actions).
+  const policy: DeploymentPolicy = { ...DEFAULT_POLICY, spam: await loadSpamPolicy() };
+
   for (const rec of event.Records) {
     const { mail, receipt } = rec.ses;
     const messageId = mail.messageId;
@@ -195,7 +214,7 @@ export async function handler(event: SESEvent): Promise<void> {
     // Fan out: one row per recipient that this deployment actually hosts.
     const recipients = (receipt.recipients ?? []).map(normalizeAddress).filter(isHosted);
     for (const recipient of recipients) {
-      const decision = classifyDelivery(from.address, verdicts, policyFor(addressDomain(recipient)));
+      const decision = classifyDelivery(from.address, verdicts, policy);
       if (decision.folder === null) {
         // Rejected by policy (virus/spam/block-list). Raw object is left in S3
         // for audit; the janitor sweeps unindexed inbound objects later.

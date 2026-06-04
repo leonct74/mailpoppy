@@ -6,6 +6,7 @@ import { saveDeploymentConfig } from "../lib/deploymentConfig";
 import { MailboxStorageRow } from "./MailboxStorageRow";
 import { SendingAccessView } from "./SendingAccessView";
 import { MailFromSetup } from "./MailFromSetup";
+import { PolicyEditor } from "./PolicyEditor";
 
 // Phase 1 setup wizard.
 // Step 0 verifies the AWS environment (credentials + per-service permissions, + detects
@@ -700,6 +701,13 @@ export function SetupWizard() {
               )}
             </div>
           )}
+        </section>
+      )}
+
+      {/* ---- Mail rules: spam / auth actions + allow/block lists ---- */}
+      {ready && !mbNoBackend && (
+        <section style={box}>
+          <PolicyEditor stackName={stackName} />
         </section>
       )}
     </>

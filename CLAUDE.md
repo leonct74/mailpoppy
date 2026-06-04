@@ -303,6 +303,34 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
     path (writes DNS) was **not** fired — it needs explicit user confirmation. **Measure the fix by
     SPF *alignment* in headers (mail-tester.com / Gmail "Show original"), NOT by Outlook Junk
     placement** — placement is reputation-dominated and won't flip from SPF alone.
+  - ✅ **Applied live + verified (2026-06-04)** on ollydigital.com: MAIL FROM = `mail.ollydigital.com`,
+    `MailFromDomainStatus=SUCCESS`, MX + SPF TXT present → SPF now aligns to the domain.
+- ✅ **Admin mail rules — allow/block lists + per-verdict actions (2026-06-04)** — Phase 5
+  policy surface. The inbound-processor *already* routed via `classifyDelivery(sender, verdicts,
+  policy)` (block→allow→virus→spam→auth→clean), but `policyFor()` returned a hardcoded
+  `DEFAULT_POLICY`, so nothing was configurable. Now there's a **store + admin UI**, and the Lambda
+  reads it:
+  - **Core** (`packages/core/src/policy.ts`): `policySettingsKey()` (`policy#default`),
+    `normalizeSpamPolicy` (coerces untrusted input → valid `SpamPolicy`, defaults per field so a
+    malformed doc can never break delivery), `normalizeAddressList` (trim/lowercase/dedupe),
+    `isValidListEntry` (address / domain / @domain). 8 unit tests. (Matching logic + precedence
+    live in `mailbox.ts::classifyDelivery`/`addressMatchesList`, already tested.)
+  - **Lambda** (`inbound-processor.ts`): replaced the hardcoded `policyFor` with async
+    `loadSpamPolicy()` — reads `policy#default` from `SETTINGS_TABLE` (already wired for quotas),
+    `normalizeSpamPolicy(JSON.parse(...))`, **fail-safe to `DEFAULT_POLICY.spam`** on any
+    missing/malformed doc or read error; loaded once per invocation and passed to `classifyDelivery`.
+  - **Sidecar** (`provisioning.ts`): `getSpamPolicy`/`setSpamPolicy` read/write the JSON doc to the
+    settings table (normalized on write); routes `GET /policy/spam/:stackName` + `POST /policy/spam`.
+  - **Desktop** (`views/PolicyEditor.tsx`, in the wizard, gated on a deployed backend): three
+    verdict dropdowns (spam → junk/tag/reject, auth-fail → junk/tag/reject/allow, virus →
+    quarantine/reject; virus never inboxes) + allow/block list textareas with invalid-entry
+    warnings; re-renders the server-normalized lists after save. `lib/policy.ts` client; 3 tests.
+  - **IAM/infra**: none — the settings table is covered by the provisioning `StackTables` stmt, and
+    the inbound-processor already has `grantReadWriteData` on it (from quotas).
+  - ⚠️ **Live-verify pending a redeploy**: enforcement runs in the *deployed* inbound-processor, so
+    the new code only takes effect after the backend is re-deployed (the Lambda bundle hash changed,
+    so a deploy WILL update it). Not yet fired on the user's stack — offer it (block-list a sender →
+    send → confirm dropped) with confirmation.
 
 ## Architecture (concise)
 

@@ -239,7 +239,11 @@ sorts into four buckets:
 - **Spam/virus/auth** — consume SES verdicts (no numeric score; PASS/FAIL/GRAY). Admin sets
   the action per verdict. Safe defaults: **virus → reject/quarantine (never inbox)**,
   spam → Junk, auth-fail → tag + Junk. Sender allow/block lists. Optional paid upgrade to
-  heavier filtering.
+  heavier filtering. ✅ **built (2026-06-04)**: the policy is editable in the wizard
+  (`views/PolicyEditor.tsx` — per-verdict actions + allow/block lists), stored as a JSON doc in the
+  settings table (`policy#default`), and enforced by the `inbound-processor`'s existing
+  `classifyDelivery` (precedence: block → allow → virus → spam → auth → clean). Normalization +
+  fail-safe-to-defaults in `@mailpoppy/core/policy.ts`. *(Per-domain override is a later nicety.)*
 - **Attachments** — stored in **S3** inside the raw `.eml` (MVP) → extract to separate objects
   later for previews/lazy-load. Hard ceiling ~40 MB (AWS). Optional admin soft-cap below that.
   Later: "send large files as S3 link." Storage ≈ $0.023/GB-mo billed to the *user's* AWS
@@ -383,6 +387,9 @@ This is the **highest, never-ending risk** — bigger than any AWS plumbing.
 - **Deliverability — SPF alignment** — ✅ **done** (`views/MailFromSetup.tsx`, in the wizard):
   one-click custom MAIL FROM subdomain so SPF aligns to the sender's domain (helps Outlook/Hotmail
   placement). See §13.
+- **Mail rules** — ✅ **done** (`views/PolicyEditor.tsx`, in the wizard): per-verdict actions
+  (spam/auth-fail/virus → junk/tag/reject) + sender allow/block lists, enforced on inbound mail.
+  See §10.
 - **Admin panel:** domain setup wizard (the headline feature), health/verification dashboard
   (DKIM verified? out of sandbox? records correct?), mailbox-user management, policy panels,
   licensing.
@@ -604,6 +611,9 @@ live-verified on ollydigital.com:**
 - **Custom MAIL FROM / SPF alignment** (2026-06-04) — one-click `mail.<domain>` MAIL FROM with its
   feedback MX + SPF TXT, so SPF aligns to the sender's domain (§13) — the concrete fix for
   Outlook/Hotmail Junk placement on a fresh domain.
+- **Admin mail rules** (2026-06-04) — allow/block lists + per-verdict actions (spam/auth/virus →
+  junk/tag/reject), stored in the settings table and enforced by the inbound-processor (§10). Turns
+  the hardcoded default policy into something the admin actually controls.
 - *(Also fixed in this pass: attachment send/receive — raw-MIME `Content.Raw` send so Gmail can
   open them, + `tauri-plugin-opener` and a fallback link so received attachments download. The
   "still failing" symptom was a **stale prebuilt sidecar binary** masking re-deploys — always

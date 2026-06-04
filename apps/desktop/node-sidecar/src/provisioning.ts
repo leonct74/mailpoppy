@@ -66,6 +66,8 @@ import {
   validateProductionAccessRequest,
   defaultMailFromDomain,
   mailFromDnsRecords,
+  policySettingsKey,
+  normalizeSpamPolicy,
   type MailboxStorage,
   type SesAccountStatus,
   type SesReviewStatus,
@@ -73,6 +75,7 @@ import {
   type MailFromState,
   type MailFromStatus,
   type DnsRecord,
+  type SpamPolicy,
 } from "@mailpoppy/core";
 import {
   CloudFormationClient,
@@ -886,6 +889,47 @@ export async function setMailboxQuota(
   }
   await dynamodb.send(new DeleteItemCommand({ TableName: settingsTable, Key }));
   return { ok: true, email, quotaBytes: null };
+}
+
+// ---- Spam / auth policy (admin: allow-block lists + per-verdict actions, DESIGN §10) ----
+
+/** Read the deployment's spam/auth policy from the settings table (defaults if unset). */
+export async function getSpamPolicy(ctx: AwsContext, args: { stackName?: string }): Promise<SpamPolicy> {
+  const { dynamodb } = clients(ctx);
+  const stackName = args.stackName ?? "MailpoppyMailStack";
+  const outputs = await getStackOutputs(ctx, stackName);
+  const settingsTable = await resolveSettingsTableName(ctx, stackName, outputs);
+  if (!settingsTable) return normalizeSpamPolicy(null);
+  const out = await dynamodb.send(
+    new GetItemCommand({ TableName: settingsTable, Key: { pk: { S: policySettingsKey() } } }),
+  );
+  const json = out.Item?.json?.S;
+  try {
+    return normalizeSpamPolicy(json ? (JSON.parse(json) as Partial<SpamPolicy>) : null);
+  } catch {
+    return normalizeSpamPolicy(null);
+  }
+}
+
+/** Write the deployment's spam/auth policy (normalized) to the settings table. */
+export async function setSpamPolicy(
+  ctx: AwsContext,
+  args: { stackName?: string; policy: Partial<SpamPolicy> },
+): Promise<{ ok: true; policy: SpamPolicy }> {
+  const { dynamodb } = clients(ctx);
+  const stackName = args.stackName ?? "MailpoppyMailStack";
+  const outputs = await getStackOutputs(ctx, stackName);
+  const settingsTable = await resolveSettingsTableName(ctx, stackName, outputs);
+  if (!settingsTable) throw new Error("settings table not found — re-deploy the backend to enable mail rules");
+
+  const policy = normalizeSpamPolicy(args.policy);
+  await dynamodb.send(
+    new PutItemCommand({
+      TableName: settingsTable,
+      Item: { pk: { S: policySettingsKey() }, json: { S: JSON.stringify(policy) } },
+    }),
+  );
+  return { ok: true, policy };
 }
 
 // ---- Teardown: remove everything Mailpoppy deployed (the inverse of deploy + provision) ----
