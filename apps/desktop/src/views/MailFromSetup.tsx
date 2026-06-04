@@ -33,6 +33,18 @@ function banner(bg: string, border: string, color: string): React.CSSProperties 
   return { background: bg, border: `1px solid ${border}`, color, borderRadius: 8, padding: "10px 12px", fontSize: 14 };
 }
 
+const recommendedBadge: React.CSSProperties = {
+  marginLeft: 8,
+  fontSize: 11,
+  fontWeight: 700,
+  color: "#166534",
+  background: "#dcfce7",
+  border: "1px solid #bbf7d0",
+  borderRadius: 999,
+  padding: "2px 8px",
+  verticalAlign: "middle",
+};
+
 function RecordsTable({ records }: { records: DnsRecord[] }) {
   return (
     <table style={{ fontSize: 12, borderCollapse: "collapse", marginTop: 8 }}>
@@ -109,10 +121,14 @@ export function MailFromSetup({ domain, region = "eu-west-1", load, setup }: Mai
 
   return (
     <div style={{ marginTop: 16, borderTop: "1px solid #eee", paddingTop: 14 }}>
-      <h3 style={{ margin: "0 0 4px" }}>Improve deliverability — SPF alignment</h3>
+      <h3 style={{ margin: "0 0 4px" }}>
+        Improve deliverability — SPF alignment
+        <span style={recommendedBadge}>Recommended</span>
+      </h3>
       <p style={{ fontSize: 13, color: "#666", margin: "0 0 10px" }}>
-        A custom <b>MAIL&nbsp;FROM</b> subdomain makes SPF align to <code style={mono}>{domain}</code> (not just
-        Amazon's domain), which helps inbox placement at strict providers like Outlook/Hotmail.
+        <b>Recommended.</b> A custom <b>MAIL&nbsp;FROM</b> subdomain makes SPF align to{" "}
+        <code style={mono}>{domain}</code> (not just Amazon's domain), which improves inbox placement at strict
+        providers like Outlook/Hotmail. It's safe and additive — your existing setup and mailboxes are unaffected.
       </p>
 
       {loading && <p style={{ fontSize: 14, color: "#666" }}>Checking MAIL FROM status…</p>}
@@ -147,7 +163,8 @@ export function MailFromSetup({ domain, region = "eu-west-1", load, setup }: Mai
 
           {alignment === "not-configured" && (
             <div style={banner("#fffbeb", "#fde68a", "#92400e")}>
-              Not configured yet. Mail currently passes DMARC on DKIM alone (SPF is not aligned to your domain).
+              Not configured yet. Mail currently passes DMARC on DKIM alone (SPF is not aligned to your domain).{" "}
+              <b>Enabling this is recommended</b> for better inbox placement.
             </div>
           )}
 
@@ -161,7 +178,7 @@ export function MailFromSetup({ domain, region = "eu-west-1", load, setup }: Mai
 
               {!confirming ? (
                 <button onClick={() => setConfirming(true)} disabled={busy} style={{ ...btn(busy), marginTop: 10 }}>
-                  Set up custom MAIL FROM
+                  Set up custom MAIL FROM (recommended)
                 </button>
               ) : (
                 <div style={{ ...banner("#f8fafc", "#e2e8f0", "#334155"), marginTop: 10 }}>

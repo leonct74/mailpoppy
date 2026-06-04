@@ -17,7 +17,9 @@ describe("MailFromSetup", () => {
     // Region-specific feedback MX + SPF preview.
     expect(screen.getByText("10 feedback-smtp.eu-west-1.amazonses.com")).toBeInTheDocument();
     expect(screen.getByText('"v=spf1 include:amazonses.com ~all"')).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Set up custom MAIL FROM/i })).toBeInTheDocument();
+    // Marked recommended so an evaluating admin understands it's worth enabling.
+    expect(screen.getByText("Recommended")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Set up custom MAIL FROM \(recommended\)/i })).toBeInTheDocument();
   });
 
   it("shows the aligned state when verified", async () => {
