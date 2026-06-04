@@ -30,6 +30,7 @@
         "ses:DeleteEmailIdentity",
         "ses:GetAccount",
         "ses:PutAccountDetails",
+        "ses:PutEmailIdentityMailFromAttributes",
         "ses:SendEmail",
         "ses:CreateReceiptRuleSet",
         "ses:CreateReceiptRule",

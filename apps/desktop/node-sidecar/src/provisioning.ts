@@ -30,6 +30,7 @@ import {
   SendEmailCommand,
   GetAccountCommand,
   PutAccountDetailsCommand,
+  PutEmailIdentityMailFromAttributesCommand,
 } from "@aws-sdk/client-sesv2";
 import {
   SESClient,
@@ -63,10 +64,15 @@ import {
   mailboxPk,
   quotaSettingsKey,
   validateProductionAccessRequest,
+  defaultMailFromDomain,
+  mailFromDnsRecords,
   type MailboxStorage,
   type SesAccountStatus,
   type SesReviewStatus,
   type ProductionAccessRequest,
+  type MailFromState,
+  type MailFromStatus,
+  type DnsRecord,
 } from "@mailpoppy/core";
 import {
   CloudFormationClient,
@@ -655,6 +661,79 @@ export async function requestProductionAccess(
   ]);
 
   return getSesAccount(ctx);
+}
+
+// ---- Custom MAIL FROM domain (DESIGN §13 — SPF alignment / deliverability) ----
+
+/** Read-only: the identity's current MAIL FROM configuration + verification status. */
+export async function getMailFromStatus(ctx: AwsContext, domain: string): Promise<MailFromState> {
+  const { sesv2 } = clients(ctx);
+  const out = await sesv2.send(new GetEmailIdentityCommand({ EmailIdentity: domain }));
+  const m = out.MailFromAttributes;
+  return {
+    mailFromDomain: m?.MailFromDomain,
+    status: m?.MailFromDomainStatus as MailFromStatus | undefined,
+    behaviorOnMxFailure: m?.BehaviorOnMxFailure,
+  };
+}
+
+/**
+ * Mutating: configure a custom MAIL FROM subdomain (default `mail.<domain>`) so
+ * SPF aligns to the sender's domain (helps Outlook/Hotmail placement). Points the
+ * SES identity at the subdomain and writes its required DNS (feedback MX + SPF
+ * TXT) to Route53. BehaviorOnMxFailure=USE_DEFAULT_VALUE so mail still sends if
+ * the MX ever fails to resolve. The UI confirms first (it changes DNS). SES then
+ * verifies the MX asynchronously (status PENDING → SUCCESS). Ledger-logged.
+ */
+export async function setupMailFrom(
+  ctx: AwsContext,
+  args: { domain: string; subdomain?: string },
+): Promise<{ mailFromDomain: string; records: DnsRecord[]; state: MailFromState }> {
+  const { sesv2, route53 } = clients(ctx);
+  const domain = args.domain.trim().toLowerCase();
+  const mailFromDomain = (args.subdomain?.trim().toLowerCase() || defaultMailFromDomain(domain)).replace(/\.$/, "");
+
+  // 1. Point the SES identity at the custom MAIL FROM domain.
+  await sesv2.send(
+    new PutEmailIdentityMailFromAttributesCommand({
+      EmailIdentity: domain,
+      MailFromDomain: mailFromDomain,
+      BehaviorOnMxFailure: "USE_DEFAULT_VALUE",
+    }),
+  );
+
+  // 2. Write the feedback MX + SPF TXT for the subdomain (fresh names — no merge needed).
+  const records = mailFromDnsRecords(mailFromDomain, ctx.region);
+  const zoneId = await findHostedZoneId(ctx, domain);
+  const changes: Change[] = records.map((r) => ({
+    Action: "UPSERT",
+    ResourceRecordSet: {
+      Name: r.name,
+      Type: r.type as RRType,
+      TTL: 300,
+      ResourceRecords: [{ Value: r.value }],
+    },
+  }));
+  await route53.send(
+    new ChangeResourceRecordSetsCommand({
+      HostedZoneId: zoneId,
+      ChangeBatch: { Comment: "Mailpoppy custom MAIL FROM", Changes: changes },
+    }),
+  );
+
+  await record([
+    { action: "created", service: "SES", resourceType: "MAIL FROM domain", name: mailFromDomain, region: ctx.region, detail: `identity ${domain}` },
+    ...records.map((r) => ({
+      action: "created" as const,
+      service: "Route53",
+      resourceType: `${r.type} record`,
+      name: r.name,
+      region: ctx.region,
+      detail: `zone ${zoneId}`,
+    })),
+  ]);
+
+  return { mailFromDomain, records, state: await getMailFromStatus(ctx, domain) };
 }
 
 // ---- Environment readiness (run BEFORE provisioning, so setup never fails midway) ----

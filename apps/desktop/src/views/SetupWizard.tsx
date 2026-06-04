@@ -5,6 +5,7 @@ import { deployBackend, deployStatus, type DeployStatus } from "../lib/deploy";
 import { saveDeploymentConfig } from "../lib/deploymentConfig";
 import { MailboxStorageRow } from "./MailboxStorageRow";
 import { SendingAccessView } from "./SendingAccessView";
+import { MailFromSetup } from "./MailFromSetup";
 
 // Phase 1 setup wizard.
 // Step 0 verifies the AWS environment (credentials + per-service permissions, + detects
@@ -603,10 +604,11 @@ export function SetupWizard() {
         {error && <p style={{ color: "crimson" }}>{error}</p>}
       </section>
 
-      {/* ---- Sending access (SES sandbox → production) ---- */}
+      {/* ---- Sending access (SES sandbox → production) + deliverability ---- */}
       {ready && (
         <section style={box}>
           <SendingAccessView defaultWebsite={domain || undefined} />
+          {domain && <MailFromSetup domain={domain} region={preflight?.region} />}
         </section>
       )}
 

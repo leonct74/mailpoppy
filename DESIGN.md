@@ -341,6 +341,15 @@ This is the **highest, never-ending risk** — bigger than any AWS plumbing.
   (`ProductionAccessEnabled` etc.); the submit path is unit-tested + core-validated (a bad request
   is rejected 400 *before* any AWS call). *(Note: account 675546221165 is already in production,
   so the form correctly shows the green "granted" state there.)*
+- **SPF alignment (custom MAIL FROM):** ✅ **built + live-read-verified (2026-06-04)**. SES's
+  default Return-Path (`…amazonses.com`) leaves SPF unaligned to the sender's domain, so mail
+  passes DMARC on DKIM alone — picky providers (notably Outlook/Hotmail) penalize that. The wizard
+  offers a one-click custom MAIL FROM subdomain (`mail.<domain>`): sidecar `setupMailFrom` points
+  the SES identity at it (`PutEmailIdentityMailFromAttributes`, `BehaviorOnMxFailure=USE_DEFAULT_VALUE`)
+  and writes the feedback MX + SPF TXT to Route53; `views/MailFromSetup.tsx` shows
+  aligned/pending/failed/not-configured and confirms before the DNS change. Pure record/state
+  logic in `@mailpoppy/core/mailFrom.ts`. *Measure the effect by SPF alignment in headers
+  (mail-tester / Gmail "Show original"), not by Junk-folder placement (reputation-dominated).*
 - **Reputation:** a fresh domain has none. Inbox placement (Gmail/Outlook) is an ongoing
   fight; consider guidance on warm-up and sending volume.
 - **Bounce/complaint handling + suppression** is mandatory once sending — neglect it and AWS
@@ -371,6 +380,9 @@ This is the **highest, never-ending risk** — bigger than any AWS plumbing.
 - **Sending access (SES sandbox)** — ✅ **done** (`views/SendingAccessView.tsx`, in the wizard):
   shows whether the account is in the SES sandbox or has production access (+ daily send quota),
   and submits the production-access request in-app. See §13.
+- **Deliverability — SPF alignment** — ✅ **done** (`views/MailFromSetup.tsx`, in the wizard):
+  one-click custom MAIL FROM subdomain so SPF aligns to the sender's domain (helps Outlook/Hotmail
+  placement). See §13.
 - **Admin panel:** domain setup wizard (the headline feature), health/verification dashboard
   (DKIM verified? out of sandbox? records correct?), mailbox-user management, policy panels,
   licensing.
@@ -589,6 +601,9 @@ live-verified on ollydigital.com:**
   glance — directly addresses the "is this as safe as WorkMail?" evaluation question.
 - **SES sandbox-exit flow** (2026-06-04) — in-app sending-access status + production-access
   request (§13). The single biggest blocker between "demos live" and "I can send to anyone."
+- **Custom MAIL FROM / SPF alignment** (2026-06-04) — one-click `mail.<domain>` MAIL FROM with its
+  feedback MX + SPF TXT, so SPF aligns to the sender's domain (§13) — the concrete fix for
+  Outlook/Hotmail Junk placement on a fresh domain.
 - *(Also fixed in this pass: attachment send/receive — raw-MIME `Content.Raw` send so Gmail can
   open them, + `tauri-plugin-opener` and a fallback link so received attachments download. The
   "still failing" symptom was a **stale prebuilt sidecar binary** masking re-deploys — always

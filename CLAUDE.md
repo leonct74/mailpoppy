@@ -276,6 +276,33 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   - 🧹 Drive-by fix: the desktop **sidecar wasn't covered by the root `npm run typecheck`**, hiding a
     latent `ExclusiveStartKey` type error in `getMailboxStorage` — fixed (typed via the SDK's
     `AttributeValue`). Run `npm run typecheck -w @mailpoppy/desktop-sidecar` after sidecar changes.
+- ✅ **Custom MAIL FROM domain — SPF alignment / deliverability (2026-06-04)** — the concrete fix
+  for mail landing in Outlook/Hotmail Junk. By default SES uses its own Return-Path
+  (`…amazonses.com`), so a message passes DMARC on **DKIM alignment only** — SPF authenticates
+  amazonses.com, *not* the sender's domain. Pointing SES at a custom MAIL FROM subdomain
+  (`mail.<domain>`) with its own feedback MX + SPF TXT makes **SPF align too** (both DMARC pillars
+  pass), which strict providers reward.
+  - **Core** (`packages/core/src/mailFrom.ts`): `defaultMailFromDomain` (`mail.<domain>`),
+    `mailFromDnsRecords(domain, region)` (region-specific `10 feedback-smtp.<region>.amazonses.com`
+    MX + `v=spf1 include:amazonses.com ~all` TXT), `mailFromAlignment`
+    (aligned/pending/failed/not-configured). 7 unit tests.
+  - **Sidecar** (`provisioning.ts`): `getMailFromStatus` (GetEmailIdentity → MailFromAttributes) and
+    `setupMailFrom` (SESv2 `PutEmailIdentityMailFromAttributes` with
+    `BehaviorOnMxFailure=USE_DEFAULT_VALUE` so mail still sends if the MX ever fails, then writes the
+    MX + TXT to Route53; ledger-logged). Routes `GET /ses/mail-from/:domain` +
+    `POST /ses/mail-from`.
+  - **Desktop** (`views/MailFromSetup.tsx`, in the wizard's Sending-access section under
+    `SendingAccessView`): shows alignment state; when not-configured it previews the exact DNS
+    records and offers setup behind an **inline confirm** (it changes DNS); pending state has a
+    "Check verification status" button (SES verifies the MX async, minutes). `lib/mailFrom.ts`
+    client; injectable for tests (4 desktop tests).
+  - **IAM**: `+ses:PutEmailIdentityMailFromAttributes` (Route53 change perms already present);
+    re-validated → **no findings**.
+  - ✅ **Live-verified 2026-06-04** via the real sidecar route: `GET /ses/mail-from/ollydigital.com`
+    → `not-configured` (only `BehaviorOnMxFailure`), `POST` with no domain → 400. The **apply**
+    path (writes DNS) was **not** fired — it needs explicit user confirmation. **Measure the fix by
+    SPF *alignment* in headers (mail-tester.com / Gmail "Show original"), NOT by Outlook Junk
+    placement** — placement is reputation-dominated and won't flip from SPF alone.
 
 ## Architecture (concise)
 

@@ -301,6 +301,29 @@ app.post("/ses/production-access", async (req, reply) => {
   }
 });
 
+// Read-only: the domain's custom MAIL FROM configuration + verification status.
+app.get("/ses/mail-from/:domain", async (req, reply) => {
+  const domain = (req.params as { domain: string }).domain;
+  try {
+    return await prov.getMailFromStatus(ctx(), domain);
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
+// Mutating: configure a custom MAIL FROM subdomain (SPF alignment) — points the
+// SES identity at it and writes the feedback MX + SPF TXT to Route53. The UI
+// confirms first (it changes DNS).
+app.post("/ses/mail-from", async (req, reply) => {
+  const b = (req.body ?? {}) as { domain?: string; subdomain?: string };
+  if (!b.domain) return reply.code(400).send({ ok: false, error: "domain is required" });
+  try {
+    return await prov.setupMailFrom(ctx(), { domain: b.domain, subdomain: b.subdomain });
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
 // ---- Teardown: remove everything Mailpoppy deployed for a domain ----
 
 // Mutating + DESTRUCTIVE: deletes the stack, its RETAINed data (mail bucket,
