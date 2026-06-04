@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { sidecar } from "../lib/sidecar";
 import { createMailbox, listMailboxes, type Mailbox, type BackendInfo } from "../lib/mailbox";
 import { deployBackend, deployStatus, type DeployStatus } from "../lib/deploy";
-import { saveDeploymentConfig } from "../lib/deploymentConfig";
+import { saveDeploymentConfig, loadDeploymentConfig } from "../lib/deploymentConfig";
 import { MailboxStorageRow } from "./MailboxStorageRow";
 import { SendingAccessView } from "./SendingAccessView";
 import { MailFromSetup } from "./MailFromSetup";
 import { PolicyEditor } from "./PolicyEditor";
+import { RegionPicker } from "./RegionPicker";
+import { AdminPrivacyNotice } from "./AdminPrivacyNotice";
 
 // Phase 1 setup wizard.
 // Step 0 verifies the AWS environment (credentials + per-service permissions, + detects
@@ -399,6 +401,14 @@ export function SetupWizard() {
           </div>
         </div>
       )}
+
+      {/* ---- Privacy & responsibilities (reassuring, not scary) ---- */}
+      <AdminPrivacyNotice />
+
+      {/* ---- Data residency: choose the AWS region ---- */}
+      <section style={box}>
+        <RegionPicker lockedRegion={loadDeploymentConfig()?.region} />
+      </section>
 
       {/* ---- Step 0: AWS environment ---- */}
       <section style={box}>

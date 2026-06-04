@@ -398,6 +398,12 @@ This is the **highest, never-ending risk** — bigger than any AWS plumbing.
 - **Mail rules** — ✅ **done** (`views/PolicyEditor.tsx`, in the wizard): per-verdict actions
   (spam/auth-fail/virus → junk/tag/reject) + sender allow/block lists, enforced on inbound mail.
   See §10.
+- **Data residency** — ✅ **done** (`views/RegionPicker.tsx`): the admin chooses which AWS region
+  stores their mail (an SES-inbound region), to satisfy data-residency law. Locks once deployed.
+- **Privacy & responsibilities** — ✅ **done** (`views/AdminPrivacyNotice.tsx`): a reassuring panel
+  reminding the admin they're the data controller and how Mailpoppy helps (region, owner-only access,
+  retention, transparency). **Note:** BYO-AWS can't cryptographically exclude the account owner from
+  the data — we harden + audit + are transparent rather than claim true zero-knowledge.
 - **Admin panel:** domain setup wizard (the headline feature), health/verification dashboard
   (DKIM verified? out of sandbox? records correct?), mailbox-user management, policy panels,
   licensing.

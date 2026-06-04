@@ -355,6 +355,24 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
   - *(Catch-all was deliberately NOT built — discussed as an anti-pattern/backscatter+legal risk; the
     "reject unknown" behavior above is the chosen handling. Aliases — extra addresses → one mailbox —
     remain a possible later feature.)*
+- ✅ **Data-residency region picker + admin privacy guidance (2026-06-04)** — from the
+  agency-hosting-for-customers scenario. **Honest threat model first:** in BYO-AWS you *cannot*
+  cryptographically lock the account owner out of the mail (plaintext at SES ingestion + admin owns
+  KMS + admin controls the Lambda). So we do the achievable, valuable things and are transparent
+  about the rest.
+  - **Region selection** (`views/RegionPicker.tsx`, `lib/region.ts`): the admin picks which AWS
+    region stores their mail (data residency). Sidecar holds a module-level `currentRegion` (env
+    default) with `GET`/`POST /config/region` (validated against `SES_INBOUND_REGIONS`); `ctx()` uses
+    it. The choice persists in `localStorage` and is **re-applied to the sidecar on launch** (the
+    process resets to env otherwise). Locks to the deployed region once a backend exists (can't move
+    a stack). **Sidecar/frontend only — no Lambda redeploy.**
+  - **Admin privacy notice** (`views/AdminPrivacyNotice.tsx`): a **reassuring, not scary**
+    collapsible panel atop the wizard — "you're the data controller, here's how Mailpoppy helps":
+    you choose the region, mail belongs to its owner (don't access without authorization), you set
+    retention, nothing is hidden (Resources tab). Explicitly "guidance, not legal advice."
+  - 9 new desktop tests (RegionPicker 4 + AdminPrivacyNotice 2 + wiring). **Still TODO in this
+    thread:** configurable retention (admin window → janitor), hardening (least-privilege + CloudTrail
+    audit), Cognito self-service password-reset config.
 
 ## Architecture (concise)
 

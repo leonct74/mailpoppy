@@ -7,6 +7,7 @@ import Fastify from "fastify";
 import * as prov from "./provisioning";
 import * as migration from "./migration";
 import { readLedger } from "./ledger";
+import { SES_INBOUND_REGIONS } from "@mailpoppy/core";
 
 const app = Fastify({ logger: true });
 
@@ -36,12 +37,31 @@ app.addHook("onRequest", async (req, reply) => {
   }
 });
 
+// The active AWS region for provisioning. Starts from the env, but the admin can
+// change it from the wizard (data-residency) BEFORE deploying — the frontend
+// re-applies its saved choice on launch. Route53 stays global (pinned in clients()).
+let currentRegion = process.env.AWS_REGION ?? "eu-west-1";
+
 const ctx = (): prov.AwsContext => ({
-  region: process.env.AWS_REGION ?? "eu-west-1",
+  region: currentRegion,
   profile: process.env.AWS_PROFILE,
 });
 
 app.get("/health", async () => ({ ok: true }));
+
+// The active region + the regions where SES inbound is supported (the choices).
+app.get("/config/region", async () => ({ region: currentRegion, available: SES_INBOUND_REGIONS }));
+
+// Set the active region (must be an SES-inbound region). Applies to subsequent
+// provisioning/deploy calls; can't move an already-deployed stack.
+app.post("/config/region", async (req, reply) => {
+  const b = (req.body ?? {}) as { region?: string };
+  if (!b.region || !(SES_INBOUND_REGIONS as readonly string[]).includes(b.region)) {
+    return reply.code(400).send({ ok: false, error: `region must be one of: ${SES_INBOUND_REGIONS.join(", ")}` });
+  }
+  currentRegion = b.region;
+  return { ok: true, region: currentRegion };
+});
 
 // Step 0: is this environment able to provision at all? (credentials + per-service
 // permission probes + optional CLI detection). Run before anything mutating.
