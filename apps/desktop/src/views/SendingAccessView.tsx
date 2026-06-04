@@ -30,6 +30,18 @@ const btn = (disabled: boolean): React.CSSProperties => ({
   cursor: disabled ? "default" : "pointer",
 });
 
+const requiredBadge: React.CSSProperties = {
+  marginLeft: 8,
+  fontSize: 11,
+  fontWeight: 700,
+  color: "#b91c1c",
+  background: "#fee2e2",
+  border: "1px solid #fecaca",
+  borderRadius: 999,
+  padding: "2px 8px",
+  verticalAlign: "middle",
+};
+
 const DEFAULT_USE_CASE =
   "We use Amazon SES to host email for our own domain — sending and receiving normal " +
   "business correspondence for our staff mailboxes. Recipients are our own contacts and " +
@@ -114,7 +126,10 @@ export function SendingAccessView({ defaultWebsite, load, submit }: SendingAcces
 
   return (
     <section aria-label="Sending access">
-      <h2>Sending access (SES sandbox)</h2>
+      <h2>
+        Sending access (SES sandbox)
+        {showForm && <span style={requiredBadge}>Required to email anyone</span>}
+      </h2>
 
       {loading && <p style={{ fontSize: 14, color: "#666" }}>Checking your SES account…</p>}
 

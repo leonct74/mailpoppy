@@ -19,6 +19,8 @@ describe("SendingAccessView", () => {
 
     expect(await screen.findByText(/in the sandbox/i)).toBeInTheDocument();
     expect(screen.getByText(/Daily sending/i)).toBeInTheDocument();
+    // Sandbox is a hard blocker, not optional — flag it as required.
+    expect(screen.getByText(/Required to email anyone/i)).toBeInTheDocument();
     // Website prefilled from the domain being set up.
     expect(screen.getByLabelText("Website URL")).toHaveValue("https://ollydigital.com");
     expect(screen.getByRole("button", { name: /Request production access/i })).toBeInTheDocument();
@@ -30,6 +32,8 @@ describe("SendingAccessView", () => {
     expect(await screen.findByText(/Production access granted/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Request production access/i })).toBeNull();
     expect(screen.queryByLabelText("Website URL")).toBeNull();
+    // No "required" flag once you're already in production.
+    expect(screen.queryByText(/Required to email anyone/i)).toBeNull();
   });
 
   it("shows the under-review state when a request is pending", async () => {
