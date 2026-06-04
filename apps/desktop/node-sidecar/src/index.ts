@@ -278,6 +278,29 @@ app.get("/deploy/backend/:stackName/status", async (req) => {
   return prov.getDeployStatus(ctx(), stackName);
 });
 
+// ---- SES sandbox / production access (DESIGN §13) ----
+
+// Read-only: sandbox vs production, review status of any in-flight request, send quota.
+app.get("/ses/account", async (_req, reply) => {
+  try {
+    return await prov.getSesAccount(ctx());
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
+// Mutating: submit a production-access (sandbox-exit) request to AWS (opens a
+// Support case AWS reviews, ~24h). The UI confirms first. 400 on a bad request
+// (validated in core) so the user gets a clear message, not a raw SES error.
+app.post("/ses/production-access", async (req, reply) => {
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  try {
+    return await prov.requestProductionAccess(ctx(), b as unknown as Parameters<typeof prov.requestProductionAccess>[1]);
+  } catch (err) {
+    return reply.code(400).send({ ok: false, error: (err as Error).message });
+  }
+});
+
 // ---- Teardown: remove everything Mailpoppy deployed for a domain ----
 
 // Mutating + DESTRUCTIVE: deletes the stack, its RETAINed data (mail bucket,

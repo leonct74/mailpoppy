@@ -328,9 +328,19 @@ This is the **highest, never-ending risk** — bigger than any AWS plumbing.
 - **DNS auth:** correct SPF, DKIM (SES-managed keys), DMARC — set up automatically, then
   *verified* asynchronously (poll until SES confirms).
 - **SES sandbox:** every customer account starts sandboxed (send only to verified addresses).
-  **Production access is a manual AWS review, per account** — Mailpoppy can pre-fill and link
-  it, but can't click it. Design the UX around a "provisioned → pending verification/approval"
-  state.
+  **Production access is a manual AWS review, per account** — Mailpoppy can pre-fill and submit
+  the request, but AWS decides. ✅ **built + live-verified (2026-06-04)**: a "Sending access"
+  panel in the setup wizard (`views/SendingAccessView.tsx`) reads the account's posture via
+  SESv2 `GetAccount` and shows one of *sandbox / pending / production / denied / disabled* (pure
+  `sendingAccessState` in `@mailpoppy/core/sesAccount.ts`), with the live send quota. In the
+  sandbox/denied states it offers an in-app request form (mail type, website, use-case
+  description, language, extra contacts) validated in core, then submits via the sidecar
+  (`requestProductionAccess` → SESv2 `PutAccountDetails`, ledger-logged) behind an inline
+  confirm. IAM: provisioning policy gained `ses:GetAccount` (already present) + `ses:PutAccountDetails`
+  (re-validated, no findings). Live read on the real account confirmed the mapping
+  (`ProductionAccessEnabled` etc.); the submit path is unit-tested + core-validated (a bad request
+  is rejected 400 *before* any AWS call). *(Note: account 675546221165 is already in production,
+  so the form correctly shows the green "granted" state there.)*
 - **Reputation:** a fresh domain has none. Inbox placement (Gmail/Outlook) is an ongoing
   fight; consider guidance on warm-up and sending volume.
 - **Bounce/complaint handling + suppression** is mandatory once sending — neglect it and AWS
@@ -358,6 +368,9 @@ This is the **highest, never-ending risk** — bigger than any AWS plumbing.
 - **Per-mailbox storage** — ✅ **done**: usage bar in the inbox ("X% of Y used"; amber ≥80%, red
   "Full" ≥100%) + admin set/clear quota per mailbox in the management list. Enforced server-side
   (over-quota → bounce + NDR, see §10).
+- **Sending access (SES sandbox)** — ✅ **done** (`views/SendingAccessView.tsx`, in the wizard):
+  shows whether the account is in the SES sandbox or has production access (+ daily send quota),
+  and submits the production-access request in-app. See §13.
 - **Admin panel:** domain setup wizard (the headline feature), health/verification dashboard
   (DKIM verified? out of sandbox? records correct?), mailbox-user management, policy panels,
   licensing.
@@ -574,6 +587,8 @@ live-verified on ollydigital.com:**
   ✅ verified: over-quota mail bounced (NDR to sender), not stored, usage unchanged.
 - **Email-security transparency panel** (§14) so an admin can see the S3/mailbox protections at a
   glance — directly addresses the "is this as safe as WorkMail?" evaluation question.
+- **SES sandbox-exit flow** (2026-06-04) — in-app sending-access status + production-access
+  request (§13). The single biggest blocker between "demos live" and "I can send to anyone."
 - *(Also fixed in this pass: attachment send/receive — raw-MIME `Content.Raw` send so Gmail can
   open them, + `tauri-plugin-opener` and a fallback link so received attachments download. The
   "still failing" symptom was a **stale prebuilt sidecar binary** masking re-deploys — always

@@ -28,6 +28,8 @@ import {
   ListEmailIdentitiesCommand,
   DeleteEmailIdentityCommand,
   SendEmailCommand,
+  GetAccountCommand,
+  PutAccountDetailsCommand,
 } from "@aws-sdk/client-sesv2";
 import {
   SESClient,
@@ -55,8 +57,17 @@ import {
   GetItemCommand,
   PutItemCommand,
   DeleteItemCommand,
+  type AttributeValue,
 } from "@aws-sdk/client-dynamodb";
-import { mailboxPk, quotaSettingsKey, type MailboxStorage } from "@mailpoppy/core";
+import {
+  mailboxPk,
+  quotaSettingsKey,
+  validateProductionAccessRequest,
+  type MailboxStorage,
+  type SesAccountStatus,
+  type SesReviewStatus,
+  type ProductionAccessRequest,
+} from "@mailpoppy/core";
 import {
   CloudFormationClient,
   DescribeStackResourcesCommand,
@@ -577,6 +588,75 @@ export async function sendTest(
   return out.MessageId ?? "";
 }
 
+// ---- SES sandbox / production access (DESIGN §13) ----
+
+/**
+ * Read-only: the account's SES sending posture — sandbox vs production, the
+ * review status of any in-flight request, and the current send quota. SES starts
+ * every account in a sandbox (verified recipients only, ~200/day) until AWS
+ * grants production access via a manual review.
+ */
+export async function getSesAccount(ctx: AwsContext): Promise<SesAccountStatus> {
+  const { sesv2 } = clients(ctx);
+  const out = await sesv2.send(new GetAccountCommand({}));
+  const q = out.SendQuota;
+  return {
+    productionAccessEnabled: !!out.ProductionAccessEnabled,
+    sendingEnabled: !!out.SendingEnabled,
+    enforcementStatus: out.EnforcementStatus,
+    reviewStatus: out.Details?.ReviewDetails?.Status as SesReviewStatus | undefined,
+    mailType: out.Details?.MailType,
+    sendQuota: q
+      ? {
+          max24Hour: q.Max24HourSend ?? 0,
+          maxSendRate: q.MaxSendRate ?? 0,
+          sentLast24Hours: q.SentLast24Hours ?? 0,
+        }
+      : undefined,
+  };
+}
+
+/**
+ * Mutating: submit a production-access (sandbox-exit) request to AWS. This opens
+ * an AWS Support case the admin's account owner can track; AWS reviews it
+ * (typically within 24h). The UI confirms first. Validated locally so we fail
+ * fast with a clear message instead of a generic SES ValidationException.
+ * Returns the refreshed account status (review should now be PENDING).
+ */
+export async function requestProductionAccess(
+  ctx: AwsContext,
+  req: ProductionAccessRequest,
+): Promise<SesAccountStatus> {
+  const problems = validateProductionAccessRequest(req);
+  if (problems.length) throw new Error(problems.join(" "));
+
+  const { sesv2 } = clients(ctx);
+  const extra = (req.additionalContactEmails ?? []).map((e) => e.trim()).filter(Boolean);
+  await sesv2.send(
+    new PutAccountDetailsCommand({
+      MailType: req.mailType,
+      WebsiteURL: req.websiteUrl.trim(),
+      ContactLanguage: req.contactLanguage,
+      UseCaseDescription: req.useCaseDescription.trim(),
+      AdditionalContactEmailAddresses: extra.length ? extra : undefined,
+      ProductionAccessEnabled: true,
+    }),
+  );
+
+  await record([
+    {
+      action: "created",
+      service: "SES",
+      resourceType: "Production access request",
+      name: `SES production access (${ctx.region})`,
+      region: ctx.region,
+      detail: `mailType=${req.mailType}, site=${req.websiteUrl.trim()}`,
+    },
+  ]);
+
+  return getSesAccount(ctx);
+}
+
 // ---- Environment readiness (run BEFORE provisioning, so setup never fails midway) ----
 
 export interface Readiness {
@@ -673,7 +753,7 @@ export async function getMailboxStorage(
   const pk = mailboxPk(email);
   let usedBytes = 0;
   let messageCount = 0;
-  let ExclusiveStartKey: Record<string, { S?: string }> | undefined;
+  let ExclusiveStartKey: Record<string, AttributeValue> | undefined;
   do {
     const out = await dynamodb.send(
       new QueryCommand({
@@ -688,7 +768,7 @@ export async function getMailboxStorage(
       usedBytes += Number(item.sizeBytes?.N ?? 0);
       messageCount += 1;
     }
-    ExclusiveStartKey = out.LastEvaluatedKey as Record<string, { S?: string }> | undefined;
+    ExclusiveStartKey = out.LastEvaluatedKey;
   } while (ExclusiveStartKey);
 
   let quotaBytes: number | null = null;

@@ -252,6 +252,30 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
     set quota = 3676 (full) → a second message was **blocked from the inbox**, the sender received an
     "Undeliverable" NDR, and usage stayed unchanged. Throwaway test mailboxes deleted afterward
     (only `marco@` remains).
+- ✅ **SES sandbox-exit (production access) flow (2026-06-04)** — the single biggest blocker
+  between "demos live" and "send real mail to anyone." SES starts every account in a sandbox
+  (verified recipients only, ~200/day) until AWS grants production access via a manual review.
+  - **Core** (`packages/core/src/sesAccount.ts`): pure `sendingAccessState` → one of
+    *sandbox / pending / production / denied / disabled / unknown*; `validateProductionAccessRequest`
+    (URL, ≥30-char use-case, language, contact emails). 13 unit tests.
+  - **Sidecar** (`provisioning.ts`): `getSesAccount` (SESv2 `GetAccount` → normalized status +
+    send quota) and `requestProductionAccess` (validates in core, then SESv2 `PutAccountDetails`
+    with `ProductionAccessEnabled:true`, ledger-logged). Routes `GET /ses/account` +
+    `POST /ses/production-access` (400 on a bad request, *before* any AWS call).
+  - **Desktop** (`views/SendingAccessView.tsx`, mounted in the wizard): status banner per state +
+    live send quota; in sandbox/denied it shows a request form (mail type, website, use-case,
+    language, extra contacts) with an **inline confirm** (webview-safe, no `window.confirm`).
+    `lib/sesAccount.ts` client; injectable `load`/`submit` for tests (5 desktop tests).
+  - **IAM**: provisioning policy gained `ses:PutAccountDetails` (`ses:GetAccount` already present);
+    re-validated with `accessanalyzer validate-policy` → **no findings**.
+  - ✅ **Live-verified 2026-06-04** via the real sidecar route: `GET /ses/account` returned the
+    correctly-mapped status, and an invalid `POST /ses/production-access` was rejected **400 with no
+    AWS call**. The real account (675546221165) is **already in production** (`ProductionAccessEnabled:
+    true`, 50k/day) → the panel correctly shows the green "granted" state. The *submit* path was
+    **not** fired live (it opens a real AWS Support case, and the account is already production).
+  - 🧹 Drive-by fix: the desktop **sidecar wasn't covered by the root `npm run typecheck`**, hiding a
+    latent `ExclusiveStartKey` type error in `getMailboxStorage` — fixed (typed via the SDK's
+    `AttributeValue`). Run `npm run typecheck -w @mailpoppy/desktop-sidecar` after sidecar changes.
 
 ## Architecture (concise)
 

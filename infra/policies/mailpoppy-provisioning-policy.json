@@ -29,6 +29,7 @@
         "ses:ListEmailIdentities",
         "ses:DeleteEmailIdentity",
         "ses:GetAccount",
+        "ses:PutAccountDetails",
         "ses:SendEmail",
         "ses:CreateReceiptRuleSet",
         "ses:CreateReceiptRule",
