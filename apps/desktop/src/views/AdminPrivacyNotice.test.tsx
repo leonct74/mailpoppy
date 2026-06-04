@@ -11,6 +11,8 @@ describe("AdminPrivacyNotice", () => {
   it("explains the admin's responsibilities in a reassuring way", () => {
     render(<AdminPrivacyNotice />);
     expect(screen.getByText(/data controller/i)).toBeInTheDocument();
+    // The #1 admin concern: credentials are never copied off the machine.
+    expect(screen.getByText(/Your AWS keys never leave your computer/i)).toBeInTheDocument();
     expect(screen.getByText(/You choose where data lives/i)).toBeInTheDocument();
     expect(screen.getByText(/Mail belongs to its owner/i)).toBeInTheDocument();
     expect(screen.getByText(/not legal advice/i)).toBeInTheDocument();

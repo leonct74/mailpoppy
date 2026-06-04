@@ -16,6 +16,8 @@ function initialOpen(): boolean {
   }
 }
 
+const mono: React.CSSProperties = { fontFamily: "ui-monospace, monospace" };
+
 const panel: React.CSSProperties = {
   border: "1px solid #bfdbfe",
   background: "#eff6ff",
@@ -56,6 +58,13 @@ export function AdminPrivacyNotice() {
             that responsibly:
           </p>
           <ul style={{ margin: "0 0 10px", paddingLeft: 22 }}>
+            <li>
+              <b>Your AWS keys never leave your computer.</b> Mailpoppy reads your AWS credentials the same way the AWS
+              CLI does — from your machine's own configuration (your <code style={mono}>~/.aws</code> profile, SSO, or
+              environment) — and uses them <b>locally</b> to act on your account. It does <b>not</b> copy, upload, or
+              store them anywhere — not on Mailpoppy's servers, not in any cloud. The helper that uses them runs only on
+              your own computer, and every AWS action goes straight from your machine to your account.
+            </li>
             <li>
               <b>You choose where data lives.</b> Pick the AWS region below to match any data-residency rules that apply
               to your users (for example, an EU region for EU personal data).
