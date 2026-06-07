@@ -372,6 +372,32 @@ app.post("/policy/spam", async (req, reply) => {
   }
 });
 
+// ---- Retention (how long mail is kept) ----
+
+app.get("/policy/retention/:stackName", async (req, reply) => {
+  const stackName = (req.params as { stackName: string }).stackName;
+  try {
+    return await prov.getRetention(ctx(), { stackName });
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
+app.post("/policy/retention", async (req, reply) => {
+  const b = (req.body ?? {}) as { stackName?: string; retention?: unknown };
+  if (!b.retention || typeof b.retention !== "object") {
+    return reply.code(400).send({ ok: false, error: "retention is required" });
+  }
+  try {
+    return await prov.setRetention(ctx(), {
+      stackName: b.stackName,
+      retention: b.retention as Parameters<typeof prov.setRetention>[1]["retention"],
+    });
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
 // ---- Teardown: remove everything Mailpoppy deployed for a domain ----
 
 // Mutating + DESTRUCTIVE: deletes the stack, its RETAINed data (mail bucket,

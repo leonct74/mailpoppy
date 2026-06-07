@@ -121,6 +121,9 @@ export class MailStack extends Stack {
       standardAttributes: { email: { required: true, mutable: true } },
       customAttributes: { aliases: new cognito.StringAttribute({ mutable: true }) },
       mfa: cognito.Mfa.OPTIONAL,
+      // Self-service password reset by email: the user sets their own password, so
+      // the admin never learns it. (The forgot-password UI lands with the mail client.)
+      accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
       removalPolicy: RemovalPolicy.RETAIN,
     });
     const userPoolClient = userPool.addClient("DesktopMobileClient", {
@@ -180,10 +183,12 @@ export class MailStack extends Stack {
 
     const janitor = fn("Janitor", "janitor", {
       INDEX_TABLE: indexTable.tableName,
+      SETTINGS_TABLE: settingsTable.tableName,
       MAIL_BUCKET: mailBucket.bucketName,
     });
     indexTable.grantReadWriteData(janitor);
     mailBucket.grantReadWrite(janitor);
+    settingsTable.grantReadData(janitor); // read the admin's retention settings
 
     const suppression = fn("Suppression", "suppression", {
       SETTINGS_TABLE: settingsTable.tableName,

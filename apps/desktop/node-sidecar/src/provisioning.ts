@@ -68,6 +68,8 @@ import {
   mailFromDnsRecords,
   policySettingsKey,
   normalizeSpamPolicy,
+  retentionSettingsKey,
+  normalizeRetention,
   type MailboxStorage,
   type SesAccountStatus,
   type SesReviewStatus,
@@ -76,6 +78,7 @@ import {
   type MailFromStatus,
   type DnsRecord,
   type SpamPolicy,
+  type RetentionSettings,
 } from "@mailpoppy/core";
 import {
   CloudFormationClient,
@@ -930,6 +933,47 @@ export async function setSpamPolicy(
     }),
   );
   return { ok: true, policy };
+}
+
+// ---- Retention (admin: how long mail is kept, DESIGN §10) ----
+
+/** Read the deployment's retention settings (defaults if unset). */
+export async function getRetention(ctx: AwsContext, args: { stackName?: string }): Promise<RetentionSettings> {
+  const { dynamodb } = clients(ctx);
+  const stackName = args.stackName ?? "MailpoppyMailStack";
+  const outputs = await getStackOutputs(ctx, stackName);
+  const settingsTable = await resolveSettingsTableName(ctx, stackName, outputs);
+  if (!settingsTable) return normalizeRetention(null);
+  const out = await dynamodb.send(
+    new GetItemCommand({ TableName: settingsTable, Key: { pk: { S: retentionSettingsKey() } } }),
+  );
+  const json = out.Item?.json?.S;
+  try {
+    return normalizeRetention(json ? (JSON.parse(json) as Partial<RetentionSettings>) : null);
+  } catch {
+    return normalizeRetention(null);
+  }
+}
+
+/** Write the deployment's retention settings (normalized) to the settings table. */
+export async function setRetention(
+  ctx: AwsContext,
+  args: { stackName?: string; retention: Partial<RetentionSettings> },
+): Promise<{ ok: true; retention: RetentionSettings }> {
+  const { dynamodb } = clients(ctx);
+  const stackName = args.stackName ?? "MailpoppyMailStack";
+  const outputs = await getStackOutputs(ctx, stackName);
+  const settingsTable = await resolveSettingsTableName(ctx, stackName, outputs);
+  if (!settingsTable) throw new Error("settings table not found — re-deploy the backend to enable retention");
+
+  const retention = normalizeRetention(args.retention);
+  await dynamodb.send(
+    new PutItemCommand({
+      TableName: settingsTable,
+      Item: { pk: { S: retentionSettingsKey() }, json: { S: JSON.stringify(retention) } },
+    }),
+  );
+  return { ok: true, retention };
 }
 
 // ---- Teardown: remove everything Mailpoppy deployed (the inverse of deploy + provision) ----

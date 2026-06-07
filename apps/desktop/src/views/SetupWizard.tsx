@@ -7,6 +7,7 @@ import { MailboxStorageRow } from "./MailboxStorageRow";
 import { SendingAccessView } from "./SendingAccessView";
 import { MailFromSetup } from "./MailFromSetup";
 import { PolicyEditor } from "./PolicyEditor";
+import { RetentionEditor } from "./RetentionEditor";
 import { RegionPicker } from "./RegionPicker";
 import { AdminPrivacyNotice } from "./AdminPrivacyNotice";
 
@@ -718,6 +719,13 @@ export function SetupWizard() {
       {ready && !mbNoBackend && (
         <section style={box}>
           <PolicyEditor stackName={stackName} />
+        </section>
+      )}
+
+      {/* ---- Retention: how long mail is kept ---- */}
+      {ready && !mbNoBackend && (
+        <section style={box}>
+          <RetentionEditor stackName={stackName} />
         </section>
       )}
     </>
