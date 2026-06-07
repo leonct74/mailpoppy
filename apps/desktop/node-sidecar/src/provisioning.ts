@@ -58,10 +58,14 @@ import {
   GetItemCommand,
   PutItemCommand,
   DeleteItemCommand,
+  BatchWriteItemCommand,
   type AttributeValue,
+  type WriteRequest,
+  type BatchWriteItemCommandOutput,
 } from "@aws-sdk/client-dynamodb";
 import {
   mailboxPk,
+  addressDomain,
   quotaSettingsKey,
   validateProductionAccessRequest,
   defaultMailFromDomain,
@@ -94,10 +98,11 @@ import {
   CognitoIdentityProviderClient,
   AdminCreateUserCommand,
   AdminSetUserPasswordCommand,
+  AdminDeleteUserCommand,
   ListUsersCommand,
   DeleteUserPoolCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
-import { record, type LedgerEntry } from "./ledger";
+import { record, readLedger, type LedgerEntry } from "./ledger";
 
 export interface AwsContext {
   region: string;
@@ -894,6 +899,134 @@ export async function setMailboxQuota(
   return { ok: true, email, quotaBytes: null };
 }
 
+export interface MailboxDeletion {
+  email: string;
+  userDeleted: boolean;
+  deletedMessages: number;
+  deletedObjects: number;
+  freedBytes: number;
+}
+
+/**
+ * Permanently delete a single mailbox: its Cognito sign-in user AND all of its
+ * stored mail (DynamoDB index rows + the raw .eml / attachment objects in S3) +
+ * its quota setting. Irreversible. Mail is keyed solely by the owning address,
+ * so we enumerate the mailbox's partition, delete the referenced S3 objects,
+ * then the rows. The Cognito user is removed LAST so a failure mid-way leaves
+ * the user (and the UI listing) intact to retry, rather than an unreachable
+ * orphan of mail.
+ */
+export async function deleteMailbox(
+  ctx: AwsContext,
+  args: { stackName?: string; email: string },
+): Promise<MailboxDeletion> {
+  const { dynamodb, s3, cognito } = clients(ctx);
+  const stackName = args.stackName ?? "MailpoppyMailStack";
+  const email = args.email.trim().toLowerCase();
+  const outputs = await getStackOutputs(ctx, stackName);
+  const indexTable = outputs.IndexTableName;
+  const bucket = outputs.MailBucketName;
+  const userPoolId = outputs.UserPoolId;
+  if (!indexTable) throw new Error("IndexTableName not found in stack outputs");
+  if (!userPoolId) throw new Error("UserPoolId not found in stack outputs");
+
+  const pk = mailboxPk(email);
+
+  // 1. Enumerate the mailbox's messages: sort keys (to delete index rows), the
+  //    S3 object keys (raw .eml + each attachment), and total bytes freed.
+  const sortKeys: string[] = [];
+  const objectKeys = new Set<string>();
+  let freedBytes = 0;
+  let ExclusiveStartKey: Record<string, AttributeValue> | undefined;
+  do {
+    const out = await dynamodb.send(
+      new QueryCommand({
+        TableName: indexTable,
+        KeyConditionExpression: "pk = :pk",
+        ExpressionAttributeValues: { ":pk": { S: pk } },
+        ProjectionExpression: "sk, s3Key, sizeBytes, attachments",
+        ExclusiveStartKey,
+      }),
+    );
+    for (const item of out.Items ?? []) {
+      if (item.sk?.S) sortKeys.push(item.sk.S);
+      if (item.s3Key?.S) objectKeys.add(item.s3Key.S);
+      freedBytes += Number(item.sizeBytes?.N ?? 0);
+      for (const a of item.attachments?.L ?? []) {
+        const k = a.M?.s3Key?.S;
+        if (k) objectKeys.add(k);
+      }
+    }
+    ExclusiveStartKey = out.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+
+  // 2. Delete the S3 objects (up to 1000 keys per request).
+  let deletedObjects = 0;
+  if (bucket && objectKeys.size > 0) {
+    const keys = [...objectKeys];
+    for (let i = 0; i < keys.length; i += 1000) {
+      const chunk = keys.slice(i, i + 1000);
+      await s3.send(
+        new DeleteObjectsCommand({
+          Bucket: bucket,
+          Delete: { Objects: chunk.map((Key) => ({ Key })), Quiet: true },
+        }),
+      );
+      deletedObjects += chunk.length;
+    }
+  }
+
+  // 3. Delete the index rows (25 per BatchWriteItem; retry UnprocessedItems).
+  for (let i = 0; i < sortKeys.length; i += 25) {
+    const requests: WriteRequest[] = sortKeys
+      .slice(i, i + 25)
+      .map((sk) => ({ DeleteRequest: { Key: { pk: { S: pk }, sk: { S: sk } } } }));
+    let requestItems: Record<string, WriteRequest[]> = { [indexTable]: requests };
+    let attempts = 0;
+    while (Object.keys(requestItems).length > 0 && attempts < 8) {
+      const res: BatchWriteItemCommandOutput = await dynamodb.send(
+        new BatchWriteItemCommand({ RequestItems: requestItems }),
+      );
+      requestItems = res.UnprocessedItems ?? {};
+      attempts++;
+    }
+  }
+
+  // 4. Delete the mailbox's quota setting doc (best-effort).
+  try {
+    const settingsTable = await resolveSettingsTableName(ctx, stackName, outputs);
+    if (settingsTable) {
+      await dynamodb.send(
+        new DeleteItemCommand({ TableName: settingsTable, Key: { pk: { S: quotaSettingsKey(email) } } }),
+      );
+    }
+  } catch {
+    // non-fatal — a left-over quota row is harmless
+  }
+
+  // 5. Delete the Cognito sign-in user LAST (see doc comment).
+  let userDeleted = false;
+  try {
+    await cognito.send(new AdminDeleteUserCommand({ UserPoolId: userPoolId, Username: email }));
+    userDeleted = true;
+  } catch (e) {
+    if (!/UserNotFound/i.test((e as Error).name ?? "")) throw e;
+  }
+
+  await record([
+    {
+      action: "deleted",
+      service: "Cognito",
+      resourceType: "Mailbox",
+      name: email,
+      region: ctx.region,
+      detail: `removed sign-in + ${sortKeys.length} stored messages (${deletedObjects} S3 objects)`,
+    },
+  ]);
+
+  return { email, userDeleted, deletedMessages: sortKeys.length, deletedObjects, freedBytes };
+}
+
 // ---- Spam / auth policy (admin: allow-block lists + per-verdict actions, DESIGN §10) ----
 
 /** Read the deployment's spam/auth policy from the settings table (defaults if unset). */
@@ -981,9 +1114,69 @@ export async function setRetention(
 export interface TeardownResult {
   ok: true;
   domain: string;
+  domains: string[]; // every provisioned domain whose SES identity + DNS was cleaned
   stackName: string;
   deleted: string[]; // human-readable list of what was removed
   warnings: string[]; // non-fatal issues the user should know about
+}
+
+/**
+ * Best-effort discovery of EVERY domain this backend was provisioned for, so
+ * teardown cleans each one's SES identity + DNS — not just a single "primary"
+ * domain. The local ledger can be incomplete (e.g. a domain set up from another
+ * machine), so we union several live signals and tolerate any of them being gone:
+ *   - the address domains of the backend's mailboxes (Cognito users)
+ *   - the recipients of our active SES receipt rule set
+ *   - SES EmailIdentity entries recorded in the local provisioning ledger
+ */
+export async function discoverProvisionedDomains(ctx: AwsContext, stackName: string): Promise<string[]> {
+  const { cognito, ses } = clients(ctx);
+  const domains = new Set<string>();
+  const add = (raw?: string | null) => {
+    if (!raw) return;
+    const v = raw.trim().toLowerCase();
+    const d = v.includes("@") ? addressDomain(v) : v;
+    if (d && d.includes(".")) domains.add(d);
+  };
+
+  // Mailbox (Cognito user) address domains.
+  try {
+    const outputs = await getStackOutputs(ctx, stackName);
+    if (outputs.UserPoolId) {
+      let token: string | undefined;
+      do {
+        const out = await cognito.send(
+          new ListUsersCommand({ UserPoolId: outputs.UserPoolId, Limit: 60, PaginationToken: token }),
+        );
+        for (const u of out.Users ?? []) add(u.Attributes?.find((a) => a.Name === "email")?.Value ?? u.Username);
+        token = out.PaginationToken;
+      } while (token);
+    }
+  } catch {
+    // stack/pool may be gone (e.g. a re-run after partial teardown) — ignore
+  }
+
+  // Recipients of our active SES receipt rule set.
+  try {
+    const active = await ses.send(new DescribeActiveReceiptRuleSetCommand({}));
+    const name = active.Metadata?.Name;
+    if (name && /mailpoppy|MailRuleSet/i.test(name)) {
+      for (const rule of active.Rules ?? []) for (const r of rule.Recipients ?? []) add(r);
+    }
+  } catch {
+    // no active rule set — ignore
+  }
+
+  // SES identities recorded in the local ledger.
+  try {
+    for (const e of await readLedger()) {
+      if (e.service === "SES" && e.resourceType === "EmailIdentity" && e.action === "created") add(e.name);
+    }
+  } catch {
+    // missing/corrupt ledger — ignore
+  }
+
+  return [...domains].sort();
 }
 
 /** Empty a bucket (all objects + versions) then delete it. Returns false if it didn't exist. */
@@ -1061,12 +1254,29 @@ async function removeDnsRecords(ctx: AwsContext, domain: string): Promise<string
     });
   };
 
+  const isAmazonSesSpf = (v: string) => /v=spf1/.test(v) && /include:amazonses\.com/.test(v);
+
+  // First pass: identify custom MAIL FROM subdomains (any name carrying a
+  // "feedback-smtp.*.amazonses.com" MX). Their MX + SPF TXT must be removed too —
+  // the SPF-alignment / MAIL FROM setup publishes records under e.g. mail.<domain>.
+  const mailFromNames = new Set<string>();
+  for (const r of all) {
+    if (r.Type === "MX" && (r.ResourceRecords ?? []).some((x) => /feedback-smtp\..*amazonses\.com/.test(x.Value ?? ""))) {
+      if (r.Name) mailFromNames.add(r.Name);
+    }
+  }
+
   for (const r of all) {
     const records = r.ResourceRecords ?? [];
     // SES inbound MX at the apex.
     if (r.Name === apex && r.Type === "MX" && records.some((x) => /inbound-smtp\..*amazonaws\.com/.test(x.Value ?? ""))) {
       del(r);
       removed.push(`MX ${domain}`);
+    }
+    // Custom MAIL FROM MX (e.g. mail.<domain> → feedback-smtp.*.amazonses.com).
+    else if (r.Type === "MX" && records.some((x) => /feedback-smtp\..*amazonses\.com/.test(x.Value ?? ""))) {
+      del(r);
+      removed.push(`MAIL FROM MX ${r.Name?.replace(/\.$/, "")}`);
     }
     // DMARC TXT.
     else if (r.Name === dmarc && r.Type === "TXT") {
@@ -1081,6 +1291,20 @@ async function removeDnsRecords(ctx: AwsContext, domain: string): Promise<string
     ) {
       del(r);
       removed.push(`DKIM CNAME ${r.Name.replace(/\.$/, "")}`);
+    }
+    // SPF TXT on a MAIL FROM subdomain (strip the amazonses SPF; keep anything else).
+    else if (r.Name && mailFromNames.has(r.Name) && r.Type === "TXT" && records.some((x) => isAmazonSesSpf(x.Value ?? ""))) {
+      const keep = records.filter((x) => !isAmazonSesSpf(x.Value ?? ""));
+      if (keep.length === 0) {
+        del(r);
+        removed.push(`MAIL FROM SPF TXT ${r.Name.replace(/\.$/, "")}`);
+      } else {
+        changes.push({
+          Action: "UPSERT",
+          ResourceRecordSet: { Name: r.Name, Type: "TXT", TTL: r.TTL ?? 300, ResourceRecords: keep },
+        });
+        removed.push(`SPF value from TXT ${r.Name.replace(/\.$/, "")}`);
+      }
     }
     // Apex TXT: strip only the amazonses SPF value, keep everything else.
     else if (r.Name === apex && r.Type === "TXT") {
@@ -1159,6 +1383,14 @@ export async function teardownAll(
     warnings.push(`stack ${stackName} not found — cleaning up any remaining known resources`);
   }
 
+  // 1b. Discover EVERY provisioned domain BEFORE we delete the stack / pool /
+  //     rule set (we read those as discovery signals). Always include the typed
+  //     domain. This ensures a second provisioned domain (e.g. one set up from
+  //     another machine, absent from the local ledger) isn't left orphaned.
+  const domainsToClean = new Set<string>();
+  if (domain) domainsToClean.add(domain);
+  for (const d of await discoverProvisionedDomains(ctx, stackName)) domainsToClean.add(d);
+
   // 2. Deactivate the SES receipt rule set if ours is active (CloudFormation can't
   //    delete an active rule set, and inbound mail should stop now).
   try {
@@ -1233,26 +1465,31 @@ export async function teardownAll(
     }
   }
 
-  // 6. Delete the SES domain identity.
-  try {
-    await sesv2.send(new DeleteEmailIdentityCommand({ EmailIdentity: domain }));
-    deleted.push(`SES domain identity ${domain}`);
-    ledger.push({ action: "deleted", service: "SES", resourceType: "EmailIdentity", name: domain, region });
-  } catch (e) {
-    if (!/NotFound/i.test((e as Error).name ?? "")) warnings.push(`SES identity: ${(e as Error).message}`);
+  // 6. Delete the SES domain identity for EVERY provisioned domain.
+  for (const d of domainsToClean) {
+    try {
+      await sesv2.send(new DeleteEmailIdentityCommand({ EmailIdentity: d }));
+      deleted.push(`SES domain identity ${d}`);
+      ledger.push({ action: "deleted", service: "SES", resourceType: "EmailIdentity", name: d, region });
+    } catch (e) {
+      if (!/NotFound/i.test((e as Error).name ?? "")) warnings.push(`SES identity ${d}: ${(e as Error).message}`);
+    }
   }
 
-  // 7. Remove the DNS records (MX / DMARC / DKIM CNAMEs / amazonses SPF).
-  try {
-    const removed = await removeDnsRecords(ctx, domain);
-    for (const d of removed) {
-      deleted.push(`Route53 ${d}`);
-      ledger.push({ action: "deleted", service: "Route53", resourceType: "DNS", name: d, region });
+  // 7. Remove the DNS records (MX / DMARC / DKIM CNAMEs / amazonses SPF) for
+  //    every provisioned domain. Each domain's hosted zone is cleaned independently.
+  for (const d of domainsToClean) {
+    try {
+      const removed = await removeDnsRecords(ctx, d);
+      for (const desc of removed) {
+        deleted.push(`Route53 ${desc}`);
+        ledger.push({ action: "deleted", service: "Route53", resourceType: "DNS", name: desc, region });
+      }
+    } catch (e) {
+      warnings.push(`DNS cleanup ${d}: ${(e as Error).message}`);
     }
-  } catch (e) {
-    warnings.push(`DNS cleanup: ${(e as Error).message}`);
   }
 
   await record(ledger);
-  return { ok: true, domain, stackName, deleted, warnings };
+  return { ok: true, domain, domains: [...domainsToClean], stackName, deleted, warnings };
 }

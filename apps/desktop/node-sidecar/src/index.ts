@@ -247,6 +247,22 @@ app.post("/mailbox/create", async (req, reply) => {
   }
 });
 
+// Delete a mailbox: its Cognito sign-in user AND all of its stored mail
+// (S3 + DynamoDB). Irreversible — the UI gates this behind a typed confirmation.
+app.post("/mailbox/delete", async (req, reply) => {
+  const b = (req.body ?? {}) as { stackName?: string; email?: string };
+  if (!b.email) return reply.code(400).send({ ok: false, error: "email is required" });
+  const stackName = b.stackName ?? "MailpoppyMailStack";
+  const backend = await resolveBackend(stackName);
+  if (!backend) return reply.code(404).send({ ok: false, error: NO_BACKEND });
+  try {
+    const result = await prov.deleteMailbox(ctx(), { stackName, email: b.email });
+    return { ok: true, ...result };
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
 // ---- Mailbox storage quotas (admin) ----
 
 // Read a mailbox's current storage usage + quota (for "X% of Y used").
@@ -399,6 +415,18 @@ app.post("/policy/retention", async (req, reply) => {
 });
 
 // ---- Teardown: remove everything Mailpoppy deployed for a domain ----
+
+// Read-only: every domain this backend was provisioned for (so the teardown
+// confirmation can list them all — DNS/SES is removed for each).
+app.get("/teardown/domains/:stackName", async (req, reply) => {
+  const stackName = (req.params as { stackName: string }).stackName;
+  try {
+    const domains = await prov.discoverProvisionedDomains(ctx(), stackName);
+    return { ok: true, domains };
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
 
 // Mutating + DESTRUCTIVE: deletes the stack, its RETAINed data (mail bucket,
 // DynamoDB tables, Cognito pool), the deploy bucket, the SES identity and the

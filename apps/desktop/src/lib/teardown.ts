@@ -6,6 +6,7 @@ import { sidecar } from "./sidecar";
 export interface TeardownResult {
   ok: true;
   domain: string;
+  domains: string[];
   stackName: string;
   deleted: string[];
   warnings: string[];
@@ -21,4 +22,9 @@ export function teardownEverything(input: {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
+}
+
+/** Read-only: every domain the backend was provisioned for (DNS/SES cleanup targets). */
+export function listProvisionedDomains(stackName: string): Promise<{ ok: true; domains: string[] }> {
+  return sidecar(`/teardown/domains/${encodeURIComponent(stackName)}`);
 }

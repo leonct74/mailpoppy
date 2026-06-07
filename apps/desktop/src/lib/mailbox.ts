@@ -34,3 +34,21 @@ export function createMailbox(input: {
     body: JSON.stringify(input),
   });
 }
+
+export interface MailboxDeletion {
+  ok: true;
+  email: string;
+  userDeleted: boolean;
+  deletedMessages: number;
+  deletedObjects: number;
+  freedBytes: number;
+}
+
+/** Permanently delete a mailbox: its sign-in user AND all its stored mail. */
+export function deleteMailbox(input: { email: string; stackName?: string }): Promise<MailboxDeletion> {
+  return sidecar(`/mailbox/delete`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}

@@ -704,7 +704,13 @@ export function SetupWizard() {
               ) : (
                 <ul style={{ margin: "8px 0 0", padding: 0 }}>
                   {mailboxes.map((m) => (
-                    <MailboxStorageRow key={m.email} email={m.email} status={m.status} stackName={stackName} />
+                    <MailboxStorageRow
+                      key={m.email}
+                      email={m.email}
+                      status={m.status}
+                      stackName={stackName}
+                      onDeleted={() => void loadMailboxes()}
+                    />
                   ))}
                 </ul>
               )}

@@ -71,11 +71,41 @@ describe("ResourcesView", () => {
     const teardown = vi.fn(async () => ({
       ok: true as const,
       domain: "ollydigital.com",
+      domains: ["boxord.com", "ollydigital.com"],
       stackName: "MailpoppyMailStack",
       deleted: ["CloudFormation stack MailpoppyMailStack", "S3 bucket mailpoppy-bucket-abc"],
       warnings: [],
     }));
-    render(<ResourcesView load={vi.fn(async () => POPULATED)} teardown={teardown} />);
+    const listMailboxes = vi.fn(async () => ({
+      mailboxes: [
+        { email: "marco@ollydigital.com", status: "CONFIRMED" },
+        { email: "support@boxord.com", status: "CONFIRMED" },
+      ],
+    }));
+    const listDomains = vi.fn(async () => ({ domains: ["boxord.com", "ollydigital.com"] }));
+    render(
+      <ResourcesView
+        load={vi.fn(async () => POPULATED)}
+        teardown={teardown}
+        listMailboxes={listMailboxes}
+        listDomains={listDomains}
+      />,
+    );
+
+    // The danger zone is collapsed by default — the destructive control is hidden
+    // until the admin expands it.
+    await screen.findByRole("button", { name: "Toggle danger zone" });
+    expect(screen.queryByRole("button", { name: "Remove everything" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Toggle danger zone" }));
+
+    // It lists EVERY mailbox that will be destroyed, across all domains — so the
+    // imported boxord.com mailbox is named even though the prompt asks for ollydigital.com.
+    expect(await screen.findByText("support@boxord.com")).toBeInTheDocument();
+    expect(screen.getByText("marco@ollydigital.com")).toBeInTheDocument();
+    expect(screen.getByText(/across every domain/i)).toBeInTheDocument();
+    // …and it lists every provisioned domain whose DNS/SES will be removed.
+    expect(await screen.findByText(/every provisioned domain/i)).toBeInTheDocument();
+    expect(screen.getByText("boxord.com")).toBeInTheDocument();
 
     const btn = await screen.findByRole("button", { name: "Remove everything" });
     expect(btn).toBeDisabled();
