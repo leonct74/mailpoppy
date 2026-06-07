@@ -370,9 +370,26 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
     collapsible panel atop the wizard — "you're the data controller, here's how Mailpoppy helps":
     you choose the region, mail belongs to its owner (don't access without authorization), you set
     retention, nothing is hidden (Resources tab). Explicitly "guidance, not legal advice."
-  - 9 new desktop tests (RegionPicker 4 + AdminPrivacyNotice 2 + wiring). **Still TODO in this
-    thread:** configurable retention (admin window → janitor), hardening (least-privilege + CloudTrail
-    audit), Cognito self-service password-reset config.
+  - Desktop tests for RegionPicker + AdminPrivacyNotice. The credentials reassurance is also the
+    **header sub-text** (`App.tsx`), visible on every screen.
+  - *CloudTrail audit was deliberately NOT built* — it's an account-wide, billable AWS concern the
+    admin enables themselves; the privacy notice points them to it.
+- ✅ **Configurable retention + Cognito password-reset readiness (2026-06-04..07)** — last of the
+  privacy thread.
+  - **Retention** (`core/retention.ts`: `RetentionSettings`, `normalizeRetention` fail-safe to
+    keep-forever, `retentionSettingsKey`; 6 tests). The **janitor** reads `retention#default` from
+    `SETTINGS_TABLE` (env + `grantReadData`): always purges Trash older than `trashPurgeDays`; if a
+    `retentionDays` window is set, hard-deletes any message older than it in every folder. Sidecar
+    `get/setRetention` + routes `GET /policy/retention/:stack` + `POST`. `views/RetentionEditor.tsx`
+    (wizard): 30d Trash purge + keep-indefinitely (default) vs delete-after-N-days with a
+    permanent-deletion warning. Default = **keep mail forever** (AWS never auto-deletes; safe).
+  - **Password-reset readiness**: user pool gains `accountRecovery: EMAIL_ONLY` → users self-reset by
+    email, admin never learns the password. (The forgot-password UI lands with the mail client.)
+  - ✅ **Live-verified 2026-06-07** (sidecar redeploy → `UPDATE_COMPLETE`, GuardDuty preserved):
+    Cognito `AccountRecoverySetting=verified_email`; retention set/read round-trips; the janitor,
+    invoked with a 100-year window against rows seeded at **1900** (so real mail can't be caught),
+    purged the ancient trash + inbox rows (rows gone + S3 404) while a *now*-dated row survived and
+    **marco@ stayed at 12 messages** (real mail untouched). Test rows + the retention doc cleaned up.
 
 ## Architecture (concise)
 

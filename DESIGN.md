@@ -235,10 +235,14 @@ sorts into four buckets:
 
 **Resolved defaults:**
 
-- **Retention** — admin-configurable. Default: soft-delete to Trash + 30-day auto-purge.
-  Options: custom window, never-purge / legal-hold, hard-delete, **per-domain override**.
-  Enforced by the scheduled janitor Lambda reading the policy store. Guardrail: tightening a
-  policy can trigger mass purge → require confirmation + warning; purges are irreversible.
+- **Retention** — admin-configurable. ✅ **built + live-verified (2026-06-07)**. AWS never
+  auto-deletes mail, so the safe default is **keep indefinitely** + Trash auto-purge after 30 days.
+  An optional `retentionDays` window hard-deletes any message older than it (data-minimisation),
+  shown in the UI with a permanent-deletion warning. Stored as `retention#default` in the settings
+  table (`core/retention.ts` normalizes, fail-safe to keep-forever); enforced by the scheduled
+  janitor Lambda; edited in `views/RetentionEditor.tsx`. Live-verified safely (100-year window vs.
+  rows seeded at 1900 → only the ancient rows purged, real mail untouched). *(Per-domain override
+  still a later nicety.)*
 - **Spam/virus/auth** — consume SES verdicts (no numeric score; PASS/FAIL/GRAY). Admin sets
   the action per verdict. Safe defaults: **virus → reject/quarantine (never inbox)**,
   spam → Junk, auth-fail → tag + Junk. Sender allow/block lists. Optional paid upgrade to
@@ -400,10 +404,16 @@ This is the **highest, never-ending risk** — bigger than any AWS plumbing.
   See §10.
 - **Data residency** — ✅ **done** (`views/RegionPicker.tsx`): the admin chooses which AWS region
   stores their mail (an SES-inbound region), to satisfy data-residency law. Locks once deployed.
-- **Privacy & responsibilities** — ✅ **done** (`views/AdminPrivacyNotice.tsx`): a reassuring panel
-  reminding the admin they're the data controller and how Mailpoppy helps (region, owner-only access,
-  retention, transparency). **Note:** BYO-AWS can't cryptographically exclude the account owner from
-  the data — we harden + audit + are transparent rather than claim true zero-knowledge.
+- **Privacy & responsibilities** — ✅ **done** (`views/AdminPrivacyNotice.tsx` + the header sub-text
+  on every screen): a reassuring panel reminding the admin they're the data controller and how
+  Mailpoppy helps (credentials never leave the machine, region, owner-only access, retention,
+  transparency). **Note:** BYO-AWS can't cryptographically exclude the account owner from the data —
+  we harden + are transparent rather than claim true zero-knowledge.
+- **Retention** — ✅ **done** (`views/RetentionEditor.tsx`): admin sets how long mail is kept
+  (default keep-forever + 30d Trash purge). See §10.
+- **Password reset** — ✅ **ready**: the user pool is configured for self-service email recovery
+  (`accountRecovery: EMAIL_ONLY`) so the admin never learns a user's password; the reset UI lands
+  with the mail client.
 - **Admin panel:** domain setup wizard (the headline feature), health/verification dashboard
   (DKIM verified? out of sandbox? records correct?), mailbox-user management, policy panels,
   licensing.
