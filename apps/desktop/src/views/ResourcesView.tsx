@@ -7,6 +7,7 @@ import {
   type Inventory,
 } from "../lib/resources";
 import { teardownEverything as defaultTeardown, type TeardownResult } from "../lib/teardown";
+import { resolveStackName } from "../lib/deploymentConfig";
 
 // "What Mailpoppy did to your account" (DESIGN §14.1). Shows the authoritative
 // CloudFormation inventory of the deployed stack — grouped by service, every
@@ -34,7 +35,7 @@ function actionBadge(action: "created" | "deleted"): React.CSSProperties {
 }
 
 export function ResourcesView({
-  stackName = "MailpoppyMailStack",
+  stackName = resolveStackName(),
   load = defaultLoad,
   teardown = defaultTeardown,
 }: {

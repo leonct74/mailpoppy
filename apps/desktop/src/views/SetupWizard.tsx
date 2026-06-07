@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { sidecar } from "../lib/sidecar";
 import { createMailbox, listMailboxes, type Mailbox, type BackendInfo } from "../lib/mailbox";
 import { deployBackend, deployStatus, type DeployStatus } from "../lib/deploy";
-import { saveDeploymentConfig, loadDeploymentConfig } from "../lib/deploymentConfig";
+import { saveDeploymentConfig, loadDeploymentConfig, resolveStackName, DEFAULT_STACK_NAME } from "../lib/deploymentConfig";
 import { MailboxStorageRow } from "./MailboxStorageRow";
 import { SendingAccessView } from "./SendingAccessView";
 import { MailFromSetup } from "./MailFromSetup";
@@ -119,8 +119,9 @@ export function SetupWizard() {
   const [enableMalware, setEnableMalware] = useState(true); // recommended → default on
   const deployPollRef = useRef<number | null>(null);
 
-  // Mailboxes
-  const [stackName, setStackName] = useState("MailpoppyMailStack");
+  // Mailboxes. The backend's stack name is resolved (one backend per install),
+  // not typed — there's no editable stack-name field anymore.
+  const stackName = resolveStackName();
   const [mbEmail, setMbEmail] = useState("");
   const [mbPassword, setMbPassword] = useState("");
   const [mailboxes, setMailboxes] = useState<Mailbox[] | null>(null);
@@ -223,6 +224,7 @@ export function SetupWizard() {
               userPoolId: o.UserPoolId,
               clientId: o.UserPoolClientId,
               region: o.DeployRegion || "eu-west-1",
+              stackName: DEFAULT_STACK_NAME,
             });
           }
           setStep("deployed");
@@ -352,6 +354,7 @@ export function SetupWizard() {
           userPoolId: res.userPoolId,
           clientId: res.clientId,
           region: res.region,
+          stackName,
         });
       }
       await loadMailboxes();
@@ -664,11 +667,6 @@ export function SetupWizard() {
                 style={input}
               />
             </label>
-            <label style={{ fontSize: 13 }}>
-              Stack name
-              <br />
-              <input aria-label="Stack name" value={stackName} onChange={(e) => setStackName(e.target.value.trim())} style={{ ...input, minWidth: 200 }} {...noAutoCap} />
-            </label>
             <button
               onClick={() => void createMb()}
               disabled={mbBusy || mbNoBackend || !mbEmail || !mbPassword}
@@ -697,7 +695,7 @@ export function SetupWizard() {
                 <strong>Existing mailboxes ({mailboxes.length})</strong>
                 {mbBackend && (
                   <span style={{ color: "#666", fontSize: 12 }}>
-                    pool <code style={mono}>{mbBackend.userPoolId}</code> · {mbBackend.region}
+                    backend <code style={mono}>{stackName}</code> · pool <code style={mono}>{mbBackend.userPoolId}</code> · {mbBackend.region}
                   </span>
                 )}
               </div>

@@ -4,6 +4,7 @@
 // region-aware AWS console deep-link so the admin can verify each resource
 // first-hand. Kept pure (and unit-tested) — no network in serviceFor/consoleUrl.
 import { sidecar } from "./sidecar";
+import { DEFAULT_STACK_NAME } from "./deploymentConfig";
 
 export interface ResourceEntry {
   logicalId: string;
@@ -116,6 +117,6 @@ export function groupByService(resources: ResourceEntry[]): Array<{ service: str
 }
 
 /** Fetch the inventory (CloudFormation resources + ledger) from the sidecar. */
-export function loadInventory(stackName = "MailpoppyMailStack"): Promise<Inventory> {
+export function loadInventory(stackName = DEFAULT_STACK_NAME): Promise<Inventory> {
   return sidecar<Inventory>(`/aws/inventory/${encodeURIComponent(stackName)}`);
 }

@@ -5,6 +5,7 @@ import {
   type ImapFolderInfo,
   type MigrateSummary,
 } from "../lib/migration";
+import { resolveStackName } from "../lib/deploymentConfig";
 
 // Phase 4 — "Bring your old mail across." Connects to the user's existing
 // WorkMail / IMAP account (credentials stay on this machine, in the sidecar),
@@ -22,9 +23,12 @@ const ghost: React.CSSProperties = { padding: "9px 16px", borderRadius: 8, borde
 export function MigrationView({
   test = defaultTest,
   run = defaultRun,
+  // The backend is resolved (one per install), not typed — see deploymentConfig.
+  stackName = resolveStackName(),
 }: {
   test?: typeof defaultTest;
   run?: typeof defaultRun;
+  stackName?: string;
 }) {
   const [host, setHost] = useState("");
   const [port, setPort] = useState("993");
@@ -32,7 +36,6 @@ export function MigrationView({
   const [user, setUser] = useState("");
   const [password, setPassword] = useState("");
   const [mailbox, setMailbox] = useState("");
-  const [stackName, setStackName] = useState("MailpoppyMailStack");
   const [dryRun, setDryRun] = useState(false);
 
   const [folders, setFolders] = useState<ImapFolderInfo[] | null>(null);
@@ -125,10 +128,6 @@ export function MigrationView({
           <label style={field}>
             Destination mailbox
             <input aria-label="Destination mailbox" style={input} value={mailbox} placeholder="you@yourdomain.com" onChange={(e) => setMailbox(e.target.value.trim().toLowerCase())} />
-          </label>
-          <label style={field}>
-            Stack name
-            <input aria-label="Stack name" style={input} value={stackName} onChange={(e) => setStackName(e.target.value)} />
           </label>
         </div>
         <div style={{ display: "flex", gap: 16, alignItems: "center", marginTop: 12 }}>
