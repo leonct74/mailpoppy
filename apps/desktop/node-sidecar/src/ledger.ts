@@ -13,7 +13,7 @@ import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 
-export type LedgerAction = "created" | "deleted";
+export type LedgerAction = "created" | "deleted" | "updated";
 
 export interface LedgerEntry {
   ts: string; // ISO 8601

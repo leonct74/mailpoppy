@@ -15,7 +15,7 @@ export interface ResourceEntry {
 
 export interface LedgerEntry {
   ts: string;
-  action: "created" | "deleted";
+  action: "created" | "deleted" | "updated";
   service: string;
   resourceType: string;
   name: string;

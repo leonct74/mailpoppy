@@ -79,3 +79,42 @@ describe("MailboxStorageRow — delete", () => {
     expect(onDeleted).not.toHaveBeenCalled();
   });
 });
+
+describe("MailboxStorageRow — reset password", () => {
+  it("requires a password (≥8 chars) then calls resetPw and confirms", async () => {
+    const resetPw = vi.fn(async () => ({ ok: true as const, email: "old@acme.com" }));
+    render(
+      <MailboxStorageRow email="old@acme.com" stackName="MailpoppyMailStack" loadStorage={loadStorage} resetPw={resetPw} />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reset password" }));
+    const setBtn = screen.getByRole("button", { name: "Set password" });
+    expect(setBtn).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/New password for old@acme.com/i), { target: { value: "short" } });
+    expect(setBtn).toBeDisabled(); // < 8 chars
+
+    fireEvent.change(screen.getByLabelText(/New password for old@acme.com/i), { target: { value: "Str0ng!Pass" } });
+    expect(setBtn).toBeEnabled();
+
+    fireEvent.click(setBtn);
+    await waitFor(() => expect(resetPw).toHaveBeenCalledTimes(1));
+    expect(resetPw).toHaveBeenCalledWith({ stackName: "MailpoppyMailStack", email: "old@acme.com", password: "Str0ng!Pass" });
+    expect(await screen.findByText(/Password updated/i)).toBeInTheDocument();
+  });
+
+  it("surfaces a reset error", async () => {
+    const resetPw = vi.fn(async () => {
+      throw new Error("InvalidPasswordException: does not satisfy policy");
+    });
+    render(
+      <MailboxStorageRow email="old@acme.com" stackName="MailpoppyMailStack" loadStorage={loadStorage} resetPw={resetPw} />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reset password" }));
+    fireEvent.change(screen.getByLabelText(/New password for old@acme.com/i), { target: { value: "Str0ng!Pass" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set password" }));
+
+    expect(await screen.findByText(/does not satisfy policy/i)).toBeInTheDocument();
+  });
+});

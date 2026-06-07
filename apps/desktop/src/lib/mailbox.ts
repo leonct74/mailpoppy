@@ -52,3 +52,16 @@ export function deleteMailbox(input: { email: string; stackName?: string }): Pro
     body: JSON.stringify(input),
   });
 }
+
+/** Admin-set a mailbox's sign-in password to a new permanent value. */
+export function resetMailboxPassword(input: {
+  email: string;
+  password: string;
+  stackName?: string;
+}): Promise<{ ok: true; email: string }> {
+  return sidecar(`/mailbox/reset-password`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}

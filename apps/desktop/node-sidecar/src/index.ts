@@ -263,6 +263,26 @@ app.post("/mailbox/delete", async (req, reply) => {
   }
 });
 
+// Admin-reset a mailbox's sign-in password (e.g. recover a departed employee's
+// mailbox). The password is taken from the request body and never logged.
+app.post("/mailbox/reset-password", async (req, reply) => {
+  const b = (req.body ?? {}) as { stackName?: string; email?: string; password?: string };
+  if (!b.email || !b.password) {
+    return reply.code(400).send({ ok: false, error: "email and password are required" });
+  }
+  const backend = await resolveBackend(b.stackName ?? "MailpoppyMailStack");
+  if (!backend) return reply.code(404).send({ ok: false, error: NO_BACKEND });
+  try {
+    return await prov.resetMailboxPassword(ctx(), {
+      userPoolId: backend.userPoolId,
+      email: b.email,
+      password: b.password,
+    });
+  } catch (err) {
+    return reply.code(400).send({ ok: false, error: (err as Error).message });
+  }
+});
+
 // ---- Mailbox storage quotas (admin) ----
 
 // Read a mailbox's current storage usage + quota (for "X% of Y used").

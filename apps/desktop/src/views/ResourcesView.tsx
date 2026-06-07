@@ -26,16 +26,21 @@ const th: React.CSSProperties = { textAlign: "left", fontSize: 12, color: "#666"
 const td: React.CSSProperties = { padding: "6px 8px", borderBottom: "1px solid #f3f3f3", verticalAlign: "top" };
 const link: React.CSSProperties = { color: "#7c3aed", textDecoration: "none" };
 
-function actionBadge(action: "created" | "deleted"): React.CSSProperties {
-  const created = action === "created";
+function actionBadge(action: "created" | "deleted" | "updated"): React.CSSProperties {
+  const palette =
+    action === "created"
+      ? { bg: "#f0fdf4", fg: "#15803d", border: "#bbf7d0" }
+      : action === "updated"
+        ? { bg: "#eff6ff", fg: "#1d4ed8", border: "#bfdbfe" }
+        : { bg: "#fef2f2", fg: "#b91c1c", border: "#fecaca" };
   return {
     fontSize: 11,
     fontWeight: 600,
     padding: "1px 8px",
     borderRadius: 999,
-    background: created ? "#f0fdf4" : "#fef2f2",
-    color: created ? "#15803d" : "#b91c1c",
-    border: `1px solid ${created ? "#bbf7d0" : "#fecaca"}`,
+    background: palette.bg,
+    color: palette.fg,
+    border: `1px solid ${palette.border}`,
   };
 }
 

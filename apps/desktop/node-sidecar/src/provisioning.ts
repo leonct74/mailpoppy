@@ -576,6 +576,40 @@ export async function listMailboxes(ctx: AwsContext, userPoolId: string): Promis
   }));
 }
 
+/**
+ * Admin-set a mailbox's sign-in password to a new permanent value. Use cases:
+ * recovering a departed employee's mailbox (the admin can then sign in and read
+ * it), or helping a locked-out user. Sets `Permanent: true` so the new password
+ * works immediately with the normal login (no forced-change challenge). The
+ * password is NEVER logged or returned.
+ */
+export async function resetMailboxPassword(
+  ctx: AwsContext,
+  args: { userPoolId: string; email: string; password: string },
+): Promise<{ ok: true; email: string }> {
+  const { cognito } = clients(ctx);
+  const email = args.email.trim().toLowerCase();
+  await cognito.send(
+    new AdminSetUserPasswordCommand({
+      UserPoolId: args.userPoolId,
+      Username: email,
+      Password: args.password,
+      Permanent: true,
+    }),
+  );
+  await record([
+    {
+      action: "updated",
+      service: "Cognito",
+      resourceType: "Mailbox password",
+      name: email,
+      region: ctx.region,
+      detail: "admin reset the sign-in password",
+    },
+  ]);
+  return { ok: true, email };
+}
+
 /** Poll DKIM/identity verification (the gate before sending). */
 export async function getIdentityStatus(
   ctx: AwsContext,

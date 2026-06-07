@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { formatBytes, usagePercent, usageLevel } from "@mailpoppy/core";
 import { getMailboxStorage, setMailboxQuota, type MailboxStorageInfo } from "../lib/mailboxStorage";
-import { deleteMailbox as defaultDelete, type MailboxDeletion } from "../lib/mailbox";
+import {
+  deleteMailbox as defaultDelete,
+  resetMailboxPassword as defaultReset,
+  type MailboxDeletion,
+} from "../lib/mailbox";
 
 // One row in the Mailboxes list: shows a mailbox's storage usage ("X of Y (Z%)")
 // and lets the admin set or clear its storage limit, or permanently delete the
@@ -22,6 +26,7 @@ export function MailboxStorageRow({
   loadStorage = getMailboxStorage,
   saveQuota = setMailboxQuota,
   del = defaultDelete,
+  resetPw = defaultReset,
   onDeleted,
 }: {
   email: string;
@@ -30,6 +35,7 @@ export function MailboxStorageRow({
   loadStorage?: (stackName: string, email: string) => Promise<MailboxStorageInfo>;
   saveQuota?: typeof setMailboxQuota;
   del?: (input: { email: string; stackName?: string }) => Promise<MailboxDeletion>;
+  resetPw?: (input: { email: string; password: string; stackName?: string }) => Promise<{ ok: true; email: string }>;
   onDeleted?: (email: string) => void;
 }) {
   const [info, setInfo] = useState<MailboxStorageInfo | null>(null);
@@ -43,6 +49,13 @@ export function MailboxStorageRow({
   const [confirmText, setConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [delErr, setDelErr] = useState<string | null>(null);
+
+  // Reset-password flow
+  const [resetOpen, setResetOpen] = useState(false);
+  const [newPw, setNewPw] = useState("");
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwErr, setPwErr] = useState<string | null>(null);
+  const [pwDone, setPwDone] = useState(false);
 
   async function load() {
     setErr(null);
@@ -88,6 +101,21 @@ export function MailboxStorageRow({
     } catch (e) {
       setDelErr(String(e));
       setDeleting(false);
+    }
+  }
+
+  async function doReset() {
+    setPwErr(null);
+    setPwDone(false);
+    setPwBusy(true);
+    try {
+      await resetPw({ stackName, email, password: newPw });
+      setPwDone(true);
+      setNewPw("");
+    } catch (e) {
+      setPwErr(String(e));
+    } finally {
+      setPwBusy(false);
     }
   }
 
@@ -143,6 +171,19 @@ export function MailboxStorageRow({
             <button onClick={() => setEditing(true)} style={{ fontSize: 12, cursor: "pointer" }}>
               {info?.quotaBytes ? "Change storage limit" : "Set storage limit"}
             </button>{" "}
+            {!resetOpen && (
+              <button
+                onClick={() => {
+                  setResetOpen(true);
+                  setNewPw("");
+                  setPwErr(null);
+                  setPwDone(false);
+                }}
+                style={{ fontSize: 12, cursor: "pointer" }}
+              >
+                Reset password
+              </button>
+            )}{" "}
             {!confirming && (
               <button
                 onClick={() => {
@@ -158,6 +199,65 @@ export function MailboxStorageRow({
           </>
         )}
       </div>
+
+      {resetOpen && (
+        <div style={{ marginTop: 8, background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, padding: "10px 12px", maxWidth: 520 }}>
+          <div style={{ fontSize: 13, color: "#1e3a8a", lineHeight: 1.5 }}>
+            Set a new sign-in password for <b>{email}</b>. Use this to recover a mailbox your organization owns (e.g. an
+            employee who has left) — afterwards you, or the user, can sign in with the new password.{" "}
+            <b>Only do this for mailboxes you’re authorised to access.</b>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 13 }}>
+            New password{" "}
+            <input
+              aria-label={`New password for ${email}`}
+              type="password"
+              value={newPw}
+              onChange={(e) => setNewPw(e.target.value)}
+              disabled={pwBusy}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              style={{ width: 200, padding: 4, marginLeft: 4 }}
+            />
+          </div>
+          <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+            Min 8 characters, with upper &amp; lower case, a number and a symbol.
+          </div>
+          <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              onClick={() => void doReset()}
+              disabled={pwBusy || newPw.length < 8}
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#fff",
+                background: pwBusy || newPw.length < 8 ? "#93c5fd" : "#2563eb",
+                border: "none",
+                borderRadius: 6,
+                padding: "6px 14px",
+                cursor: pwBusy || newPw.length < 8 ? "default" : "pointer",
+              }}
+            >
+              {pwBusy ? "Setting…" : "Set password"}
+            </button>
+            <button
+              onClick={() => {
+                setResetOpen(false);
+                setNewPw("");
+                setPwErr(null);
+                setPwDone(false);
+              }}
+              disabled={pwBusy}
+              style={{ fontSize: 13, background: "none", border: "1px solid #ccc", borderRadius: 6, padding: "6px 14px", cursor: "pointer" }}
+            >
+              {pwDone ? "Close" : "Cancel"}
+            </button>
+            {pwDone && <span style={{ color: "#166534", fontSize: 13 }}>✅ Password updated.</span>}
+          </div>
+          {pwErr && <div style={{ color: "#b91c1c", fontSize: 12, marginTop: 6 }}>{pwErr}</div>}
+        </div>
+      )}
 
       {confirming && (
         <div
