@@ -1,12 +1,13 @@
 // Desktop client for the sidecar's "sending health" endpoint (admin-only — talks
 // to the local sidecar with the admin's AWS credentials). Read-only.
 import { sidecar } from "./sidecar";
-import type { DeliverabilityStatus } from "@mailpoppy/core";
+import type { DeliverabilityOverview } from "@mailpoppy/core";
 
 /**
- * Read account-level sending health: bounce/complaint rates + sending quota from
- * SES, plus the do-not-send (suppression) list from the deployed stack.
+ * Per-domain sending-health overview: an account-wide header (sending paused?,
+ * daily quota, all-domains SES totals + do-not-send list) plus one row per domain
+ * (sends, bounce/complaint counts + rates, do-not-send count).
  */
-export function getDeliverability(stackName: string): Promise<DeliverabilityStatus> {
+export function getDeliverabilityOverview(stackName: string): Promise<DeliverabilityOverview> {
   return sidecar(`/ses/deliverability/${encodeURIComponent(stackName)}`);
 }

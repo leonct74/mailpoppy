@@ -22,6 +22,8 @@ export interface SuppressedAddress {
   detail?: string;
   /** ISO timestamp the address was suppressed. */
   suppressedAt?: string;
+  /** The sending domain whose mail triggered this (recorded going forward). */
+  domain?: string;
 }
 
 /** Raw counts over the reporting window, summed from SES send statistics. */
@@ -87,4 +89,37 @@ export function overallHealth(s: DeliverabilityStatus | null | undefined): Healt
 /** True when no mail has been sent yet — the UI shows a friendly "nothing to report" state. */
 export function hasSendHistory(s: DeliverabilityStatus | null | undefined): boolean {
   return !!s && s.totals.deliveryAttempts > 0;
+}
+
+// ---- Per-domain view --------------------------------------------------------
+// SES only reports bounce/complaint at the account level, so per-domain numbers
+// are Mailpoppy's own tally: outbound counts come from each domain's stored Sent
+// copies, and bounces/complaints are attributed to the sending domain by the
+// suppression Lambda. These are forward-looking (they start when that's deployed).
+
+export interface DomainDeliverability {
+  domain: string;
+  /** Messages this domain sent in the window (from stored Sent copies). */
+  sends: number;
+  bounces: number;
+  complaints: number;
+  bounceRate: number; // 0..1 of sends
+  complaintRate: number; // 0..1 of sends
+  /** Addresses we've stopped sending to that were triggered by this domain. */
+  suppressedCount: number;
+  windowDays: number;
+}
+
+/** Account-wide header (paused/quota + the authoritative all-domains SES totals) + per-domain rows. */
+export interface DeliverabilityOverview {
+  account: DeliverabilityStatus;
+  domains: DomainDeliverability[];
+}
+
+/** Worst-of bounce/complaint health for one domain. Sends-but-no-problems = good. */
+export function domainHealth(d: DomainDeliverability): HealthLevel {
+  const levels: HealthLevel[] = [bounceHealth(d.bounceRate), complaintHealth(d.complaintRate)];
+  if (levels.includes("action")) return "action";
+  if (levels.includes("watch")) return "watch";
+  return "good";
 }

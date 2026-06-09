@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { LayoutDashboard, Inbox, ArrowLeftRight, SlidersHorizontal, ShieldCheck, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Inbox, ArrowLeftRight, HeartPulse, SlidersHorizontal, ShieldCheck, type LucideIcon } from "lucide-react";
 import { HomeView } from "./views/HomeView";
 import { DomainView } from "./views/DomainView";
 import { SetupWizard } from "./views/SetupWizard";
 import { InboxView } from "./views/InboxView";
 import { AccountView } from "./views/AccountView";
+import { SendingHealthView } from "./views/SendingHealthView";
 import { MigrationView } from "./views/MigrationView";
 import { ConnectView } from "./views/ConnectView";
 import { LoginView } from "./views/LoginView";
@@ -21,12 +22,13 @@ import {
 // "Setup" is intentionally NOT a sidebar tab — it's a per-domain flow reached
 // from "Add domain" (Home) or a domain card's "Domain setup" action, so it's
 // never ambiguous which domain you're configuring.
-type Tab = "home" | "inbox" | "migrate" | "account";
+type Tab = "home" | "inbox" | "migrate" | "health" | "account";
 
 const NAV: { id: Tab; label: string; icon: LucideIcon; blurb: string }[] = [
   { id: "home", label: "Home", icon: LayoutDashboard, blurb: "Overview of your domains and mailboxes" },
   { id: "inbox", label: "Inbox", icon: Inbox, blurb: "Read and send mail" },
   { id: "migrate", label: "Migrate", icon: ArrowLeftRight, blurb: "Bring your old mail across via IMAP" },
+  { id: "health", label: "Sending health", icon: HeartPulse, blurb: "Is each domain's mail reaching inboxes?" },
   { id: "account", label: "Account", icon: SlidersHorizontal, blurb: "Shared settings & the AWS resources Mailpoppy manages" },
 ];
 
@@ -238,6 +240,13 @@ export function App() {
             <div className={cn("h-full overflow-y-auto px-8 py-8", tab === "migrate" ? "block" : "hidden")}>
               <div className="mx-auto max-w-6xl">
                 <MigrationView preselectDomain={migrateDomain ?? undefined} />
+              </div>
+            </div>
+          )}
+          {visited.has("health") && (
+            <div className={cn("h-full overflow-y-auto px-8 py-8", tab === "health" ? "block" : "hidden")}>
+              <div className="mx-auto max-w-6xl">
+                <SendingHealthView />
               </div>
             </div>
           )}

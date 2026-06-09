@@ -87,6 +87,8 @@ import {
   type SpamPolicy,
   type RetentionSettings,
   type DeliverabilityStatus,
+  type DeliverabilityOverview,
+  type DomainDeliverability,
   type SendingTotals,
   type SuppressedAddress,
 } from "@mailpoppy/core";
@@ -727,6 +729,7 @@ export async function getDeliverability(
         reason: it.reason?.S ?? "bounce",
         detail: it.detail?.S,
         suppressedAt: it.suppressedAt?.S,
+        domain: it.domain?.S,
       }));
       // Most recently suppressed first.
       suppressed.sort((a, b) =>
@@ -748,6 +751,120 @@ export async function getDeliverability(
     dailyLimit: quota?.Max24HourSend ?? 0,
     suppressed,
   };
+}
+
+const DELIVERABILITY_WINDOW_DAYS = 14;
+
+/**
+ * Per-domain "sending health" overview. The account-wide header reuses
+ * getDeliverability (paused/quota + the authoritative all-domains SES totals +
+ * suppression list). Per-domain rows are Mailpoppy's own tally, since SES doesn't
+ * break reputation down by domain:
+ *   • sends    — counted from each mailbox's stored Sent copies in the window;
+ *   • bounces/complaints — from the STAT#<domain>#<day> counters the suppression
+ *     Lambda writes (forward-looking: they accrue from when that Lambda deploys);
+ *   • suppressed — the do-not-send entries attributed to that sending domain.
+ * Everything is best-effort; a missing table/permission yields zeroes, not an error.
+ */
+export async function getDeliverabilityOverview(
+  ctx: AwsContext,
+  args: { stackName?: string } = {},
+): Promise<DeliverabilityOverview> {
+  const { dynamodb } = clients(ctx);
+  const stackName = args.stackName ?? "MailpoppyMailStack";
+
+  const account = await getDeliverability(ctx, { stackName });
+
+  const outputs = await getStackOutputs(ctx, stackName);
+  const indexTable = outputs.IndexTableName;
+  const userPoolId = outputs.UserPoolId;
+  const settingsTable = await resolveSettingsTableName(ctx, stackName, outputs);
+
+  const since = new Date(Date.now() - DELIVERABILITY_WINDOW_DAYS * 86_400_000);
+  const sinceIso = since.toISOString();
+  const sinceDay = sinceIso.slice(0, 10); // YYYY-MM-DD
+
+  // Domains that can send = those with at least one mailbox.
+  const mailboxes = userPoolId ? await listMailboxes(ctx, userPoolId).catch(() => []) : [];
+  const addressesByDomain = new Map<string, string[]>();
+  for (const m of mailboxes) {
+    const d = addressDomain(m.email);
+    if (!d) continue;
+    addressesByDomain.set(d, [...(addressesByDomain.get(d) ?? []), m.email]);
+  }
+
+  // Per-domain bounce/complaint tallies (one scan of the STAT# counters).
+  const stat = new Map<string, { bounces: number; complaints: number }>();
+  if (settingsTable) {
+    try {
+      const scan = await dynamodb.send(
+        new ScanCommand({
+          TableName: settingsTable,
+          FilterExpression: "begins_with(pk, :p)",
+          ExpressionAttributeValues: { ":p": { S: "STAT#" } },
+        }),
+      );
+      for (const it of scan.Items ?? []) {
+        const day = it.day?.S ?? "";
+        if (day && day < sinceDay) continue; // outside the window
+        const dom = it.domain?.S ?? (it.pk?.S ?? "").split("#")[1] ?? "";
+        if (!dom) continue;
+        const cur = stat.get(dom) ?? { bounces: 0, complaints: 0 };
+        cur.bounces += Number(it.bounces?.N ?? 0);
+        cur.complaints += Number(it.complaints?.N ?? 0);
+        stat.set(dom, cur);
+      }
+    } catch {
+      // no perms / no table → no per-domain bounce data
+    }
+  }
+
+  // Suppressed addresses attributed to each sending domain.
+  const suppressedByDomain = new Map<string, number>();
+  for (const s of account.suppressed) {
+    if (!s.domain) continue;
+    suppressedByDomain.set(s.domain, (suppressedByDomain.get(s.domain) ?? 0) + 1);
+  }
+
+  const domains: DomainDeliverability[] = [];
+  for (const [domain, addresses] of [...addressesByDomain.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    // Sends = stored Sent copies in the window (one COUNT query per mailbox).
+    let sends = 0;
+    if (indexTable) {
+      for (const addr of addresses) {
+        try {
+          const q = await dynamodb.send(
+            new QueryCommand({
+              TableName: indexTable,
+              KeyConditionExpression: "pk = :pk AND sk BETWEEN :lo AND :hi",
+              ExpressionAttributeValues: {
+                ":pk": { S: mailboxPk(addr) },
+                ":lo": { S: `sent#${sinceIso}` },
+                ":hi": { S: "sent#￿" },
+              },
+              Select: "COUNT",
+            }),
+          );
+          sends += q.Count ?? 0;
+        } catch {
+          // ignore a single mailbox's query failure
+        }
+      }
+    }
+    const counts = stat.get(domain) ?? { bounces: 0, complaints: 0 };
+    domains.push({
+      domain,
+      sends,
+      bounces: counts.bounces,
+      complaints: counts.complaints,
+      bounceRate: rate(counts.bounces, sends),
+      complaintRate: rate(counts.complaints, sends),
+      suppressedCount: suppressedByDomain.get(domain) ?? 0,
+      windowDays: DELIVERABILITY_WINDOW_DAYS,
+    });
+  }
+
+  return { account, domains };
 }
 
 /**

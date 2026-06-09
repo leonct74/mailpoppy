@@ -649,14 +649,23 @@ live-verified on ollydigital.com:**
   "still failing" symptom was a **stale prebuilt sidecar binary** masking re-deploys — always
   rebuild the binary after Lambda/template changes.)*
 - **Sending-health / deliverability monitoring** (2026-06-09) — the §18 "reputation monitoring"
-  item. A plain-language **"Sending health"** panel in the Account tab (no AWS jargon): traffic-light
-  bounce rate + spam-complaint rate + daily-send usage (from SES `GetSendStatistics` + SESv2
-  `GetAccount`), a loud "your sending is paused" state, and the **do-not-send list** (the
-  `SUPPRESS#` entries the bounce/complaint Lambda writes to the settings table). Pure health
-  classifiers + thresholds in `@mailpoppy/core` (`deliverability.ts`, unit-tested, warn one band
-  before AWS acts); sidecar `getDeliverability` + `GET /ses/deliverability/:stackName`; IAM gained
-  `ses:GetSendStatistics` + `dynamodb:Scan`. Live-read-verified on the deployed stack. **Still open
-  in Phase 5: DMARC aggregate (RUA) report ingestion.**
+  item, in plain language (no AWS jargon). Started as an account-level panel, then made
+  **per-domain** in its own **"Sending health" sidebar view**: every domain listed with its own
+  traffic-light bounce/spam-complaint rates + sends + do-not-send count, so the admin can spot a bad
+  domain and remove its mailbox/domain *before* AWS pauses the (account-wide) sending. An
+  account-wide header carries the two genuinely per-account facts — sending paused? + daily quota.
+  - Because SES only reports reputation per account (`GetSendStatistics` has no per-domain split),
+    per-domain numbers are Mailpoppy's own tally: **sends** counted from each mailbox's stored Sent
+    copies; **bounces/complaints** attributed to the sending domain by the suppression Lambda into
+    `STAT#<domain>#<day>` counters; **do-not-send** entries tagged with their domain. These are
+    forward-looking (accrue from deploy). Account-level `GetSendStatistics`/`GetAccount` still backs
+    the header (authoritative, all-domains).
+  - Pieces: `@mailpoppy/core` `deliverability.ts` (health classifiers + per-domain types,
+    unit-tested, warn one band before AWS acts); sidecar `getDeliverabilityOverview` +
+    `GET /ses/deliverability/:stackName`; suppression Lambda writes per-domain counters; IAM gained
+    `ses:GetSendStatistics` + `dynamodb:Scan`. The per-domain counters need the updated suppression
+    Lambda deployed (Lambda-only UpdateStack). **Still open in Phase 5: DMARC aggregate (RUA)
+    report ingestion** (the one genuinely per-domain signal AWS hands us for free).
 
 **Phase 6 — Mobile.** Flutter/React Native client; Cognito auth; SNS → APNs/FCM push.
 

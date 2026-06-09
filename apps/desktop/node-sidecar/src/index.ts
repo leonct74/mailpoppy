@@ -405,12 +405,14 @@ app.get("/ses/account", async (_req, reply) => {
   }
 });
 
-// Read-only: "sending health" — bounce/complaint rates + sending quota from SES,
-// and the do-not-send (suppression) list from the deployed stack's settings table.
+// Read-only: per-domain "sending health" overview — an account-wide header
+// (paused/quota + the authoritative all-domains SES bounce/complaint totals) plus
+// one row per domain (sends from stored Sent copies, bounces/complaints from the
+// STAT# counters, and the do-not-send count attributed to that domain).
 app.get("/ses/deliverability/:stackName", async (req, reply) => {
   const { stackName } = req.params as { stackName: string };
   try {
-    return await prov.getDeliverability(ctx(), { stackName });
+    return await prov.getDeliverabilityOverview(ctx(), { stackName });
   } catch (err) {
     return reply.code(502).send({ ok: false, error: (err as Error).message });
   }

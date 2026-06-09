@@ -5,7 +5,9 @@ import {
   complaintHealth,
   overallHealth,
   hasSendHistory,
+  domainHealth,
   type DeliverabilityStatus,
+  type DomainDeliverability,
 } from "./deliverability";
 
 function status(p: Partial<DeliverabilityStatus> = {}): DeliverabilityStatus {
@@ -85,5 +87,27 @@ describe("hasSendHistory", () => {
     );
     expect(hasSendHistory(null)).toBe(false);
     expect(hasSendHistory(status())).toBe(true);
+  });
+});
+
+describe("domainHealth", () => {
+  const dom = (p: Partial<DomainDeliverability> = {}): DomainDeliverability => ({
+    domain: "x.com",
+    sends: 100,
+    bounces: 0,
+    complaints: 0,
+    bounceRate: 0,
+    complaintRate: 0,
+    suppressedCount: 0,
+    windowDays: 14,
+    ...p,
+  });
+  it("is good for a clean domain", () => {
+    expect(domainHealth(dom())).toBe("good");
+  });
+  it("takes the worst of the two rates", () => {
+    expect(domainHealth(dom({ bounceRate: 0.03 }))).toBe("watch");
+    expect(domainHealth(dom({ complaintRate: 0.01 }))).toBe("action");
+    expect(domainHealth(dom({ bounceRate: 0.03, complaintRate: 0.01 }))).toBe("action");
   });
 });
