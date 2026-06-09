@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Terminal, KeyRound, ShieldCheck, Rocket, Globe, RefreshCw, Mail, Sparkles } from "lucide-react";
 import { sidecar } from "../lib/sidecar";
 import { createMailbox, listMailboxes, type Mailbox, type BackendInfo } from "../lib/mailbox";
 import { deployBackend, deployStatus, type DeployStatus } from "../lib/deploy";
@@ -10,6 +11,7 @@ import { PolicyEditor } from "./PolicyEditor";
 import { RetentionEditor } from "./RetentionEditor";
 import { RegionPicker } from "./RegionPicker";
 import { AdminPrivacyNotice } from "./AdminPrivacyNotice";
+import { Card, Button, Spinner, cn } from "../ui";
 
 // Phase 1 setup wizard.
 // Step 0 verifies the AWS environment (credentials + per-service permissions, + detects
@@ -49,48 +51,53 @@ type Step =
   | "sent";
 const SERVICES = ["route53", "ses", "sesv2", "s3"] as const;
 
-const box: React.CSSProperties = { border: "1px solid #ddd", borderRadius: 12, padding: 20, marginTop: 16 };
-const mono: React.CSSProperties = { fontFamily: "ui-monospace, monospace" };
-const warn: React.CSSProperties = { marginTop: 10, background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, padding: 10 };
-const input: React.CSSProperties = { padding: 6, minWidth: 240 };
 const noAutoCap = { autoCapitalize: "off", autoCorrect: "off", spellCheck: false } as const;
-// Prominent style for the numbered flow actions (the "Deploy backend" button was
-// too small to notice before).
-const primaryBtn: React.CSSProperties = {
-  padding: "10px 18px",
-  fontSize: 15,
-  fontWeight: 600,
-  color: "#fff",
-  background: "#7c3aed",
-  border: "none",
-  borderRadius: 8,
-};
-const pBtn = (disabled: boolean): React.CSSProperties => ({
-  ...primaryBtn,
-  opacity: disabled ? 0.5 : 1,
-  cursor: disabled ? "default" : "pointer",
-});
 
-const permIcon = (v: "ok" | "denied" | "error") => (v === "ok" ? "✅" : v === "denied" ? "⛔" : "⚠️");
+const inputCls =
+  "rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-outline-variant transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50";
 
-function Spinner() {
+/** Inline code chip. */
+function C({ children }: { children: ReactNode }) {
+  return <code className="rounded bg-surface-container-lowest px-1 py-0.5 font-mono text-[0.85em] text-on-surface-variant">{children}</code>;
+}
+
+/** A numbered step card with the accent bar + "STEP" pill from the Stitch design. */
+function StepCard({ step, title, children }: { step: string; title: string; children: ReactNode }) {
   return (
-    <span
-      aria-hidden
-      style={{
-        display: "inline-block",
-        width: 16,
-        height: 16,
-        border: "2px solid #ddd",
-        borderTopColor: "#7c3aed",
-        borderRadius: "50%",
-        animation: "mp-spin 0.8s linear infinite",
-        verticalAlign: "-3px",
-        marginRight: 8,
-      }}
-    />
+    <div className="relative overflow-hidden rounded-xl border border-outline-variant/10 bg-surface-container p-6 shadow-lg shadow-black/20">
+      <span aria-hidden className="absolute left-0 top-0 h-full w-1 bg-primary-container" />
+      <div className="mb-4 flex items-center gap-3">
+        <span className="rounded-full border border-primary/30 bg-primary-container/20 px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-wider text-primary">
+          {step}
+        </span>
+        <h2 className="text-lg font-semibold text-on-surface">{title}</h2>
+      </div>
+      {children}
+    </div>
   );
 }
+
+/** Mint "ok" pill used for verified dependencies. */
+function OkBadge({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-secondary/20 bg-secondary/10 px-3 py-1 font-mono text-xs text-secondary">
+      <ShieldCheck className="size-3.5" /> {children}
+    </span>
+  );
+}
+
+/** A warning callout (amber). */
+function Warn({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn("rounded-lg border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100", className)}>{children}</div>;
+}
+
+const permTone = (v: "ok" | "denied" | "error") =>
+  v === "ok"
+    ? "border-secondary/20 bg-secondary/10 text-secondary"
+    : v === "denied"
+      ? "border-tertiary/30 bg-tertiary-container/15 text-tertiary"
+      : "border-amber-400/30 bg-amber-400/10 text-amber-300";
+const permIcon = (v: "ok" | "denied" | "error") => (v === "ok" ? "✓" : v === "denied" ? "⛔" : "⚠");
 
 export function SetupWizard() {
   // Step 0 — environment readiness
@@ -339,6 +346,15 @@ export function SetupWizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, stackName]);
 
+  // After an in-session deploy finishes, the backend stack now exists. The
+  // effect above already ran (and 404'd) before the stack was created, so
+  // re-query here to clear the stale "no backend yet" state and enable
+  // "Create mailbox" — without forcing an app restart.
+  useEffect(() => {
+    if (ready && step === "deployed") void loadMailboxes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
   async function createMb() {
     setMbBusy(true);
     setMbError(null);
@@ -366,82 +382,102 @@ export function SetupWizard() {
   }
 
   return (
-    <>
-      <style>{`@keyframes mp-spin { to { transform: rotate(360deg); } }`}</style>
-
+    <div className="flex flex-col gap-6">
       {/* In-app confirmation dialog (native window.confirm is unreliable in the
           Tauri webview). */}
       {confirmAction && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
-        >
-          <div style={{ background: "#fff", borderRadius: 12, padding: 24, maxWidth: 460, boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
-            <p style={{ margin: "0 0 18px", fontSize: 15, lineHeight: 1.5 }}>{confirmAction.message}</p>
-            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-              <button onClick={() => setConfirmAction(null)} style={{ padding: "8px 16px" }}>
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-xl border border-outline-variant/20 bg-surface-container p-6 shadow-2xl">
+            <p className="mb-5 text-sm leading-relaxed text-on-surface">{confirmAction.message}</p>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setConfirmAction(null)}>
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={() => {
                   const run = confirmAction.run;
                   setConfirmAction(null);
                   run();
                 }}
-                style={{ ...primaryBtn, padding: "8px 16px" }}
               >
                 Yes, continue
-              </button>
+              </Button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ---- Privacy & responsibilities (reassuring, not scary) ---- */}
-      <AdminPrivacyNotice />
+      {/* Intro */}
+      <div>
+        <div className="font-mono text-xs uppercase tracking-wider text-primary">Environment Setup</div>
+        <h2 className="mt-1 flex items-center gap-2 text-2xl font-bold tracking-tight text-on-surface">
+          <Sparkles className="size-5 text-primary" />
+          Configure your Mailpoppy backend
+        </h2>
+        <p className="mt-1 max-w-2xl text-on-surface-variant">
+          Provision the SES, Route53, Lambda and Cognito resources for your domain — all in your own AWS account. Your
+          credentials never leave this machine.
+        </p>
+      </div>
 
-      {/* ---- Data residency: choose the AWS region ---- */}
-      <section style={box}>
-        <RegionPicker lockedRegion={loadDeploymentConfig()?.region} />
-      </section>
+      {/* Two columns (Stitch layout): the main step content fills the left; the
+          reassuring guidance ("messages to the user") sits in a sticky right
+          column so it doesn't push the main content down the page. */}
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-3">
+        <div className="flex flex-col gap-6 lg:col-span-2">
+          {/* ---- Data residency: choose the AWS region ---- */}
+          <Card>
+            <RegionPicker lockedRegion={loadDeploymentConfig()?.region} />
+          </Card>
 
       {/* ---- Step 0: AWS environment ---- */}
-      <section style={box}>
-        <h2>Step 0 · AWS environment</h2>
+      <StepCard step="Step 0" title="AWS environment">
         {checking && (
-          <div style={{ display: "flex", alignItems: "center", fontSize: 14, color: "#555" }}>
-            <Spinner />
-            Starting Mailpoppy and checking your AWS environment… <span style={{ color: "#999", marginLeft: 6 }}>(this can take a few seconds)</span>
+          <div className="flex items-center gap-2 text-sm text-on-surface-variant">
+            <Spinner /> Starting Mailpoppy and checking your AWS environment…{" "}
+            <span className="text-on-surface-variant/60">(this can take a few seconds)</span>
           </div>
         )}
         {readiness && (
-          <div style={{ fontSize: 14 }}>
-            <div>
-              {readiness.cli.installed
-                ? `✅ AWS CLI: ${readiness.cli.version}`
-                : "ℹ️ AWS CLI not found (optional — the app reads ~/.aws directly)"}
-            </div>
-            <div>
-              {readiness.credentials.ok ? (
-                <>✅ Credentials: <code style={mono}>{readiness.credentials.arn}</code> (account {readiness.credentials.account})</>
+          <div className="flex flex-col gap-3 text-sm">
+            {/* AWS CLI */}
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-outline-variant/10 bg-surface-container-lowest p-3">
+              <span className="flex items-center gap-2 text-on-surface-variant">
+                <Terminal className="size-4" /> AWS CLI
+              </span>
+              {readiness.cli.installed ? (
+                <OkBadge>{readiness.cli.version}</OkBadge>
               ) : (
-                <>⛔ No usable AWS credentials{readiness.credentials.error ? `: ${readiness.credentials.error}` : ""}</>
+                <span className="font-mono text-xs text-on-surface-variant/70">not found (optional — reads ~/.aws directly)</span>
               )}
             </div>
+            {/* Credentials */}
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-outline-variant/10 bg-surface-container-lowest p-3">
+              <span className="flex items-center gap-2 text-on-surface-variant">
+                <KeyRound className="size-4" /> Credentials
+              </span>
+              {readiness.credentials.ok ? (
+                <span className="flex items-center gap-2">
+                  <OkBadge>Found</OkBadge>
+                  <span className="font-mono text-xs text-on-surface-variant">
+                    {readiness.credentials.arn} (account {readiness.credentials.account})
+                  </span>
+                </span>
+              ) : (
+                <span className="text-tertiary">
+                  ⛔ No usable AWS credentials{readiness.credentials.error ? `: ${readiness.credentials.error}` : ""}
+                </span>
+              )}
+            </div>
+            {/* Permissions */}
             {readiness.credentials.ok && (
-              <div>
-                Permissions:{" "}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-on-surface-variant">Permissions:</span>
                 {SERVICES.map((k) => (
-                  <span key={k} style={{ marginRight: 10 }}>
+                  <span
+                    key={k}
+                    className={cn("inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-mono text-xs", permTone(readiness.permissions[k]))}
+                  >
                     {permIcon(readiness.permissions[k])} {k}
                   </span>
                 ))}
@@ -449,31 +485,27 @@ export function SetupWizard() {
             )}
 
             {!ready && (
-              <div style={warn}>
+              <Warn>
                 <b>Action needed before setup:</b>
-                <ul style={{ margin: "6px 0 0 18px" }}>
+                <ul className="ml-4 mt-1.5 list-disc space-y-2">
                   {!readiness.credentials.ok && (
                     <li>
                       <b>Make AWS credentials available, then re-check.</b>
-                      <div style={{ marginTop: 4 }}>
-                        The app uses your AWS credential profiles in{" "}
-                        <code style={mono}>~/.aws/credentials</code> and <code style={mono}>~/.aws/config</code>. To target a
-                        specific one, start the app with{" "}
-                        <code style={mono}>AWS_PROFILE=&lt;profile-name&gt; AWS_REGION=eu-west-1</code>.
+                      <div className="mt-1">
+                        The app uses your AWS credential profiles in <C>~/.aws/credentials</C> and <C>~/.aws/config</C>. To
+                        target a specific one, start the app with <C>AWS_PROFILE=&lt;profile-name&gt; AWS_REGION=eu-west-1</C>.
                       </div>
-                      <ul style={{ margin: "4px 0 0 18px" }}>
+                      <ul className="ml-4 mt-1 list-disc space-y-1">
                         <li>
-                          <code style={mono}>&lt;profile-name&gt;</code> is the <b>name</b> in brackets in those files (e.g.{" "}
-                          <code style={mono}>[default]</code> → <code style={mono}>default</code>) — <b>not</b> your AWS account
-                          number. List them with <code style={mono}>aws configure list-profiles</code>.
+                          <C>&lt;profile-name&gt;</C> is the <b>name</b> in brackets in those files (e.g. <C>[default]</C> →{" "}
+                          <C>default</C>) — <b>not</b> your AWS account number. List them with <C>aws configure list-profiles</C>.
                         </li>
                         <li>
-                          If you have a <code style={mono}>[default]</code> profile, you can omit <code style={mono}>AWS_PROFILE</code> entirely.
+                          If you have a <C>[default]</C> profile, you can omit <C>AWS_PROFILE</C> entirely.
                         </li>
                         <li>
-                          No profiles yet? Run <code style={mono}>aws configure</code>
-                          {readiness.cli.installed ? "" : " (after installing the AWS CLI)"} or{" "}
-                          <code style={mono}>aws sso login</code>.
+                          No profiles yet? Run <C>aws configure</C>
+                          {readiness.cli.installed ? "" : " (after installing the AWS CLI)"} or <C>aws sso login</C>.
                         </li>
                       </ul>
                     </li>
@@ -482,227 +514,226 @@ export function SetupWizard() {
                     SERVICES.filter((k) => readiness.permissions[k] !== "ok").map((k) => (
                       <li key={k}>
                         <b>{k}</b>: {readiness.permissions[k] === "denied" ? "access denied — this identity lacks permission" : "could not verify"}.
-                        Attach <b>AdministratorAccess</b> (or the Mailpoppy provisioning policy) to{" "}
-                        <code style={mono}>{readiness.credentials.arn}</code>.
+                        Attach <b>AdministratorAccess</b> (or the Mailpoppy provisioning policy) to <C>{readiness.credentials.arn}</C>.
                       </li>
                     ))}
                 </ul>
-                <button onClick={() => void loadReadiness()} disabled={checking} style={{ marginTop: 8 }}>
-                  Re-check
-                </button>
+                <Button variant="secondary" size="sm" className="mt-3" onClick={() => void loadReadiness()} disabled={checking}>
+                  <RefreshCw className="size-3.5" /> Re-check
+                </Button>
+              </Warn>
+            )}
+            {ready && (
+              <div className="flex items-center gap-2 font-medium text-secondary">
+                <ShieldCheck className="size-4" /> Environment ready — you can set up a domain.
               </div>
             )}
-            {ready && <div style={{ marginTop: 6, color: "#15803d" }}>✅ Environment ready — you can set up a domain.</div>}
           </div>
         )}
-      </section>
+      </StepCard>
 
-      {/* ---- Steps 1–3 (gated on readiness) ---- */}
-      <section style={box}>
-        <h2>Set up a domain</h2>
-        {!ready && <p style={{ fontSize: 14, color: "#666" }}>Complete Step 0 first.</p>}
+      {/* ---- Steps 1–4 (gated on readiness) ---- */}
+      <StepCard step="Steps 1–4" title="Set up a domain">
+        {!ready && <p className="mb-3 text-sm text-on-surface-variant">Complete Step 0 first.</p>}
 
-        <label>
-          Domain{" "}
-          <input
-            value={domain}
-            onChange={(e) => setDomain(e.target.value.trim().toLowerCase())}
-            placeholder="yourdomain.com"
-            disabled={!ready || step !== "start"}
-            style={input}
-            {...noAutoCap}
-          />
-        </label>{" "}
-        <button
-          onClick={runPreflight}
-          disabled={!ready || !domain || busy || step !== "start"}
-          style={pBtn(!ready || !domain || busy || step !== "start")}
-        >
-          1. Check AWS &amp; DNS
-        </button>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
+            Domain
+            <input
+              value={domain}
+              onChange={(e) => setDomain(e.target.value.trim().toLowerCase())}
+              placeholder="yourdomain.com"
+              disabled={!ready || step !== "start"}
+              className={cn(inputCls, "w-64")}
+              {...noAutoCap}
+            />
+          </label>
+          <Button onClick={runPreflight} disabled={!ready || !domain || busy || step !== "start"}>
+            <Globe className="size-4" /> 1. Check AWS &amp; DNS
+          </Button>
+        </div>
 
         {preflight && (
-          <div style={{ marginTop: 12, fontSize: 14 }}>
-            <div>✅ Account <code style={mono}>{preflight.accountId}</code> · region <code style={mono}>{preflight.region}</code></div>
-            <div>✅ Hosted zone <code style={mono}>{preflight.zoneId}</code></div>
+          <div className="mt-4 flex flex-col gap-2 text-sm text-on-surface">
+            <div className="flex items-center gap-1.5 text-secondary">
+              <ShieldCheck className="size-4" /> Account <C>{preflight.accountId}</C> · region <C>{preflight.region}</C>
+            </div>
+            <div className="flex items-center gap-1.5 text-secondary">
+              <ShieldCheck className="size-4" /> Hosted zone <C>{preflight.zoneId}</C>
+            </div>
             {step === "preflighted" && (
-              <div style={{ marginTop: 10 }}>
-                <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, marginBottom: 8, maxWidth: 520 }}>
-                  <input type="checkbox" checked={enableMalware} onChange={(e) => setEnableMalware(e.target.checked)} style={{ marginTop: 3 }} />
+              <div className="mt-2">
+                <label className="mb-3 flex max-w-lg items-start gap-2 text-sm text-on-surface-variant">
+                  <input type="checkbox" checked={enableMalware} onChange={(e) => setEnableMalware(e.target.checked)} className="mt-1 size-4 accent-primary" />
                   <span>
-                    <b>Scan attachments for malware</b> <span style={{ color: "#15803d" }}>(recommended)</span> — adds AWS
-                    GuardDuty Malware Protection on your mail storage; infected files are blocked from download. Small AWS
-                    usage cost (a personal mailbox is usually within the free tier).
+                    <b className="text-on-surface">Scan attachments for malware</b> <span className="text-secondary">(recommended)</span> —
+                    adds AWS GuardDuty Malware Protection on your mail storage; infected files are blocked from download. Small
+                    AWS usage cost (a personal mailbox is usually within the free tier).
                   </span>
                 </label>
-                <button onClick={onDeploy} disabled={busy} style={pBtn(busy)}>
-                  2. Deploy backend
-                </button>
+                <Button onClick={onDeploy} disabled={busy}>
+                  <Rocket className="size-4" /> 2. Deploy backend
+                </Button>
               </div>
             )}
           </div>
         )}
 
         {step === "deploying" && (
-          <div style={{ marginTop: 12, fontSize: 14 }}>
-            <Spinner />
-            Deploying the backend stack… <code style={mono}>{deploy?.status ?? "starting"}</code>{" "}
-            <span style={{ color: "#999" }}>(CloudFormation — this usually takes 1–3 minutes)</span>
+          <div className="mt-4 flex items-center gap-2 text-sm text-on-surface-variant">
+            <Spinner /> Deploying the backend stack… <C>{deploy?.status ?? "starting"}</C>{" "}
+            <span className="text-on-surface-variant/60">(CloudFormation — this usually takes 1–3 minutes)</span>
           </div>
         )}
 
         {(step === "deployed" || step === "provisioning" || step === "verifying" || step === "verified" || step === "sending" || step === "sent") &&
           deploy?.outputs?.ApiBaseUrl && (
-            <div style={{ marginTop: 12, fontSize: 14 }}>
-              ✅ Backend deployed · API <code style={mono}>{deploy.outputs.ApiBaseUrl}</code> · the Inbox tab is now connected.
+            <div className="mt-4 text-sm text-on-surface">
+              <span className="text-secondary">✅ Backend deployed</span> · API <C>{deploy.outputs.ApiBaseUrl}</C> · the Inbox
+              tab is now connected.
               {step === "deployed" && (
-                <div>
-                  <button onClick={provisionDomain} disabled={busy} style={{ ...pBtn(busy), marginTop: 10 }}>
-                    3. Set up domain mail (SES + DNS)
-                  </button>
+                <div className="mt-3">
+                  <Button onClick={provisionDomain} disabled={busy}>
+                    <Globe className="size-4" /> 3. Set up domain mail (SES + DNS)
+                  </Button>
                 </div>
               )}
             </div>
           )}
 
         {provision?.ok && (
-          <div style={{ marginTop: 12, fontSize: 14 }}>
+          <div className="mt-4 text-sm text-secondary">
             ✅ Domain mail set up · {provision.dkimTokens.length} DKIM records + MX/DMARC published.
           </div>
         )}
 
         {step === "verifying" && (
-          <div style={{ marginTop: 12, fontSize: 14 }}>
-            <Spinner />
-            Verifying DKIM… <code style={mono}>{status?.dkim ?? "pending"}</code> (polling every 4s).
+          <div className="mt-4 flex items-center gap-2 text-sm text-on-surface-variant">
+            <Spinner /> Verifying DKIM… <C>{status?.dkim ?? "pending"}</C> (polling every 4s).
           </div>
         )}
 
         {(step === "verified" || step === "sending" || step === "sent") && (
-          <div style={{ marginTop: 12, fontSize: 14 }}>
-            <div>✅ DKIM verified — ready to send.</div>
-            <p style={{ fontSize: 13, color: "#666", margin: "8px 0 4px" }}>
-              Send a test to a <b>personal inbox you can open</b> — e.g. your Gmail or Outlook address (not an
-              address on this domain). Check it lands in the inbox (not spam) with SPF/DKIM/DMARC = PASS.
+          <div className="mt-4 text-sm text-on-surface">
+            <div className="flex items-center gap-1.5 text-secondary">
+              <ShieldCheck className="size-4" /> DKIM verified — ready to send.
+            </div>
+            <p className="my-2 text-sm text-on-surface-variant">
+              Send a test to a <b className="text-on-surface">personal inbox you can open</b> — e.g. your Gmail or Outlook
+              address (not an address on this domain). Check it lands in the inbox (not spam) with SPF/DKIM/DMARC = PASS.
             </p>
-            <label>
-              Your personal email address{" "}
-              <input
-                value={recipient}
-                onChange={(e) => setRecipient(e.target.value.trim().toLowerCase())}
-                placeholder="you@gmail.com"
-                disabled={step !== "verified"}
-                style={input}
-                {...noAutoCap}
-              />
-            </label>{" "}
-            <button onClick={sendTest} disabled={busy || step !== "verified" || !recipient} style={pBtn(busy || step !== "verified" || !recipient)}>
-              4. Send deliverability test
-            </button>
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
+                Your personal email address
+                <input
+                  value={recipient}
+                  onChange={(e) => setRecipient(e.target.value.trim().toLowerCase())}
+                  placeholder="you@gmail.com"
+                  disabled={step !== "verified"}
+                  className={cn(inputCls, "w-64")}
+                  {...noAutoCap}
+                />
+              </label>
+              <Button onClick={sendTest} disabled={busy || step !== "verified" || !recipient}>
+                <Mail className="size-4" /> 4. Send deliverability test
+              </Button>
+            </div>
           </div>
         )}
 
         {step === "sending" && (
-          <p style={{ fontSize: 14 }}>
-            <Spinner />
-            Sending…
+          <p className="mt-4 flex items-center gap-2 text-sm text-on-surface-variant">
+            <Spinner /> Sending…
           </p>
         )}
 
         {step === "sent" && (
-          <div style={{ marginTop: 12, fontSize: 14 }}>
-            🎉 Sent (message <code style={mono}>{messageId}</code>). Check <b>{recipient}</b> — it should be in the inbox
-            (not spam). Open <b>Show original</b> to confirm SPF/DKIM/DMARC = PASS.
+          <div className="mt-4 text-sm text-on-surface">
+            🎉 Sent (message <C>{messageId}</C>). Check <b>{recipient}</b> — it should be in the inbox (not spam). Open{" "}
+            <b>Show original</b> to confirm SPF/DKIM/DMARC = PASS.
           </div>
         )}
 
-        {error && <p style={{ color: "crimson" }}>{error}</p>}
-      </section>
+        {error && <p className="mt-3 text-sm text-tertiary">{error}</p>}
+      </StepCard>
 
       {/* ---- Sending access (SES sandbox → production) + deliverability ---- */}
       {ready && (
-        <section style={box}>
+        <Card>
           <SendingAccessView defaultWebsite={domain || undefined} />
           {domain && <MailFromSetup domain={domain} region={preflight?.region} />}
-        </section>
+        </Card>
       )}
 
       {/* ---- Mailboxes (Cognito users in the deployed backend) ---- */}
       {ready && (
-        <section style={box}>
-          <h2>Mailboxes</h2>
-          <p style={{ fontSize: 13, color: "#666", marginTop: 0 }}>
+        <Card>
+          <h2 className="text-lg font-semibold text-on-surface">Mailboxes</h2>
+          <p className="mt-1 text-sm text-on-surface-variant">
             A mailbox is a user that can sign in to the Inbox. Mailboxes live in your deployed backend (Cognito), so the
             backend stack must be deployed first.
           </p>
 
           {mbNoBackend && (
-            <div style={warn}>
+            <Warn className="mt-3">
               No backend deployed yet. Set up a domain above and run the <b>Deploy backend</b> step to create it — then come
               back here to add mailboxes.
-            </div>
+            </Warn>
           )}
 
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-            <label style={{ fontSize: 13 }}>
+          <div className="mt-4 flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
               Email address
-              <br />
               <input
                 aria-label="Mailbox email"
                 value={mbEmail}
                 onChange={(e) => setMbEmail(e.target.value.trim().toLowerCase())}
                 placeholder="you@yourdomain.com"
-                style={input}
+                className={cn(inputCls, "w-64")}
                 {...noAutoCap}
               />
             </label>
-            <label style={{ fontSize: 13 }}>
+            <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
               Password
-              <br />
               <input
                 aria-label="Mailbox password"
                 type="password"
                 value={mbPassword}
                 onChange={(e) => setMbPassword(e.target.value)}
-                style={input}
+                className={cn(inputCls, "w-64")}
               />
             </label>
-            <button
-              onClick={() => void createMb()}
-              disabled={mbBusy || mbNoBackend || !mbEmail || !mbPassword}
-              style={pBtn(mbBusy || mbNoBackend || !mbEmail || !mbPassword)}
-            >
+            <Button onClick={() => void createMb()} disabled={mbBusy || mbNoBackend || !mbEmail || !mbPassword}>
+              {mbBusy ? <Spinner className="border-white/40 border-t-white" /> : null}
               {mbBusy ? "Creating…" : "Create mailbox"}
-            </button>
+            </Button>
           </div>
-          <p style={{ fontSize: 12, color: "#999", marginTop: 6 }}>
+          <p className="mt-1.5 text-xs text-on-surface-variant/70">
             Password must meet the pool policy (min 8 chars, with upper &amp; lower case, a number and a symbol).
           </p>
 
           {mbCreated && (
-            <div style={{ ...box, marginTop: 10, borderColor: "#bbf7d0", background: "#f0fdf4" }}>
-              ✅ Mailbox <b>{mbCreated}</b> created. The <b>Inbox</b> tab is now connected to this backend — go there and sign in
-              as <code style={mono}>{mbCreated}</code>.
+            <div className="mt-3 rounded-lg border border-secondary/30 bg-secondary/10 p-4 text-sm text-on-surface">
+              ✅ Mailbox <b>{mbCreated}</b> created. The <b>Inbox</b> tab is now connected to this backend — go there and sign
+              in as <C>{mbCreated}</C>.
             </div>
           )}
-          {mbError && (
-            <div style={{ ...warn, background: "#fef2f2", borderColor: "#fecaca", color: "#b91c1c" }}>{mbError}</div>
-          )}
+          {mbError && <div className="mt-3 rounded-lg border border-tertiary/30 bg-tertiary-container/10 p-4 text-sm text-tertiary">{mbError}</div>}
 
           {mailboxes && (
-            <div style={{ marginTop: 12, fontSize: 14 }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <strong>Existing mailboxes ({mailboxes.length})</strong>
+            <div className="mt-4 text-sm">
+              <div className="flex items-center justify-between">
+                <strong className="text-on-surface">Existing mailboxes ({mailboxes.length})</strong>
                 {mbBackend && (
-                  <span style={{ color: "#666", fontSize: 12 }}>
-                    backend <code style={mono}>{stackName}</code> · pool <code style={mono}>{mbBackend.userPoolId}</code> · {mbBackend.region}
+                  <span className="font-mono text-xs text-on-surface-variant">
+                    backend <C>{stackName}</C> · pool <C>{mbBackend.userPoolId}</C> · {mbBackend.region}
                   </span>
                 )}
               </div>
               {mailboxes.length === 0 ? (
-                <p style={{ color: "#666", fontSize: 13 }}>No mailboxes yet.</p>
+                <p className="mt-2 text-sm text-on-surface-variant">No mailboxes yet.</p>
               ) : (
-                <ul style={{ margin: "8px 0 0", padding: 0 }}>
+                <ul className="mt-2 flex flex-col gap-2">
                   {mailboxes.map((m) => (
                     <MailboxStorageRow
                       key={m.email}
@@ -716,22 +747,31 @@ export function SetupWizard() {
               )}
             </div>
           )}
-        </section>
+        </Card>
       )}
 
       {/* ---- Mail rules: spam / auth actions + allow/block lists ---- */}
       {ready && !mbNoBackend && (
-        <section style={box}>
+        <Card>
           <PolicyEditor stackName={stackName} />
-        </section>
+        </Card>
       )}
 
-      {/* ---- Retention: how long mail is kept ---- */}
-      {ready && !mbNoBackend && (
-        <section style={box}>
-          <RetentionEditor stackName={stackName} />
-        </section>
-      )}
-    </>
+          {/* ---- Retention: how long mail is kept ---- */}
+          {ready && !mbNoBackend && (
+            <Card>
+              <RetentionEditor stackName={stackName} />
+            </Card>
+          )}
+        </div>
+
+        {/* Right column — guidance ("running this the right way"). */}
+        <aside className="lg:col-span-1">
+          <div className="lg:sticky lg:top-0">
+            <AdminPrivacyNotice />
+          </div>
+        </aside>
+      </div>
+    </div>
   );
 }

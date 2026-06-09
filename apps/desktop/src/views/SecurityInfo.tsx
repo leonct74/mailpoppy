@@ -70,63 +70,48 @@ const FEATURES: Feature[] = [
   },
 ];
 
-const overlay: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.4)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 1000,
-  padding: 16,
-};
-const sheet: React.CSSProperties = {
-  background: "#fff",
-  borderRadius: 12,
-  padding: 24,
-  maxWidth: 620,
-  width: "100%",
-  maxHeight: "85vh",
-  overflowY: "auto",
-  boxShadow: "0 10px 40px rgba(0,0,0,0.25)",
-};
-const badge = (s: Feature["status"]): React.CSSProperties => ({
-  fontSize: 11,
-  fontWeight: 600,
-  padding: "1px 8px",
-  borderRadius: 999,
-  whiteSpace: "nowrap",
-  background: s === "on" ? "#f0fdf4" : "#fff7ed",
-  color: s === "on" ? "#15803d" : "#b45309",
-  border: `1px solid ${s === "on" ? "#bbf7d0" : "#fed7aa"}`,
-});
+const badgeCls = (s: Feature["status"]) =>
+  s === "on"
+    ? "border-secondary/20 bg-secondary/10 text-secondary"
+    : "border-amber-400/30 bg-amber-400/10 text-amber-300";
 
 export function SecurityInfo({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
   return (
-    <div role="dialog" aria-modal="true" aria-label="Email security" style={overlay} onClick={onClose}>
-      <div style={sheet} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h2 style={{ margin: 0 }}>🔒 How your email is protected</h2>
-          <button onClick={onClose} style={{ cursor: "pointer", border: "none", background: "none", fontSize: 20, color: "#777" }} aria-label="Close">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Email security"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-outline-variant/20 bg-surface-container p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold text-on-surface">🔒 How your email is protected</h2>
+          <button onClick={onClose} aria-label="Close" className="rounded-full p-1 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface">
             ✕
           </button>
         </div>
-        <p style={{ color: "#666", fontSize: 13, marginTop: 6 }}>
+        <p className="mt-1.5 text-sm text-on-surface-variant">
           Mailpoppy hosts your domain's email entirely inside your own AWS account. These protections are in place:
         </p>
-        <ul style={{ listStyle: "none", padding: 0, margin: "12px 0 0" }}>
+        <ul className="mt-3 list-none p-0">
           {FEATURES.map((f) => (
-            <li key={f.title} style={{ display: "flex", gap: 12, padding: "10px 0", borderTop: "1px solid #f0f0f0" }}>
-              <span style={{ fontSize: 20, lineHeight: "24px" }} aria-hidden>
+            <li key={f.title} className="flex gap-3 border-t border-outline-variant/10 py-2.5">
+              <span className="text-xl leading-6" aria-hidden>
                 {f.icon}
               </span>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                  <strong style={{ fontSize: 14 }}>{f.title}</strong>
-                  <span style={badge(f.status)}>{f.status === "on" ? "Active" : "Recommended"}</span>
+              <div className="flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <strong className="text-sm text-on-surface">{f.title}</strong>
+                  <span className={`shrink-0 whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-semibold ${badgeCls(f.status)}`}>
+                    {f.status === "on" ? "Active" : "Recommended"}
+                  </span>
                 </div>
-                <div style={{ fontSize: 13, color: "#555", marginTop: 2 }}>{f.detail}</div>
+                <div className="mt-0.5 text-sm text-on-surface-variant">{f.detail}</div>
               </div>
             </li>
           ))}

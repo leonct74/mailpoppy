@@ -1,10 +1,11 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 // Port 1420 + no clearScreen are Tauri conventions, so this drops in cleanly
 // once the Tauri shell is added (see README.md).
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   clearScreen: false,
   // amazon-cognito-identity-js (via its bundled `buffer` polyfill) references the
   // Node global `global` — unguarded (`global.TYPED_ARRAY_SUPPORT`). It doesn't

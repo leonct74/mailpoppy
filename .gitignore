@@ -16,3 +16,7 @@ infra/cdk.out/
 # env / secrets
 .env
 .env.*
+# Claude Code local config
+.claude/
+# Google Stitch design references (kept local, not part of the app build)
+apps/desktop/stitch/

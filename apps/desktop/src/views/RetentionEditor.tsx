@@ -1,22 +1,15 @@
 import { useEffect, useState } from "react";
 import type { RetentionSettings } from "@mailpoppy/core";
 import { getRetention as defaultGet, setRetention as defaultSet } from "../lib/retention";
+import { Button } from "../ui";
 
 // "How long mail is kept" editor. AWS never auto-deletes mail, so the safe default
 // is keep-indefinitely (+ auto-purge Trash). A delete-after window is opt-in and
 // clearly flagged as permanent, because some jurisdictions require data
 // minimisation while others require minimum retention — it's the admin's call.
 
-const input: React.CSSProperties = { padding: 6, border: "1px solid #ccc", borderRadius: 6, font: "inherit", width: 80 };
-const btn = (disabled: boolean): React.CSSProperties => ({
-  padding: "8px 14px",
-  borderRadius: 8,
-  border: "none",
-  background: disabled ? "#cbd5e1" : "#7c3aed",
-  color: "#fff",
-  fontWeight: 600,
-  cursor: disabled ? "default" : "pointer",
-});
+const numInput =
+  "w-20 rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-2 py-1.5 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50";
 
 export interface RetentionEditorProps {
   stackName: string;
@@ -79,58 +72,58 @@ export function RetentionEditor({ stackName, load, save }: RetentionEditorProps)
 
   return (
     <section aria-label="Retention">
-      <h2>Retention — how long mail is kept</h2>
-      <p style={{ fontSize: 13, color: "#666", marginTop: 0 }}>
+      <h2 className="text-lg font-semibold text-on-surface">Retention — how long mail is kept</h2>
+      <p className="mt-1 text-sm text-on-surface-variant">
         AWS never deletes mail on its own — Mailpoppy keeps it until you say otherwise. Some rules require a{" "}
         <i>minimum</i> retention, others a <i>maximum</i> — so this is your call.
       </p>
 
-      {loading && <p style={{ fontSize: 14, color: "#666" }}>Loading retention…</p>}
+      {loading && <p className="mt-3 text-sm text-on-surface-variant">Loading retention…</p>}
 
       {!loading && (
         <>
-          <div style={{ fontSize: 14, marginBottom: 12 }}>
+          <div className="mb-3 mt-4 text-sm text-on-surface">
             Empty the Trash automatically after{" "}
-            <input aria-label="Trash purge days" value={trashPurgeDays} onChange={(e) => setTrashPurgeDays(e.target.value)} style={input} /> days.
+            <input aria-label="Trash purge days" value={trashPurgeDays} onChange={(e) => setTrashPurgeDays(e.target.value)} className={numInput} /> days.
           </div>
 
-          <div style={{ fontSize: 14 }}>
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>Keep mail for how long?</div>
-            <label style={{ display: "block", marginBottom: 4 }}>
-              <input type="radio" name="ret" aria-label="Keep mail indefinitely" checked={keepForever} onChange={() => setKeepForever(true)} /> Keep
-              indefinitely <span style={{ color: "#999", fontSize: 12 }}>(recommended — never auto-deleted)</span>
+          <div className="text-sm text-on-surface">
+            <div className="mb-2 font-semibold">Keep mail for how long?</div>
+            <label className="mb-2 flex items-center gap-2">
+              <input type="radio" name="ret" aria-label="Keep mail indefinitely" checked={keepForever} onChange={() => setKeepForever(true)} className="size-4 accent-primary" />
+              Keep indefinitely <span className="text-xs text-on-surface-variant/70">(recommended — never auto-deleted)</span>
             </label>
-            <label style={{ display: "block" }}>
-              <input type="radio" name="ret" aria-label="Delete mail after a set time" checked={!keepForever} onChange={() => setKeepForever(false)} /> Delete mail
-              older than{" "}
+            <label className="flex flex-wrap items-center gap-2">
+              <input type="radio" name="ret" aria-label="Delete mail after a set time" checked={!keepForever} onChange={() => setKeepForever(false)} className="size-4 accent-primary" />
+              Delete mail older than{" "}
               <input
                 aria-label="Retention days"
                 value={retentionDays}
                 onChange={(e) => setRetentionDays(e.target.value)}
                 disabled={keepForever}
-                style={{ ...input, opacity: keepForever ? 0.5 : 1 }}
+                className={numInput}
               />{" "}
               days
             </label>
           </div>
 
           {!keepForever && (
-            <div style={{ marginTop: 10, background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e", borderRadius: 8, padding: "8px 12px", fontSize: 13 }}>
+            <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
               ⚠️ This <b>permanently deletes</b> any mail older than {Math.max(1, Math.floor(Number(retentionDays) || 0)) || "—"} days, in
               every folder, on the next daily cleanup. Make sure this matches the rules that apply to your users.
             </div>
           )}
 
-          <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
-            <button onClick={() => void onSave()} disabled={saving} style={btn(saving)}>
+          <div className="mt-4 flex items-center gap-3">
+            <Button onClick={() => void onSave()} disabled={saving}>
               {saving ? "Saving…" : "Save retention"}
-            </button>
-            {saved && <span style={{ color: "#166534", fontSize: 13 }}>✅ Saved.</span>}
+            </Button>
+            {saved && <span className="text-sm text-secondary">✅ Saved.</span>}
           </div>
         </>
       )}
 
-      {err && <p style={{ color: "crimson", fontSize: 13 }}>{err}</p>}
+      {err && <p className="mt-2 text-sm text-tertiary">{err}</p>}
     </section>
   );
 }

@@ -11,20 +11,36 @@ const folders: ImapFolderInfo[] = [
   { path: "Projects", name: "Projects", mappedFolder: "projects", messages: 0 },
 ];
 
-function fill() {
+// The destination is now a picker populated from the deployed backend's
+// mailboxes, so tests inject a mailbox list (two domains) and select from it.
+const loadMailboxes = async () => ({
+  ok: true as const,
+  region: "eu-west-1",
+  userPoolId: "pool-1",
+  clientId: "client-1",
+  apiBaseUrl: "https://api.example.com",
+  mailboxes: [
+    { email: "you@yourdomain.com", status: "CONFIRMED" },
+    { email: "team@otherdomain.com", status: "CONFIRMED" },
+  ],
+});
+
+async function fill() {
   fireEvent.change(screen.getByLabelText("IMAP host"), { target: { value: "imap.example.com" } });
   fireEvent.change(screen.getByLabelText("IMAP username"), { target: { value: "old@example.com" } });
   fireEvent.change(screen.getByLabelText("IMAP password"), { target: { value: "secret" } });
-  fireEvent.change(screen.getByLabelText("Destination mailbox"), { target: { value: "you@yourdomain.com" } });
+  // The destination picker loads asynchronously; open it and choose a mailbox.
+  fireEvent.click(await screen.findByRole("button", { name: "Destination mailbox" }));
+  fireEvent.click(await screen.findByRole("option", { name: "you@yourdomain.com" }));
 }
 
 describe("MigrationView", () => {
   it("tests the connection and lists folders with their mapped Mailpoppy folder", async () => {
     const test = vi.fn(async () => ({ ok: true as const, folders }));
     const run = vi.fn();
-    render(<MigrationView test={test} run={run} />);
+    render(<MigrationView test={test} run={run} loadMailboxes={loadMailboxes} />);
 
-    fill();
+    await fill();
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
 
     expect(await screen.findByText("INBOX")).toBeInTheDocument();
@@ -50,9 +66,9 @@ describe("MigrationView", () => {
       totalSkipped: 0,
     };
     const run = vi.fn(async () => summary);
-    render(<MigrationView test={test} run={run} />);
+    render(<MigrationView test={test} run={run} loadMailboxes={loadMailboxes} />);
 
-    fill();
+    await fill();
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
     await screen.findByText("INBOX");
 
@@ -73,9 +89,9 @@ describe("MigrationView", () => {
     const test = vi.fn(async () => {
       throw new Error("AUTHENTICATIONFAILED");
     });
-    render(<MigrationView test={test} run={vi.fn()} />);
+    render(<MigrationView test={test} run={vi.fn()} loadMailboxes={loadMailboxes} />);
 
-    fill();
+    await fill();
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
 
     expect(await screen.findByText(/AUTHENTICATIONFAILED/)).toBeInTheDocument();
@@ -92,9 +108,9 @@ describe("MigrationView", () => {
       totalImported: 12,
       totalSkipped: 0,
     }));
-    render(<MigrationView test={test} run={run} />);
+    render(<MigrationView test={test} run={run} loadMailboxes={loadMailboxes} />);
 
-    fill();
+    await fill();
     fireEvent.click(screen.getByLabelText("Preview only"));
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
     await screen.findByText("INBOX");

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Sparkles, RefreshCw, AlertTriangle, ExternalLink, ChevronDown, ChevronUp, X } from "lucide-react";
 import {
   loadInventory as defaultLoad,
   groupByService,
@@ -13,6 +14,7 @@ import {
 } from "../lib/teardown";
 import { listMailboxes as defaultListMailboxes, type Mailbox } from "../lib/mailbox";
 import { resolveStackName } from "../lib/deploymentConfig";
+import { Card, Button, Spinner, cn } from "../ui";
 
 // "What Mailpoppy did to your account" (DESIGN §14.1). Shows the authoritative
 // CloudFormation inventory of the deployed stack — grouped by service, every
@@ -20,29 +22,49 @@ import { resolveStackName } from "../lib/deploymentConfig";
 // out-of-stack mutations (Route53 / SES identity / rule-set activation) as a
 // created/deleted timeline. The whole point is trust: no surprise resources.
 
-const box: React.CSSProperties = { border: "1px solid #ddd", borderRadius: 12, padding: 16, marginTop: 16 };
-const mono: React.CSSProperties = { fontFamily: "ui-monospace, monospace", fontSize: 12, wordBreak: "break-all" };
-const th: React.CSSProperties = { textAlign: "left", fontSize: 12, color: "#666", padding: "4px 8px", borderBottom: "1px solid #eee" };
-const td: React.CSSProperties = { padding: "6px 8px", borderBottom: "1px solid #f3f3f3", verticalAlign: "top" };
-const link: React.CSSProperties = { color: "#7c3aed", textDecoration: "none" };
+type Action = "created" | "deleted" | "updated";
 
-function actionBadge(action: "created" | "deleted" | "updated"): React.CSSProperties {
-  const palette =
+/** Status chip — low-opacity hue + solid text (design "Status Chips" spec). */
+function ActionChip({ action }: { action: Action }) {
+  const tone =
     action === "created"
-      ? { bg: "#f0fdf4", fg: "#15803d", border: "#bbf7d0" }
+      ? "bg-secondary/10 text-secondary border-secondary/20"
       : action === "updated"
-        ? { bg: "#eff6ff", fg: "#1d4ed8", border: "#bfdbfe" }
-        : { bg: "#fef2f2", fg: "#b91c1c", border: "#fecaca" };
-  return {
-    fontSize: 11,
-    fontWeight: 600,
-    padding: "1px 8px",
-    borderRadius: 999,
-    background: palette.bg,
-    color: palette.fg,
-    border: `1px solid ${palette.border}`,
-  };
+        ? "bg-surface-bright text-on-surface border-outline-variant/30"
+        : "bg-tertiary-container/15 text-tertiary border-tertiary/20";
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-xs", tone)}>
+      {action === "deleted" ? (
+        <X className="size-3" />
+      ) : (
+        <span className={cn("size-1.5 rounded-full", action === "created" ? "bg-secondary" : "bg-on-surface-variant")} />
+      )}
+      {action}
+    </span>
+  );
 }
+
+function StatTile({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="rounded-lg border border-outline-variant/5 bg-surface-container-highest/50 p-4">
+      <div className="mb-1 font-mono text-[11px] uppercase tracking-wider text-on-surface-variant">{label}</div>
+      <div className="text-2xl font-semibold tracking-tight text-on-surface">{value}</div>
+    </div>
+  );
+}
+
+function Th({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <th className={cn("border-b border-outline-variant/10 px-4 py-3 text-left font-mono text-xs font-medium uppercase tracking-wider text-on-surface-variant", className)}>
+      {children}
+    </th>
+  );
+}
+function Td({ children, className }: { children: ReactNode; className?: string }) {
+  return <td className={cn("border-b border-outline-variant/5 px-4 py-3 align-top text-sm", className)}>{children}</td>;
+}
+
+const consoleLink = "inline-flex items-center gap-1 text-primary hover:text-primary-container hover:underline";
 
 export function ResourcesView({
   stackName = resolveStackName(),
@@ -148,69 +170,72 @@ export function ResourcesView({
 
   // Danger zone — pinned near the top, collapsed by default (see state comment).
   const dangerZone = somethingDeployed ? (
-    <div style={{ ...box, borderColor: "#fecaca", background: "#fff5f5" }}>
+    <div className="overflow-hidden rounded-xl border border-error/20 bg-[#1a0f14]">
       <button
         type="button"
         aria-label="Toggle danger zone"
         aria-expanded={dangerOpen}
         onClick={() => setDangerOpen((o) => !o)}
-        style={{
-          all: "unset",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          width: "100%",
-        }}
+        className="flex w-full items-center justify-between gap-4 p-6 text-left"
       >
-        <strong style={{ color: "#b91c1c" }}>⚠️ Danger zone — remove everything</strong>
-        <span style={{ color: "#b91c1c", fontSize: 13, fontWeight: 600 }}>{dangerOpen ? "Hide ▲" : "Show ▼"}</span>
+        <div>
+          <div className="mb-1 flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-error">
+            <AlertTriangle className="size-4" />
+            Danger zone
+          </div>
+          <h3 className="text-lg font-semibold text-on-surface">Remove everything</h3>
+          {!dangerOpen && (
+            <p className="mt-1 text-sm text-on-surface-variant">
+              Permanently delete the entire backend{knownDomain ? <> for <code className="font-mono text-tertiary">{knownDomain}</code></> : null} —
+              stack, all stored mail &amp; mailboxes, the SES identity and DNS.
+            </p>
+          )}
+        </div>
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-error/20 bg-error/5 px-3 py-1.5 text-sm font-medium text-error">
+          {dangerOpen ? <>Hide <ChevronUp className="size-4" /></> : <>Show <ChevronDown className="size-4" /></>}
+        </span>
       </button>
 
-      {!dangerOpen ? (
-        <p style={{ fontSize: 12, color: "#7f1d1d", margin: "6px 0 0" }}>
-          Permanently delete the entire backend{knownDomain ? <> for <code style={mono}>{knownDomain}</code></> : null} —
-          stack, all stored mail &amp; mailboxes, the SES identity and DNS. Click <b>Show</b> to reveal.
-        </p>
-      ) : (
-        <>
-          <p style={{ fontSize: 13, color: "#7f1d1d", marginTop: 6 }}>
-            Permanently delete the <b>entire backend</b>: the CloudFormation stack, <b>all stored mail and mailboxes</b>{" "}
-            (S3, DynamoDB, Cognito), the deploy bucket, and the SES identity + DNS records (MX/DKIM/DMARC/SPF) for{" "}
+      {dangerOpen && (
+        <div className="border-t border-error/10 p-6 pt-5">
+          <p className="text-sm text-on-surface-variant">
+            Permanently delete the <b className="text-on-surface">entire backend</b>: the CloudFormation stack,{" "}
+            <b className="text-on-surface">all stored mail and mailboxes</b> (S3, DynamoDB, Cognito), the deploy bucket, and
+            the SES identity + DNS records (MX/DKIM/DMARC/SPF) for{" "}
             {provDomains && provDomains.length > 0 ? (
-              <b>
+              <b className="text-on-surface">
                 every provisioned domain:{" "}
                 {provDomains.map((d, i) => (
                   <span key={d}>
                     {i > 0 ? ", " : ""}
-                    <code style={mono}>{d}</code>
+                    <code className="font-mono text-tertiary">{d}</code>
                   </span>
                 ))}
               </b>
             ) : knownDomain ? (
-              <code style={mono}>{knownDomain}</code>
+              <code className="font-mono text-tertiary">{knownDomain}</code>
             ) : (
               "every provisioned domain"
             )}
-            . <b>This cannot be undone.</b>
+            . <b className="text-tertiary">This cannot be undone.</b>
           </p>
 
           {/* The mailboxes that will be destroyed — across EVERY domain, not just
               the one named in the confirm prompt. */}
-          <div style={{ fontSize: 13, color: "#7f1d1d", marginBottom: 8 }}>
+          <div className="mt-3 text-sm text-on-surface-variant">
             {mbLoading ? (
               "Checking which mailboxes will be deleted…"
             ) : mbError ? (
-              <span style={{ color: "#b45309" }}>Couldn’t list mailboxes ({mbError}) — they will still be deleted.</span>
+              <span className="text-amber-300">Couldn’t list mailboxes ({mbError}) — they will still be deleted.</span>
             ) : mailboxes && mailboxes.length > 0 ? (
               <>
-                <b>
+                <b className="text-on-surface">
                   This deletes all {mailboxes.length} mailbox{mailboxes.length === 1 ? "" : "es"} and their mail — across
-                  every domain{knownDomain ? <>, not just <code style={mono}>{knownDomain}</code></> : null}:
+                  every domain{knownDomain ? <>, not just <code className="font-mono text-tertiary">{knownDomain}</code></> : null}:
                 </b>
-                <ul style={{ margin: "4px 0 0 18px" }}>
+                <ul className="mt-1 list-disc pl-5 font-mono text-xs">
                   {mailboxes.map((m) => (
-                    <li key={m.email} style={mono}>{m.email}</li>
+                    <li key={m.email}>{m.email}</li>
                   ))}
                 </ul>
               </>
@@ -220,17 +245,17 @@ export function ResourcesView({
           </div>
 
           {tdResult ? (
-            <div style={{ ...box, marginTop: 8, borderColor: "#bbf7d0", background: "#f0fdf4" }}>
-              <strong style={{ color: "#15803d" }}>Removed {tdResult.deleted.length} item(s).</strong>
-              <ul style={{ margin: "6px 0 0 18px", fontSize: 13 }}>
+            <div className="mt-4 rounded-lg border border-secondary/30 bg-secondary/10 p-4">
+              <strong className="text-secondary">Removed {tdResult.deleted.length} item(s).</strong>
+              <ul className="mt-1.5 list-disc pl-5 font-mono text-xs text-on-surface-variant">
                 {tdResult.deleted.map((d, i) => (
-                  <li key={i} style={mono}>{d}</li>
+                  <li key={i}>{d}</li>
                 ))}
               </ul>
               {tdResult.warnings.length > 0 && (
-                <div style={{ marginTop: 8, fontSize: 13, color: "#b45309" }}>
+                <div className="mt-2 text-sm text-amber-300">
                   <b>Warnings:</b>
-                  <ul style={{ margin: "4px 0 0 18px" }}>
+                  <ul className="mt-1 list-disc pl-5">
                     {tdResult.warnings.map((w, i) => (
                       <li key={i}>{w}</li>
                     ))}
@@ -239,14 +264,16 @@ export function ResourcesView({
               )}
             </div>
           ) : tearingDown ? (
-            <div style={{ fontSize: 14, color: "#7f1d1d", marginTop: 8 }}>
-              Removing everything… this can take a few minutes (waiting for CloudFormation to delete the stack). Please
-              keep the app open.
+            <div className="mt-4 flex items-center gap-2 text-sm text-on-surface-variant">
+              <Spinner /> Removing everything… this can take a few minutes (waiting for CloudFormation to delete the
+              stack). Please keep the app open.
             </div>
           ) : (
-            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-              <label style={{ fontSize: 13, color: "#7f1d1d" }}>
-                Type {knownDomain ? <code style={mono}>{knownDomain}</code> : "the domain name"} to confirm{" "}
+            <div className="mt-4 flex flex-wrap items-end gap-3">
+              <label className="text-sm text-on-surface-variant">
+                <span className="mb-1 block">
+                  Type {knownDomain ? <code className="font-mono text-tertiary">{knownDomain}</code> : "the domain name"} to confirm
+                </span>
                 <input
                   aria-label="Type domain to confirm teardown"
                   value={confirmText}
@@ -255,165 +282,180 @@ export function ResourcesView({
                   autoCapitalize="off"
                   autoCorrect="off"
                   spellCheck={false}
-                  style={{ padding: 6, minWidth: 220, marginLeft: 6 }}
+                  className="w-64 rounded-lg border border-error/30 bg-surface-container-lowest px-3 py-2 font-mono text-sm text-on-surface placeholder:text-outline-variant focus:border-error focus:outline-none focus:ring-2 focus:ring-error/30"
                 />
               </label>
-              <button
-                onClick={() => void onTeardown()}
-                disabled={!canTearDown}
-                style={{
-                  padding: "10px 18px",
-                  fontSize: 14,
-                  fontWeight: 600,
-                  color: "#fff",
-                  background: "#dc2626",
-                  border: "none",
-                  borderRadius: 8,
-                  opacity: canTearDown ? 1 : 0.5,
-                  cursor: canTearDown ? "pointer" : "default",
-                }}
-              >
+              <Button variant="danger" disabled={!canTearDown} onClick={() => void onTeardown()}>
                 Remove everything
-              </button>
+              </Button>
             </div>
           )}
 
-          {tdError && <div style={{ marginTop: 8, fontSize: 13, color: "#b91c1c" }}>Teardown failed: {tdError}</div>}
-        </>
+          {tdError && <div className="mt-3 text-sm text-tertiary">Teardown failed: {tdError}</div>}
+        </div>
       )}
     </div>
   ) : null;
 
   return (
-    <section>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <h2 style={{ margin: 0 }}>What Mailpoppy did to your account</h2>
-          <p style={{ color: "#666", margin: "4px 0 0", fontSize: 13 }}>
-            Everything Mailpoppy created in your own AWS account — read live from CloudFormation, plus a
-            local log of DNS/SES changes. Verify any of it in your console.
-          </p>
-        </div>
-        <button onClick={() => void refresh()} disabled={loading} style={{ cursor: "pointer", padding: "8px 14px" }}>
-          {loading ? "…" : "Refresh"}
-        </button>
+    <section className="flex flex-col gap-6">
+      {/* Overview (Stitch layout): summary + stat tiles fill the left; the danger
+          zone sits in a compact right column to free up vertical space up top. */}
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-3">
+        <Card className={dangerZone ? "lg:col-span-2" : "lg:col-span-3"}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-on-surface">
+                <Sparkles className="size-5 text-primary" />
+                What Mailpoppy did to your account
+              </h2>
+              <p className="mt-1 max-w-2xl text-on-surface-variant">
+                Everything Mailpoppy created in your own AWS account — read live from CloudFormation, plus a local log of
+                DNS/SES changes. Verify any of it in your console.
+              </p>
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => void refresh()} disabled={loading}>
+              {loading ? <Spinner /> : <RefreshCw className="size-4" />}
+              Refresh
+            </Button>
+          </div>
+
+          {/* Provisioning summary stats (real counts from the live inventory + ledger). */}
+          {inv && inv.stackExists && (
+            <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <StatTile label="Stack resources" value={inv.resources.length} />
+              <StatTile label="AWS services" value={grouped.length} />
+              <StatTile label="DNS / SES changes" value={ledger.length} />
+              <StatTile label="Region" value={<span className="font-mono text-lg">{inv.region}</span>} />
+            </div>
+          )}
+        </Card>
+
+        {/* Right column — danger zone (pinned at the top, collapsed by default). */}
+        {dangerZone && <div className="lg:col-span-1">{dangerZone}</div>}
       </div>
 
-      {/* Danger zone, pinned at the top so it's findable in a long list. */}
-      {dangerZone}
-
       {error && (
-        <div style={{ ...box, borderColor: "#fecaca", background: "#fef2f2", color: "#b91c1c" }}>
-          Couldn’t read your account: {error}
-          <div style={{ color: "#7f1d1d", fontSize: 13, marginTop: 6 }}>
+        <Card className="border-tertiary/30 bg-tertiary-container/10">
+          <div className="text-tertiary">Couldn’t read your account: {error}</div>
+          <div className="mt-1.5 text-sm text-on-surface-variant">
             Make sure the provisioning helper is running and your AWS credentials are set.
           </div>
-        </div>
+        </Card>
       )}
 
       {inv && !inv.stackExists && (
-        <div style={{ ...box, background: "#f8fafc" }}>
-          <strong>No Mailpoppy backend is deployed</strong> in <code>{inv.region}</code> (stack{" "}
-          <code>{inv.stackName}</code> not found). Nothing is running in your account from the backend stack.
+        <Card className="bg-surface-container/60">
+          <strong className="text-on-surface">No Mailpoppy backend is deployed</strong> in{" "}
+          <code className="font-mono text-sm text-on-surface-variant">{inv.region}</code> (stack{" "}
+          <code className="font-mono text-sm text-on-surface-variant">{inv.stackName}</code> not found). Nothing is running
+          in your account from the backend stack.
           {ledger.length === 0 && " The change log below is empty too."}
-        </div>
+        </Card>
       )}
 
       {inv && inv.stackExists && (
-        <div style={box}>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <strong>Deployed stack: {inv.stackName}</strong>
-            <span style={{ color: "#666", fontSize: 13 }}>
+        <Card className="p-0">
+          <div className="flex items-center justify-between border-b border-outline-variant/10 bg-surface-container-low/50 p-5">
+            <strong className="text-on-surface">Deployed stack: {inv.stackName}</strong>
+            <span className="font-mono text-xs text-on-surface-variant">
               {inv.resources.length} resources · {inv.region}
             </span>
           </div>
-          {grouped.map((g) => (
-            <div key={g.service} style={{ marginTop: 14 }}>
-              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
-                {g.service} <span style={{ color: "#999", fontWeight: 400 }}>({g.items.length})</span>
+          <div className="p-5">
+            {grouped.map((g) => (
+              <div key={g.service} className="mt-5 first:mt-0">
+                <div className="mb-2 text-sm font-semibold text-on-surface">
+                  {g.service} <span className="font-normal text-on-surface-variant">({g.items.length})</span>
+                </div>
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr>
+                      <Th>Name</Th>
+                      <Th>Type</Th>
+                      <Th>Status</Th>
+                      <Th>Console</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {g.items.map((r) => {
+                      const url = awsConsoleUrl(r.type, r.physicalId, inv.region);
+                      return (
+                        <tr key={r.logicalId} className="transition-colors hover:bg-white/[0.02]">
+                          <Td className="break-all font-mono text-xs text-on-surface">{r.physicalId || r.logicalId}</Td>
+                          <Td className="text-xs text-on-surface-variant">{r.type}</Td>
+                          <Td className="text-xs text-on-surface-variant">{r.status}</Td>
+                          <Td>
+                            {url ? (
+                              <a href={url} target="_blank" rel="noreferrer" className={consoleLink}>
+                                Open <ExternalLink className="size-3" />
+                              </a>
+                            ) : (
+                              <span className="text-on-surface-variant/50">—</span>
+                            )}
+                          </Td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr>
-                    <th style={th}>Name</th>
-                    <th style={th}>Type</th>
-                    <th style={th}>Status</th>
-                    <th style={th}>Console</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {g.items.map((r) => {
-                    const url = awsConsoleUrl(r.type, r.physicalId, inv.region);
-                    return (
-                      <tr key={r.logicalId}>
-                        <td style={{ ...td, ...mono }}>{r.physicalId || r.logicalId}</td>
-                        <td style={{ ...td, fontSize: 12, color: "#555" }}>{r.type}</td>
-                        <td style={{ ...td, fontSize: 12 }}>{r.status}</td>
-                        <td style={td}>
-                          {url ? (
-                            <a href={url} target="_blank" rel="noreferrer" style={link}>
-                              Open ↗
-                            </a>
-                          ) : (
-                            <span style={{ color: "#bbb", fontSize: 12 }}>—</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </Card>
       )}
 
       {/* Out-of-stack change log (created/deleted) */}
-      <div style={box}>
-        <strong>Change log (DNS / SES — outside the stack)</strong>
+      <Card className="p-0">
+        <div className="border-b border-outline-variant/10 bg-surface-container-low/50 p-5">
+          <strong className="text-on-surface">Change log</strong>
+          <span className="ml-2 text-sm text-on-surface-variant">DNS / SES — outside the stack</span>
+        </div>
         {ledger.length === 0 ? (
-          <p style={{ color: "#666", fontSize: 13, marginTop: 8 }}>No direct DNS/SES changes recorded yet.</p>
+          <p className="p-5 text-sm text-on-surface-variant">No direct DNS/SES changes recorded yet.</p>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
-            <thead>
-              <tr>
-                <th style={th}>When</th>
-                <th style={th}>Action</th>
-                <th style={th}>Service</th>
-                <th style={th}>Resource</th>
-                <th style={th}>Name</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ledger.map((e, i) => {
-                const url = ledgerConsoleUrl(e);
-                return (
-                  <tr key={`${e.ts}-${i}`}>
-                    <td style={{ ...td, fontSize: 12, color: "#555", whiteSpace: "nowrap" }}>
-                      {new Date(e.ts).toLocaleString()}
-                    </td>
-                    <td style={td}>
-                      <span style={actionBadge(e.action)}>{e.action}</span>
-                    </td>
-                    <td style={{ ...td, fontSize: 12 }}>{e.service}</td>
-                    <td style={{ ...td, fontSize: 12, color: "#555" }}>{e.resourceType}</td>
-                    <td style={{ ...td, ...mono }}>
-                      {url ? (
-                        <a href={url} target="_blank" rel="noreferrer" style={link}>
-                          {e.name} ↗
-                        </a>
-                      ) : (
-                        e.name
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-surface-container-low">
+                  <Th>When</Th>
+                  <Th>Action</Th>
+                  <Th>Service</Th>
+                  <Th>Resource</Th>
+                  <Th>Name</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {ledger.map((e, i) => {
+                  const url = ledgerConsoleUrl(e);
+                  const deleted = e.action === "deleted";
+                  return (
+                    <tr key={`${e.ts}-${i}`} className="transition-colors hover:bg-white/[0.02]">
+                      <Td className={cn("whitespace-nowrap text-xs text-on-surface-variant", deleted && "line-through opacity-60")}>
+                        {new Date(e.ts).toLocaleString()}
+                      </Td>
+                      <Td>
+                        <ActionChip action={e.action} />
+                      </Td>
+                      <Td className={cn("text-xs", deleted ? "text-on-surface-variant/60" : "text-on-surface")}>{e.service}</Td>
+                      <Td className="text-xs text-on-surface-variant">{e.resourceType}</Td>
+                      <Td className="font-mono text-xs">
+                        {url ? (
+                          <a href={url} target="_blank" rel="noreferrer" className={consoleLink}>
+                            {e.name} <ExternalLink className="size-3" />
+                          </a>
+                        ) : (
+                          <span className={deleted ? "text-on-surface-variant/60 line-through" : "text-on-surface"}>{e.name}</span>
+                        )}
+                      </Td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
-      </div>
-
+      </Card>
     </section>
   );
 }

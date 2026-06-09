@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ShieldCheck, ChevronDown, ChevronRight } from "lucide-react";
 
 // A reassuring (not scary) panel that makes the admin aware of their
 // responsibilities and shows how Mailpoppy helps them meet them. The admin runs
@@ -16,17 +17,6 @@ function initialOpen(): boolean {
   }
 }
 
-const mono: React.CSSProperties = { fontFamily: "ui-monospace, monospace" };
-
-const panel: React.CSSProperties = {
-  border: "1px solid #bfdbfe",
-  background: "#eff6ff",
-  borderRadius: 12,
-  padding: "14px 18px",
-  marginTop: 16,
-  color: "#1e3a5f",
-};
-
 export function AdminPrivacyNotice() {
   const [open, setOpen] = useState(initialOpen);
 
@@ -41,49 +31,53 @@ export function AdminPrivacyNotice() {
   }
 
   return (
-    <section style={panel} aria-label="Privacy and responsibilities">
+    <section aria-label="Privacy and responsibilities" className="rounded-xl border border-primary/20 bg-primary/5 p-4">
       <button
         onClick={toggle}
         aria-expanded={open}
-        style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "#1e40af", fontWeight: 700, fontSize: 15 }}
+        className="flex w-full items-center gap-2 text-left font-semibold text-primary"
       >
-        {open ? "▾" : "▸"} 🛡️ Running this the right way — what Mailpoppy handles for you
+        {open ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}
+        <ShieldCheck className="size-4 shrink-0" />
+        Running this the right way — what Mailpoppy handles for you
       </button>
 
       {open && (
-        <div style={{ marginTop: 10, fontSize: 14, lineHeight: 1.55 }}>
-          <p style={{ margin: "0 0 10px" }}>
-            Mailpoppy runs entirely inside <b>your own AWS account</b>, so you stay in full control of your users'
-            email. That control also makes you its <b>data controller</b> — and Mailpoppy is built to help you handle
-            that responsibly:
+        <div className="mt-3 text-sm leading-relaxed text-on-surface-variant">
+          <p className="mb-2.5">
+            Mailpoppy runs entirely inside <b className="text-on-surface">your own AWS account</b>, so you stay in full
+            control of your users' email. That control also makes you its <b className="text-on-surface">data controller</b> —
+            and Mailpoppy is built to help you handle that responsibly:
           </p>
-          <ul style={{ margin: "0 0 10px", paddingLeft: 22 }}>
+          <ul className="mb-2.5 list-disc space-y-1.5 pl-5">
             <li>
-              <b>Your AWS keys never leave your computer.</b> Mailpoppy reads your AWS credentials the same way the AWS
-              CLI does — from your machine's own configuration (your <code style={mono}>~/.aws</code> profile, SSO, or
-              environment) — and uses them <b>locally</b> to act on your account. It does <b>not</b> copy, upload, or
-              store them anywhere — not on Mailpoppy's servers, not in any cloud. The helper that uses them runs only on
-              your own computer, and every AWS action goes straight from your machine to your account.
+              <b className="text-on-surface">Your AWS keys never leave your computer.</b> Mailpoppy reads your AWS
+              credentials the same way the AWS CLI does — from your machine's own configuration (your{" "}
+              <code className="font-mono text-on-surface">~/.aws</code> profile, SSO, or environment) — and uses them{" "}
+              <b className="text-on-surface">locally</b> to act on your account. It does <b className="text-on-surface">not</b>{" "}
+              copy, upload, or store them anywhere — not on Mailpoppy's servers, not in any cloud. The helper that uses them
+              runs only on your own computer, and every AWS action goes straight from your machine to your account.
             </li>
             <li>
-              <b>You choose where data lives.</b> Pick the AWS region below to match any data-residency rules that apply
-              to your users (for example, an EU region for EU personal data).
+              <b className="text-on-surface">You choose where data lives.</b> Pick the AWS region below to match any
+              data-residency rules that apply to your users (for example, an EU region for EU personal data).
             </li>
             <li>
-              <b>Mail belongs to its owner.</b> Each mailbox is opened with the user's own password. Mailpoppy never
-              asks you to read someone's mail, and you shouldn't access it without their authorization.
+              <b className="text-on-surface">Mail belongs to its owner.</b> Each mailbox is opened with the user's own
+              password. Mailpoppy never asks you to read someone's mail, and you shouldn't access it without their
+              authorization.
             </li>
             <li>
-              <b>You decide how long mail is kept.</b> Some rules set a minimum retention, others a maximum — Mailpoppy
-              lets you set a policy that fits (by default, mail is kept until you delete it).
+              <b className="text-on-surface">You decide how long mail is kept.</b> Some rules set a minimum retention,
+              others a maximum — Mailpoppy lets you set a policy that fits (by default, mail is kept until you delete it).
             </li>
             <li>
-              <b>Nothing is hidden.</b> The <b>AWS Resources</b> tab shows exactly what Mailpoppy created in your
-              account. Everything runs in your own account — and if you want a full access log, you can switch on AWS
-              CloudTrail there yourself.
+              <b className="text-on-surface">Nothing is hidden.</b> The <b className="text-on-surface">AWS Resources</b> tab
+              shows exactly what Mailpoppy created in your account. Everything runs in your own account — and if you want a
+              full access log, you can switch on AWS CloudTrail there yourself.
             </li>
           </ul>
-          <p style={{ margin: 0, fontSize: 13, color: "#475569" }}>
+          <p className="text-xs text-on-surface-variant/70">
             This is guidance to help you set things up correctly — not legal advice. When in doubt, check the rules that
             apply to your users.
           </p>

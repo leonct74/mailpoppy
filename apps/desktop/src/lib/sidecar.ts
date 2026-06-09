@@ -1,8 +1,52 @@
 // Thin client for the local provisioning sidecar (desktop-admin-only).
 const SIDECAR = "http://127.0.0.1:8787";
 
+// Low-level connectivity failures that bubble up from the AWS SDK inside the
+// sidecar when this machine is offline or its DNS is unavailable. We translate
+// them into one clear, actionable message instead of leaking a raw 5xx / a
+// cryptic "getaddrinfo ENOTFOUND route53.amazonaws.com".
+const NETWORK_ERROR_CODES = [
+  "ENOTFOUND", // DNS lookup failed (offline / DNS down)
+  "EAI_AGAIN", // DNS temporary failure
+  "ETIMEDOUT", // connection timed out
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+  "EHOSTDOWN",
+];
+// A connectivity failure means different things by endpoint: the migration
+// routes talk to the *source* mail server the user is importing from (often not
+// AWS at all), while everything else talks to AWS. Point the user at the right
+// place instead of blaming "AWS" for an unreachable IMAP host.
+function networkMessage(path: string): string {
+  return path.startsWith("/migrate")
+    ? "Couldn't reach the mail server you're importing from. Check the host and port are correct and your internet connection is up, then try again."
+    : "Couldn't reach AWS — please check your internet connection and try again.";
+}
+
 export async function sidecar<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${SIDECAR}${path}`, init);
-  if (!res.ok) throw new Error(`sidecar ${res.status}: ${await res.text()}`);
+  let res: Response;
+  try {
+    res = await fetch(`${SIDECAR}${path}`, init);
+  } catch {
+    // fetch() rejects only on a transport-level failure. The sidecar binds
+    // 127.0.0.1, so this means the local helper process itself isn't reachable
+    // (e.g. still starting, or crashed) — not an internet problem.
+    throw new Error(
+      "Couldn't reach Mailpoppy's local helper. Please restart the app and try again.",
+    );
+  }
+  if (!res.ok) {
+    const body = await res.text();
+    // A connectivity failure → tell the user what was unreachable (AWS, or the
+    // source mail server for migrations), rather than surfacing the raw 500.
+    if (NETWORK_ERROR_CODES.some((code) => body.includes(code))) {
+      throw new Error(networkMessage(path));
+    }
+    // Everything else keeps the original format so callers that key off the
+    // status code (e.g. the wizard's "no backend yet" 404 detection) still work.
+    throw new Error(`sidecar ${res.status}: ${body}`);
+  }
   return (await res.json()) as T;
 }

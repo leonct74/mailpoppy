@@ -1,12 +1,13 @@
 import { useState } from "react";
 import type { Authenticator } from "../lib/auth";
+import { Card, Button, Spinner } from "../ui";
 
 // Mailbox sign-in (Cognito). On success the parent gets a getToken() it hands to
 // the live MailClient. Admin-created users are prompted to set a password first.
 
-const box: React.CSSProperties = { border: "1px solid #ddd", borderRadius: 12, padding: 20, marginTop: 16, maxWidth: 420 };
-const field: React.CSSProperties = { width: "100%", padding: 8, marginBottom: 10 };
-const label: React.CSSProperties = { display: "block", fontSize: 13, color: "#555", marginBottom: 2 };
+const fieldCls =
+  "w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-outline-variant focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30";
+const labelCls = "mb-1 block text-sm text-on-surface-variant";
 
 export function LoginView({
   auth,
@@ -44,35 +45,44 @@ export function LoginView({
   }
 
   return (
-    <div style={box}>
-      <h3 style={{ marginTop: 0 }}>Sign in to your mailbox</h3>
+    <Card className="max-w-md">
+      <h3 className="text-lg font-semibold text-on-surface">Sign in to your mailbox</h3>
 
-      {!needsNewPassword ? (
-        <>
-          <label style={label}>Email</label>
-          <input aria-label="Email" style={field} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@yourdomain.com" autoComplete="username" />
-          <label style={label}>Password</label>
-          <input aria-label="Password" style={field} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
-        </>
-      ) : (
-        <>
-          <p style={{ color: "#666", fontSize: 13 }}>Set a new password to finish activating this mailbox.</p>
-          <label style={label}>New password</label>
-          <input aria-label="New password" style={field} type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" />
-        </>
-      )}
+      <div className="mt-4 flex flex-col gap-3">
+        {!needsNewPassword ? (
+          <>
+            <div>
+              <label className={labelCls}>Email</label>
+              <input aria-label="Email" className={fieldCls} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@yourdomain.com" autoComplete="username" />
+            </div>
+            <div>
+              <label className={labelCls}>Password</label>
+              <input aria-label="Password" className={fieldCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-on-surface-variant">Set a new password to finish activating this mailbox.</p>
+            <div>
+              <label className={labelCls}>New password</label>
+              <input aria-label="New password" className={fieldCls} type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" />
+            </div>
+          </>
+        )}
+      </div>
 
-      {err && <p style={{ color: "#b91c1c" }}>{err}</p>}
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <button onClick={() => void submit()} disabled={busy} style={{ cursor: "pointer", padding: "8px 14px" }}>
+      {err && <p className="mt-2 text-sm text-tertiary">{err}</p>}
+      <div className="mt-4 flex items-center gap-3">
+        <Button onClick={() => void submit()} disabled={busy}>
+          {busy && <Spinner className="border-white/40 border-t-white" />}
           {busy ? "…" : needsNewPassword ? "Set password & sign in" : "Sign in"}
-        </button>
+        </Button>
         {onReconfigure && (
-          <button onClick={onReconfigure} style={{ cursor: "pointer", background: "none", border: "none", color: "#7c3aed", textDecoration: "underline" }}>
+          <button onClick={onReconfigure} className="text-sm text-primary underline-offset-2 hover:underline">
             Change deployment
           </button>
         )}
       </div>
-    </div>
+    </Card>
   );
 }

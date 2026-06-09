@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+/* The Stitch design exports (../stitch) are reference material, not app source.
+   Keep Tailwind from scanning them so their throwaway classes don't bloat the
+   production bundle. */
+@source not "../stitch";
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Mailpoppy design tokens — "Midnight" dark theme (from the Stitch design,
+   palette "Etheric Cloud"). Tailwind v4 exposes every --color-* as utilities
+   (bg-surface, text-on-surface-variant, border-outline-variant, …) so the
+   Stitch markup maps over almost verbatim.
+   ───────────────────────────────────────────────────────────────────────── */
+@theme {
+  /* Type — Hanken Grotesk for UI, JetBrains Mono for technical/labels */
+  --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* App background (Level 0) — sits beneath every surface */
+  --color-base: #020617;
+
+  /* Surfaces — progressively lighter slate for tonal stacking */
+  --color-surface: #0b1326;
+  --color-surface-dim: #0b1326;
+  --color-surface-bright: #31394d;
+  --color-surface-container-lowest: #060e20;
+  --color-surface-container-low: #131b2e;
+  --color-surface-container: #171f33;
+  --color-surface-container-high: #222a3d;
+  --color-surface-container-highest: #2d3449;
+  --color-surface-variant: #2d3449;
+  --color-background: #0b1326;
+
+  /* Foreground text */
+  --color-on-surface: #dae2fd;
+  --color-on-surface-variant: #c7c4d7;
+  --color-on-background: #dae2fd;
+  --color-inverse-surface: #dae2fd;
+  --color-inverse-on-surface: #283044;
+
+  /* Lines / outlines */
+  --color-outline: #908fa0;
+  --color-outline-variant: #464554;
+
+  /* Primary — indigo (actions, active nav, focus) */
+  --color-primary: #c0c1ff;
+  --color-on-primary: #1000a9;
+  --color-primary-container: #8083ff;
+  --color-on-primary-container: #0d0096;
+  --color-inverse-primary: #494bd6;
+  --color-primary-fixed: #e1e0ff;
+  --color-primary-fixed-dim: #c0c1ff;
+
+  /* Secondary — mint/emerald (success, "connected", safe zones) */
+  --color-secondary: #4edea3;
+  --color-on-secondary: #003824;
+  --color-secondary-container: #00a572;
+  --color-on-secondary-container: #00311f;
+
+  /* Tertiary / error — rose (destructive, danger zone, errors) */
+  --color-tertiary: #ffb2b7;
+  --color-on-tertiary: #67001b;
+  --color-tertiary-container: #ff516a;
+  --color-on-tertiary-container: #5b0017;
+  --color-error: #ffb4ab;
+  --color-on-error: #690005;
+  --color-error-container: #93000a;
+  --color-on-error-container: #ffdad6;
+
+  /* Poppy — the brand red from the MailPoppy logo (wordmark accent) */
+  --color-poppy: #f4402e;
+  --color-poppy-dim: #d63420;
+
+  /* Layout rhythm (from the design spec) */
+  --spacing-sidebar-width: 17.5rem; /* 280px */
+  --spacing-gutter: 1.5rem; /* 24px */
+  --spacing-margin-page: 2.5rem; /* 40px */
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    color: var(--color-on-surface);
+    background-color: var(--color-base);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
+  }
+
+  /* Custom scrollbars (matches the Stitch design) */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: rgb(15 23 42 / 0.5);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(70 69 84 / 0.5);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(70 69 84 / 0.8);
+  }
+}

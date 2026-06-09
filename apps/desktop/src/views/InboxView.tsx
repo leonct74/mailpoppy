@@ -1,4 +1,28 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  Inbox as InboxIcon,
+  Send,
+  FileText,
+  Trash2,
+  ShieldAlert,
+  ShieldCheck,
+  PenSquare,
+  Search,
+  Star,
+  Paperclip,
+  Reply as ReplyIcon,
+  ReplyAll,
+  Forward,
+  MailOpen,
+  Mail,
+  Undo2,
+  Download,
+  X,
+  ExternalLink,
+  Copy,
+  ImageOff,
+  ShieldQuestion,
+} from "lucide-react";
 import type { MessageMeta, Folder } from "@mailpoppy/core";
 import { formatBytes, usagePercent, usageLevel } from "@mailpoppy/core";
 import { makeMailClient, type MailClient, type SendAttachment, type MailboxUsage } from "../lib/mailClient";
@@ -9,12 +33,13 @@ import { parseBody, sanitizeHtml, type ParsedBody } from "../lib/mailBody";
 import { buildReply, type ComposeInit, type ReplyMode } from "../lib/reply";
 import { renderMarkdown } from "../lib/compose";
 import { filterMessages } from "../lib/search";
+import { Button, Spinner, cn } from "../ui";
 
 // Phase 2 mailbox UI: browse folders, read a message (sanitized HTML, remote
 // images blocked by default), toggle read/star, move to trash / restore, and
-// compose → send. Talks to a
-// MailClient (the shared api-client against a deployed backend, or the demo
-// client offline) — so this view is identical for desktop and, later, mobile.
+// compose → send. Talks to a MailClient (the shared api-client against a
+// deployed backend, or the demo client offline) — so this view is identical
+// for desktop and, later, mobile.
 
 const FOLDERS: Folder[] = ["inbox", "sent", "drafts", "trash", "junk"];
 const FOLDER_LABEL: Record<string, string> = {
@@ -24,28 +49,22 @@ const FOLDER_LABEL: Record<string, string> = {
   trash: "Trash",
   junk: "Junk",
 };
-
-const wrap: React.CSSProperties = { display: "flex", gap: 16, marginTop: 16, alignItems: "flex-start" };
-const rail: React.CSSProperties = { width: 130, flexShrink: 0, display: "flex", flexDirection: "column", gap: 4 };
-const listCol: React.CSSProperties = { flex: 1, border: "1px solid #ddd", borderRadius: 12, overflow: "hidden", minWidth: 0 };
-const detailCol: React.CSSProperties = { flex: 1.4, border: "1px solid #ddd", borderRadius: 12, padding: 16, minWidth: 0 };
-const mono: React.CSSProperties = { fontFamily: "ui-monospace, monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 13 };
-const railBtn = (active: boolean): React.CSSProperties => ({
-  textAlign: "left",
-  padding: "8px 10px",
-  borderRadius: 8,
-  border: "1px solid " + (active ? "#c4b5fd" : "transparent"),
-  background: active ? "#f5f3ff" : "transparent",
-  cursor: "pointer",
-  fontWeight: active ? 600 : 400,
-});
+const FOLDER_ICON: Record<string, typeof InboxIcon> = {
+  inbox: InboxIcon,
+  sent: Send,
+  drafts: FileText,
+  trash: Trash2,
+  junk: ShieldAlert,
+};
 
 function fromLabel(m: MessageMeta): string {
   return m.from.name || m.from.address || "(unknown)";
 }
 function shortDate(iso: string): string {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 export function InboxView({
@@ -156,14 +175,14 @@ export function InboxView({
     }
   }
 
-  async function downloadAttachment(messageId: string, index: number, filename: string) {
+  async function downloadAttachment(messageId: string, index: number, _filename: string) {
     setAttachmentLink(null);
     try {
       const { url } = await mail.getAttachmentUrl(messageId, index);
       // Hand the presigned URL to the OS (window.open is a no-op in the webview).
       const opened = await openExternal(url);
       // If nothing could open it (Tauri opener not active yet), show the link.
-      if (!opened) setAttachmentLink({ url, filename });
+      if (!opened) setAttachmentLink({ url, filename: _filename });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -194,39 +213,29 @@ export function InboxView({
   const visible = filterMessages(items, query);
 
   return (
-    <section>
+    <section className="flex min-h-0 flex-1 flex-col gap-4">
       {demo && (
-        <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, padding: "8px 12px", marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 13 }}>
-            🧪 <strong>Demo data</strong> — not connected to a live mailbox.
+        <div className="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-4 py-2.5 text-sm text-amber-200">
+          <span>
+            🧪 <strong className="font-semibold">Demo data</strong> — not connected to a live mailbox.
           </span>
           {onConnect && (
-            <button onClick={onConnect} style={{ cursor: "pointer", padding: "6px 10px" }}>
+            <Button size="sm" variant="secondary" onClick={onConnect}>
               Connect a deployment
-            </button>
+            </Button>
           )}
         </div>
       )}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ margin: 0 }}>Mailbox</h2>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => setSecurityOpen(true)} style={{ padding: "8px 14px", borderRadius: 8, cursor: "pointer" }} title="How your email is protected">
-            🔒 Security
-          </button>
-          <button onClick={() => setComposeInit({ to: [], subject: "", text: "" })} style={{ padding: "8px 14px", borderRadius: 8, cursor: "pointer" }}>
-            ✏️ Compose
-          </button>
-        </div>
-      </div>
+
       <SecurityInfo open={securityOpen} onClose={() => setSecurityOpen(false)} />
 
       {!demo && !scanNoteDismissed && (
-        <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "8px 12px", marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, fontSize: 13 }}>
-          <span style={{ color: "#166534" }}>
-            🛡 <strong>Incoming mail is automatically scanned for viruses and spam by AWS SES.</strong> A message that fails
-            the virus check is quarantined to Junk and never reaches your inbox. Each message shows its scan result (virus /
-            SPF / DKIM / DMARC / spam). Note: this is AWS's built-in scan — it's not a substitute for your own device
-            antivirus when you download a file.
+        <div className="flex shrink-0 items-start justify-between gap-3 rounded-lg border border-secondary/30 bg-secondary/10 px-4 py-2.5 text-sm">
+          <span className="text-secondary/90">
+            🛡 <strong className="font-semibold">Incoming mail is automatically scanned for viruses and spam by AWS SES.</strong>{" "}
+            A message that fails the virus check is quarantined to Junk and never reaches your inbox. Each message shows its
+            scan result (virus / SPF / DKIM / DMARC / spam). Note: this is AWS's built-in scan — it's not a substitute for
+            your own device antivirus when you download a file.
           </span>
           <button
             onClick={() => {
@@ -237,198 +246,229 @@ export function InboxView({
               }
               setScanNoteDismissed(true);
             }}
-            style={{ cursor: "pointer", padding: "4px 10px", background: "none", border: "none", color: "#15803d", whiteSpace: "nowrap" }}
+            className="shrink-0 whitespace-nowrap rounded px-2 py-1 text-secondary hover:bg-secondary/10"
           >
             Got it
           </button>
         </div>
       )}
 
-      <div style={wrap}>
-        {/* Folder rail */}
-        <nav style={rail} aria-label="Folders">
-          {FOLDERS.map((f) => (
-            <button key={f} style={railBtn(f === folder)} onClick={() => setFolder(f)} aria-current={f === folder}>
-              {FOLDER_LABEL[f] ?? f}
-              {f === "inbox" && unreadCount > 0 ? ` (${unreadCount})` : ""}
-            </button>
-          ))}
-          {usage &&
-            (() => {
-              const pct = usagePercent(usage.usedBytes, usage.quotaBytes);
-              const level = usageLevel(usage.usedBytes, usage.quotaBytes);
-              const color = level === "full" ? "#dc2626" : level === "warn" ? "#d97706" : "#7c3aed";
-              return (
-                <div style={{ marginTop: 14, padding: "8px 10px", fontSize: 12, color: "#555" }} aria-label="Mailbox storage">
-                  {usage.quotaBytes && pct !== null ? (
-                    <>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span>Storage</span>
-                        <span style={{ color }}>{Math.round(pct)}%</span>
-                      </div>
-                      <div style={{ height: 6, background: "#eee", borderRadius: 999, marginTop: 4, overflow: "hidden" }}>
-                        <div style={{ width: `${Math.min(100, pct)}%`, height: "100%", background: color }} />
-                      </div>
-                      <div style={{ marginTop: 4, color: "#888" }}>
-                        {formatBytes(usage.usedBytes)} of {formatBytes(usage.quotaBytes)}
-                      </div>
-                      {level === "full" && <div style={{ color: "#b91c1c", marginTop: 2 }}>Full — new mail is bounced.</div>}
-                      {level === "warn" && <div style={{ color: "#b45309", marginTop: 2 }}>Almost full.</div>}
-                    </>
-                  ) : (
-                    <div>Storage: {formatBytes(usage.usedBytes)} used</div>
-                  )}
-                </div>
-              );
-            })()}
-        </nav>
-
-        {/* Message list */}
-        <div style={listCol}>
-          <div style={{ padding: 8, borderBottom: "1px solid #eee" }}>
-            <input
-              aria-label="Search messages"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Search ${FOLDER_LABEL[folder] ?? folder}…`}
-              style={{ width: "100%", padding: 6, boxSizing: "border-box" }}
-            />
+      {/* Three-pane inbox */}
+      <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-low shadow-lg">
+        {/* Pane 1 — folders & actions */}
+        <div className="flex w-60 shrink-0 flex-col border-r border-outline-variant/20 bg-surface-container-lowest/60">
+          <div className="border-b border-outline-variant/10 p-4">
+            <Button className="w-full" onClick={() => setComposeInit({ to: [], subject: "", text: "" })}>
+              <PenSquare className="size-4" />
+              Compose
+            </Button>
           </div>
-          {loading && <p style={{ padding: 16, color: "#666" }}>Loading…</p>}
-          {error && <p style={{ padding: 16, color: "#b91c1c" }}>{error}</p>}
-          {!loading && !error && items.length === 0 && (
-            <p style={{ padding: 16, color: "#666" }}>No messages in {FOLDER_LABEL[folder] ?? folder}.</p>
-          )}
-          {!loading && !error && items.length > 0 && visible.length === 0 && (
-            <p style={{ padding: 16, color: "#666" }}>No messages match “{query}”.</p>
-          )}
-          {visible.map((m) => {
-            const active = selected?.messageId === m.messageId;
-            return (
-              <button
-                key={m.messageId}
-                onClick={() => void open(m)}
-                aria-label={`Open: ${m.subject}`}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  textAlign: "left",
-                  border: "none",
-                  borderBottom: "1px solid #eee",
-                  background: active ? "#f5f3ff" : "white",
-                  padding: "10px 12px",
-                  cursor: "pointer",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                  <span style={{ fontWeight: m.flags.unread ? 700 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {m.flags.starred ? "⭐ " : ""}
-                    {fromLabel(m)}
+          <nav aria-label="Folders" className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
+            <div className="mb-1 ml-2 mt-1 font-mono text-[11px] uppercase tracking-wider text-on-surface-variant">Mailbox</div>
+            {FOLDERS.map((f) => {
+              const active = f === folder;
+              const Icon = FOLDER_ICON[f] ?? Mail;
+              const count = f === "inbox" ? unreadCount : 0;
+              return (
+                <button
+                  key={f}
+                  onClick={() => setFolder(f)}
+                  aria-current={active}
+                  className={cn(
+                    "flex items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors",
+                    active
+                      ? "border border-primary/10 bg-primary-container/10 font-medium text-primary"
+                      : "text-on-surface-variant hover:bg-surface-container hover:text-on-surface",
+                  )}
+                >
+                  <span className="flex items-center gap-3">
+                    <Icon className="size-4" />
+                    {FOLDER_LABEL[f] ?? f}
                   </span>
-                  <span style={{ color: "#999", fontSize: 12, flexShrink: 0 }}>{shortDate(m.date)}</span>
-                </div>
-                <div style={{ fontWeight: m.flags.unread ? 600 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {m.hasAttachments ? "📎 " : ""}
-                  {m.subject}
-                </div>
-                <div style={{ color: "#888", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.snippet}</div>
-              </button>
-            );
-          })}
+                  {count > 0 && (
+                    <span className="rounded bg-primary/20 px-1.5 py-0.5 font-mono text-xs text-primary">{count}</span>
+                  )}
+                </button>
+              );
+            })}
+
+            <div className="mb-1 ml-2 mt-6 font-mono text-[11px] uppercase tracking-wider text-on-surface-variant">Tools</div>
+            <button
+              onClick={() => setSecurityOpen(true)}
+              title="How your email is protected"
+              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-on-surface-variant transition-colors hover:bg-surface-container hover:text-on-surface"
+            >
+              <ShieldCheck className="size-4 text-tertiary" />
+              Security
+            </button>
+
+            {usage && <StorageMeter usage={usage} />}
+          </nav>
         </div>
 
-        {/* Detail pane */}
-        <div style={detailCol}>
-          {!selected && <p style={{ color: "#666" }}>Select a message to read it.</p>}
-          {selected && (
-            <article>
-              <h3 style={{ margin: "0 0 4px" }}>{selected.subject}</h3>
-              <div style={{ color: "#555", fontSize: 13 }}>
-                From <strong>{fromLabel(selected)}</strong> &lt;{selected.from.address}&gt;
+        {/* Pane 2 — message list */}
+        <div className="flex w-80 shrink-0 flex-col border-r border-outline-variant/20 bg-surface-container-low">
+          <div className="border-b border-outline-variant/10 p-3">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-on-surface-variant" />
+              <input
+                aria-label="Search messages"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={`Search ${FOLDER_LABEL[folder] ?? folder}…`}
+                className="w-full rounded-lg border border-outline-variant/20 bg-surface-container-lowest py-1.5 pl-8 pr-3 text-sm text-on-surface placeholder:text-on-surface-variant/60 focus:border-primary/50 focus:outline-none"
+              />
+            </div>
+          </div>
+          <div className="flex-1 divide-y divide-outline-variant/10 overflow-y-auto">
+            {loading && (
+              <p className="flex items-center gap-2 p-4 text-sm text-on-surface-variant">
+                <Spinner /> Loading…
+              </p>
+            )}
+            {error && <p className="p-4 text-sm text-tertiary">{error}</p>}
+            {!loading && !error && items.length === 0 && (
+              <p className="p-4 text-sm text-on-surface-variant">No messages in {FOLDER_LABEL[folder] ?? folder}.</p>
+            )}
+            {!loading && !error && items.length > 0 && visible.length === 0 && (
+              <p className="p-4 text-sm text-on-surface-variant">No messages match “{query}”.</p>
+            )}
+            {visible.map((m) => {
+              const active = selected?.messageId === m.messageId;
+              const unread = m.flags.unread;
+              return (
+                <button
+                  key={m.messageId}
+                  onClick={() => void open(m)}
+                  aria-label={`Open: ${m.subject}`}
+                  className={cn(
+                    "block w-full border-l-2 p-4 text-left transition-colors hover:bg-surface-container",
+                    active ? "border-l-primary bg-primary/10" : unread ? "border-l-primary bg-primary/5" : "border-l-transparent",
+                  )}
+                >
+                  <div className="mb-1 flex items-baseline justify-between gap-2">
+                    <span className={cn("flex items-center gap-1 truncate", unread ? "font-bold text-on-surface" : "text-on-surface-variant")}>
+                      {m.flags.starred && <Star className="size-3.5 shrink-0 fill-amber-300 text-amber-300" />}
+                      {fromLabel(m)}
+                    </span>
+                    <span className={cn("shrink-0 whitespace-nowrap font-mono text-xs", unread ? "text-primary" : "text-on-surface-variant")}>
+                      {shortDate(m.date)}
+                    </span>
+                  </div>
+                  <div className={cn("mb-1 flex items-center gap-1 truncate text-sm", unread ? "font-semibold text-on-surface" : "text-on-surface")}>
+                    {m.hasAttachments && <Paperclip className="size-3.5 shrink-0 text-on-surface-variant" />}
+                    {m.subject}
+                  </div>
+                  <div className="truncate text-xs text-on-surface-variant/70">{m.snippet}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Pane 3 — reading / preview */}
+        <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-surface-container-lowest">
+          {!selected ? (
+            <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
+              <div className="mb-6 flex size-16 items-center justify-center rounded-2xl border border-outline-variant/10 bg-surface-container shadow-inner">
+                <Mail className="size-8 text-on-surface-variant/50" />
               </div>
-              <div style={{ color: "#777", fontSize: 12 }}>
+              <h2 className="mb-2 text-2xl font-semibold text-on-surface">No message selected</h2>
+              <p className="max-w-sm text-on-surface-variant">Select a message from the list to read it, or compose a new one.</p>
+            </div>
+          ) : (
+            <article className="flex-1 overflow-y-auto p-6">
+              <h3 className="mb-1 text-xl font-semibold text-on-surface">{selected.subject}</h3>
+              <div className="text-sm text-on-surface-variant">
+                From <strong className="text-on-surface">{fromLabel(selected)}</strong>{" "}
+                <span className="font-mono text-xs">&lt;{selected.from.address}&gt;</span>
+              </div>
+              <div className="text-xs text-on-surface-variant/80">
                 To {selected.to.map((t) => t.address).join(", ")} · {shortDate(selected.date)}
               </div>
+
               {selected.verdicts && (
-                <div style={{ color: "#777", fontSize: 12, marginTop: 4 }}>
+                <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs text-on-surface-variant">
                   <span
                     title="Antivirus scan result from AWS SES. Virus-positive mail is quarantined and never delivered to the inbox."
-                    style={{ color: selected.verdicts.virus === "PASS" ? "#15803d" : selected.verdicts.virus === "FAIL" ? "#b91c1c" : "#777" }}
+                    className={cn(
+                      "inline-flex items-center gap-1",
+                      selected.verdicts.virus === "PASS" ? "text-secondary" : selected.verdicts.virus === "FAIL" ? "text-tertiary" : "text-on-surface-variant",
+                    )}
                   >
-                    🛡 virus {selected.verdicts.virus}
-                  </span>{" "}
-                  · SPF {selected.verdicts.spf} · DKIM {selected.verdicts.dkim} · DMARC {selected.verdicts.dmarc} · spam {selected.verdicts.spam}
+                    <ShieldQuestion className="size-3.5" /> virus {selected.verdicts.virus}
+                  </span>
+                  <span>· SPF {selected.verdicts.spf} · DKIM {selected.verdicts.dkim} · DMARC {selected.verdicts.dmarc} · spam {selected.verdicts.spam}</span>
                 </div>
               )}
+
               {selected.attachments && selected.attachments.length > 0 && (
-                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <div className="mt-3 flex flex-wrap gap-2">
                   {selected.attachments.map((a, i) => (
                     <button
                       key={`${a.filename}-${i}`}
                       onClick={() => void downloadAttachment(selected.messageId, i, a.filename)}
-                      style={{ cursor: "pointer", fontSize: 13, border: "1px solid #ddd", borderRadius: 8, padding: "4px 10px", background: "#fafafa" }}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/30 bg-surface-container px-3 py-1.5 text-xs text-on-surface transition-colors hover:border-primary/50 hover:text-primary"
                     >
-                      📎 {a.filename} ({Math.max(1, Math.round(a.sizeBytes / 1024))} KB) ⬇
+                      <Paperclip className="size-3.5" /> {a.filename} ({Math.max(1, Math.round(a.sizeBytes / 1024))} KB)
+                      <Download className="size-3.5" />
                     </button>
                   ))}
                 </div>
               )}
 
               {attachmentLink && (
-                <div style={{ marginTop: 8, fontSize: 13, border: "1px solid #fed7aa", background: "#fff7ed", borderRadius: 8, padding: 10 }}>
+                <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100">
                   <div>
                     Couldn’t open <strong>{attachmentLink.filename}</strong> automatically. Click below, or copy this link into
                     your browser to download it (the link is valid for 5 minutes):
                   </div>
-                  <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <button
-                      onClick={() => void openExternal(attachmentLink.url)}
-                      style={{ cursor: "pointer", padding: "4px 10px" }}
-                    >
-                      Open in browser
-                    </button>
-                    <button
-                      onClick={() => void navigator.clipboard?.writeText(attachmentLink.url)}
-                      style={{ cursor: "pointer", padding: "4px 10px" }}
-                    >
-                      Copy link
-                    </button>
-                    <button
-                      onClick={() => setAttachmentLink(null)}
-                      style={{ cursor: "pointer", padding: "4px 10px", background: "none", border: "none", color: "#777" }}
-                    >
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => void openExternal(attachmentLink.url)}>
+                      <ExternalLink className="size-3.5" /> Open in browser
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => void navigator.clipboard?.writeText(attachmentLink.url)}>
+                      <Copy className="size-3.5" /> Copy link
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setAttachmentLink(null)}>
                       Dismiss
-                    </button>
+                    </Button>
                   </div>
                   <input
                     readOnly
                     value={attachmentLink.url}
                     onFocus={(e) => e.currentTarget.select()}
-                    style={{ marginTop: 6, width: "100%", fontFamily: "ui-monospace, monospace", fontSize: 11, padding: 4 }}
+                    className="mt-2 w-full rounded border border-outline-variant/30 bg-surface-container-lowest p-1.5 font-mono text-[11px] text-on-surface-variant"
                   />
                 </div>
               )}
 
-              <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button onClick={() => startReply("reply")} style={{ cursor: "pointer" }}>↩︎ Reply</button>
+              <div className="mt-4 flex flex-wrap gap-2 border-t border-outline-variant/10 pt-4">
+                <Button size="sm" variant="secondary" onClick={() => startReply("reply")}>
+                  <ReplyIcon className="size-4" /> Reply
+                </Button>
                 {selected.to.length > 1 && (
-                  <button onClick={() => startReply("replyAll")} style={{ cursor: "pointer" }}>↩︎ Reply all</button>
+                  <Button size="sm" variant="secondary" onClick={() => startReply("replyAll")}>
+                    <ReplyAll className="size-4" /> Reply all
+                  </Button>
                 )}
-                <button onClick={() => startReply("forward")} style={{ cursor: "pointer" }}>↪ Forward</button>
-                <button onClick={() => void toggleRead(selected)} style={{ cursor: "pointer" }}>
-                  {selected.flags.unread ? "Mark read" : "Mark unread"}
-                </button>
-                <button onClick={() => void toggleStar(selected)} style={{ cursor: "pointer" }}>
-                  {selected.flags.starred ? "Unstar" : "Star"}
-                </button>
+                <Button size="sm" variant="secondary" onClick={() => startReply("forward")}>
+                  <Forward className="size-4" /> Forward
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => void toggleRead(selected)}>
+                  <MailOpen className="size-4" /> {selected.flags.unread ? "Mark read" : "Mark unread"}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => void toggleStar(selected)}>
+                  <Star className="size-4" /> {selected.flags.starred ? "Unstar" : "Star"}
+                </Button>
                 {folder !== "trash" ? (
-                  <button aria-label="Move to Trash" onClick={() => void moveTo(selected, "trash")} style={{ cursor: "pointer" }}>
-                    🗑 Trash
-                  </button>
+                  <Button size="sm" variant="ghost" aria-label="Move to Trash" onClick={() => void moveTo(selected, "trash")}>
+                    <Trash2 className="size-4" /> Trash
+                  </Button>
                 ) : (
-                  <button aria-label="Restore to Inbox" onClick={() => void moveTo(selected, "inbox")} style={{ cursor: "pointer" }}>
-                    ↩︎ Restore to Inbox
-                  </button>
+                  <Button size="sm" variant="ghost" aria-label="Restore to Inbox" onClick={() => void moveTo(selected, "inbox")}>
+                    <Undo2 className="size-4" /> Restore to Inbox
+                  </Button>
                 )}
               </div>
 
@@ -442,6 +482,14 @@ export function InboxView({
               />
             </article>
           )}
+
+          {/* Footer badge */}
+          <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
+            <div className="flex items-center gap-2 rounded-full border border-outline-variant/20 bg-surface-container/80 px-3 py-1.5 backdrop-blur">
+              <ShieldCheck className="size-3.5 text-secondary" />
+              <span className="font-mono text-[11px] text-on-surface-variant">Incoming mail scanned &amp; verified by AWS SES</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -458,6 +506,36 @@ export function InboxView({
         />
       )}
     </section>
+  );
+}
+
+/** Per-mailbox storage meter shown at the foot of the folder rail. */
+function StorageMeter({ usage }: { usage: MailboxUsage }) {
+  const pct = usagePercent(usage.usedBytes, usage.quotaBytes);
+  const level = usageLevel(usage.usedBytes, usage.quotaBytes);
+  const barClass = level === "full" ? "bg-tertiary-container" : level === "warn" ? "bg-amber-400" : "bg-primary";
+  const textClass = level === "full" ? "text-tertiary" : level === "warn" ? "text-amber-300" : "text-primary";
+  return (
+    <div aria-label="Mailbox storage" className="mt-auto px-2 pt-4 text-xs text-on-surface-variant">
+      {usage.quotaBytes && pct !== null ? (
+        <>
+          <div className="flex justify-between">
+            <span>Storage</span>
+            <span className={textClass}>{Math.round(pct)}%</span>
+          </div>
+          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-container-highest">
+            <div className={cn("h-full", barClass)} style={{ width: `${Math.min(100, pct)}%` }} />
+          </div>
+          <div className="mt-1 text-on-surface-variant/70">
+            {formatBytes(usage.usedBytes)} of {formatBytes(usage.quotaBytes)}
+          </div>
+          {level === "full" && <div className="mt-0.5 text-tertiary">Full — new mail is bounced.</div>}
+          {level === "warn" && <div className="mt-0.5 text-amber-300">Almost full.</div>}
+        </>
+      ) : (
+        <div>Storage: {formatBytes(usage.usedBytes)} used</div>
+      )}
+    </div>
   );
 }
 
@@ -481,34 +559,41 @@ function MessageBody({
     [parsed, allowImages],
   );
 
-  if (!parsed && !raw) return <p style={{ color: "#888" }}>Loading message…</p>;
+  if (!parsed && !raw) return <p className="mt-3 text-on-surface-variant/70">Loading message…</p>;
 
-  const preStyle: React.CSSProperties = { ...mono, marginTop: 8, background: "#fafafa", border: "1px solid #eee", borderRadius: 8, padding: 12 };
-  const htmlStyle: React.CSSProperties = { marginTop: 8, border: "1px solid #eee", borderRadius: 8, padding: 12, overflowX: "auto" };
+  const preClass =
+    "mt-2 overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-outline-variant/10 bg-surface-container-lowest p-3 font-mono text-[13px] text-on-surface";
 
   return (
-    <div style={{ marginTop: 12 }}>
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button onClick={onToggleRaw} style={{ cursor: "pointer", fontSize: 12, background: "none", border: "none", color: "#7c3aed", textDecoration: "underline" }}>
+    <div className="mt-4">
+      <div className="flex justify-end">
+        <button onClick={onToggleRaw} className="text-xs text-primary underline-offset-2 hover:underline">
           {showRaw ? "View formatted" : "View raw source"}
         </button>
       </div>
 
       {showRaw ? (
-        <pre style={preStyle}>{raw}</pre>
+        <pre className={preClass}>{raw}</pre>
       ) : sanitized ? (
         <>
           {sanitized.blockedRemote && !allowImages && (
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, padding: "6px 12px", fontSize: 13 }}>
-              <span>🛡 Remote images blocked to protect your privacy.</span>
-              <button onClick={onLoadImages} style={{ cursor: "pointer", padding: "4px 10px" }}>Load images</button>
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-1.5 text-sm text-amber-100">
+              <span className="inline-flex items-center gap-2">
+                <ImageOff className="size-4" /> Remote images blocked to protect your privacy.
+              </span>
+              <Button size="sm" variant="secondary" onClick={onLoadImages}>
+                Load images
+              </Button>
             </div>
           )}
           {/* Safe: HTML is sanitized by DOMPurify (lib/mailBody.ts) before it reaches the DOM. */}
-          <div style={htmlStyle} dangerouslySetInnerHTML={{ __html: sanitized.clean }} />
+          <div
+            className="mt-2 overflow-x-auto rounded-lg border border-outline-variant/10 bg-white p-3 text-slate-800"
+            dangerouslySetInnerHTML={{ __html: sanitized.clean }}
+          />
         </>
       ) : (
-        <pre style={preStyle}>{parsed?.text ?? raw}</pre>
+        <pre className={preClass}>{parsed?.text ?? raw}</pre>
       )}
     </div>
   );
@@ -572,51 +657,53 @@ function ComposeDialog({
     }
   }
 
+  const fieldLabel = "mb-1 block text-sm text-on-surface-variant";
+  const fieldInput =
+    "w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-outline-variant focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30";
+
   return (
     <div
       role="dialog"
       aria-label="Compose message"
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
     >
-      <div style={{ background: "white", borderRadius: 12, padding: 20, width: 480, maxWidth: "90vw" }}>
-        <h3 style={{ marginTop: 0 }}>{init.inReplyTo ? "Reply" : "New message"}</h3>
-        <label style={{ display: "block", fontSize: 13, color: "#555" }}>To (comma-separated)</label>
-        <input aria-label="To" value={to} onChange={(e) => setTo(e.target.value)} placeholder="alice@example.com" style={{ width: "100%", padding: 8, marginBottom: 8 }} />
-        <label style={{ display: "block", fontSize: 13, color: "#555" }}>Subject</label>
-        <input aria-label="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} style={{ width: "100%", padding: 8, marginBottom: 8 }} />
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <label style={{ fontSize: 13, color: "#555" }}>Message <span style={{ color: "#999" }}>· Markdown supported</span></label>
-          <button
-            type="button"
-            onClick={() => setPreview((v) => !v)}
-            style={{ cursor: "pointer", fontSize: 12, background: "none", border: "none", color: "#7c3aed", textDecoration: "underline" }}
-          >
+      <div className="w-[480px] max-w-[90vw] rounded-xl border border-outline-variant/20 bg-surface-container p-6 shadow-2xl">
+        <h3 className="mb-3 text-lg font-semibold text-on-surface">{init.inReplyTo ? "Reply" : "New message"}</h3>
+        <label className={fieldLabel}>To (comma-separated)</label>
+        <input aria-label="To" value={to} onChange={(e) => setTo(e.target.value)} placeholder="alice@example.com" className={cn(fieldInput, "mb-3")} />
+        <label className={fieldLabel}>Subject</label>
+        <input aria-label="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} className={cn(fieldInput, "mb-3")} />
+        <div className="flex items-baseline justify-between">
+          <label className={fieldLabel}>
+            Message <span className="text-on-surface-variant/60">· Markdown supported</span>
+          </label>
+          <button type="button" onClick={() => setPreview((v) => !v)} className="text-xs text-primary underline-offset-2 hover:underline">
             {preview ? "Edit" : "Preview"}
           </button>
         </div>
         {preview ? (
           <div
             aria-label="Preview"
-            style={{ minHeight: 120, border: "1px solid #eee", borderRadius: 6, padding: 8, background: "#fafafa" }}
+            className="min-h-[120px] rounded-lg border border-outline-variant/30 bg-white p-2 text-slate-800"
             dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
           />
         ) : (
-          <textarea aria-label="Message" value={text} onChange={(e) => setText(e.target.value)} rows={6} style={{ width: "100%", padding: 8 }} />
+          <textarea aria-label="Message" value={text} onChange={(e) => setText(e.target.value)} rows={6} className={cn(fieldInput, "resize-y")} />
         )}
 
-        <div style={{ marginTop: 8 }}>
-          <input aria-label="Attach files" type="file" multiple onChange={(e) => void onFiles(e.target.files)} style={{ fontSize: 13 }} />
+        <div className="mt-3">
+          <input aria-label="Attach files" type="file" multiple onChange={(e) => void onFiles(e.target.files)} className="text-xs text-on-surface-variant file:mr-3 file:rounded-md file:border-0 file:bg-surface-container-highest file:px-3 file:py-1.5 file:text-on-surface" />
           {attachments.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+            <div className="mt-2 flex flex-wrap gap-1.5">
               {attachments.map((a, i) => (
-                <span key={`${a.filename}-${i}`} style={{ fontSize: 12, background: "#f3f4f6", borderRadius: 6, padding: "2px 8px" }}>
-                  📎 {a.filename}
+                <span key={`${a.filename}-${i}`} className="inline-flex items-center gap-1 rounded-md bg-surface-container-highest px-2 py-1 text-xs text-on-surface">
+                  <Paperclip className="size-3" /> {a.filename}
                   <button
                     aria-label={`Remove ${a.filename}`}
                     onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
-                    style={{ cursor: "pointer", border: "none", background: "none", color: "#b91c1c", marginLeft: 4 }}
+                    className="ml-1 text-tertiary hover:text-tertiary-container"
                   >
-                    ×
+                    <X className="size-3" />
                   </button>
                 </span>
               ))}
@@ -624,14 +711,15 @@ function ComposeDialog({
           )}
         </div>
 
-        {err && <p style={{ color: "#b91c1c" }}>{err}</p>}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-          <button onClick={onClose} disabled={sending} style={{ cursor: "pointer" }}>
+        {err && <p className="mt-2 text-sm text-tertiary">{err}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose} disabled={sending}>
             Cancel
-          </button>
-          <button onClick={() => void submit()} disabled={sending} style={{ cursor: "pointer" }}>
+          </Button>
+          <Button onClick={() => void submit()} disabled={sending}>
+            {sending ? <Spinner className="border-white/40 border-t-white" /> : <Send className="size-4" />}
             {sending ? "Sending…" : "Send"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

@@ -37,6 +37,66 @@ app.addHook("onRequest", async (req, reply) => {
   }
 });
 
+// Map low-level connectivity failures bubbling up from the AWS SDK (machine
+// offline / DNS unavailable) to a clear, actionable 503 instead of a raw 500
+// with a cryptic "getaddrinfo ENOTFOUND route53.amazonaws.com". Everything else
+// keeps Fastify's default shape (statusCode + message) so existing error
+// handling on the client is unchanged.
+const NETWORK_ERROR_CODES = new Set([
+  "ENOTFOUND", // DNS lookup failed (offline / DNS down)
+  "EAI_AGAIN", // DNS temporary failure
+  "ETIMEDOUT", // connection timed out
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+  "EHOSTDOWN",
+]);
+function networkErrorCode(err: unknown): string | undefined {
+  // The SDK may surface the system error directly or wrap it under `cause`.
+  const e = err as { code?: string; cause?: { code?: string } };
+  if (e?.code && NETWORK_ERROR_CODES.has(e.code)) return e.code;
+  if (e?.cause?.code && NETWORK_ERROR_CODES.has(e.cause.code)) return e.cause.code;
+  return undefined;
+}
+
+// Turn an opaque error into something the user can act on. The most common one
+// is a failed credential subprocess — the AWS SDK runs your profile's
+// `credential_process` / SSO helper, and when that session has expired the
+// child exits non-zero with the cryptic message "Command failed".
+function describeError(err: unknown): string {
+  const e = err as { name?: string; message?: string };
+  const msg = e?.message ?? String(err);
+  const credLike =
+    e?.name === "CredentialsProviderError" ||
+    /\bCommand failed\b/i.test(msg) ||
+    /could not load credentials|credential[_ -]?process|\bSSO\b|ExpiredToken|security token.*(expired|invalid)/i.test(msg);
+  if (credLike) {
+    return "Couldn't get your AWS credentials — your session has probably expired. Re-authenticate (e.g. `aws sso login`, or refresh whatever your profile's credential_process uses), then restart Mailpoppy and try again.";
+  }
+  return msg;
+}
+app.setErrorHandler((err, _req, reply) => {
+  const netCode = networkErrorCode(err);
+  if (netCode) {
+    app.log.warn({ err, code: netCode }, "network failure reaching AWS");
+    return reply.code(503).send({
+      ok: false,
+      code: netCode,
+      error: "Network",
+      message: "Couldn't reach AWS — check your internet connection and try again.",
+    });
+  }
+  const statusCode = (err as { statusCode?: number }).statusCode ?? 500;
+  app.log.error({ err }, "request failed");
+  return reply.code(statusCode).send({
+    ok: false,
+    code: (err as { code?: string }).code,
+    error: err.name ?? "Internal Server Error",
+    message: describeError(err),
+  });
+});
+
 // The active AWS region for provisioning. Starts from the env, but the admin can
 // change it from the wizard (data-residency) BEFORE deploying — the frontend
 // re-applies its saved choice on launch. Route53 stays global (pinned in clients()).
@@ -146,7 +206,7 @@ app.post("/migrate/imap/test", async (req, reply) => {
       password: b.password,
     });
   } catch (err) {
-    return reply.code(502).send({ ok: false, error: (err as Error).message });
+    return reply.code(502).send({ ok: false, error: describeError(err) });
   }
 });
 
@@ -191,7 +251,7 @@ app.post("/migrate/imap/run", async (req, reply) => {
     });
     return { ok: true, ...summary };
   } catch (err) {
-    return reply.code(502).send({ ok: false, error: (err as Error).message });
+    return reply.code(502).send({ ok: false, error: describeError(err) });
   }
 });
 

@@ -12,8 +12,8 @@ import {
 // Applies to a NEW deployment; an existing stack can't be moved, so when a backend
 // is already deployed we show its region locked. load/save injectable for tests.
 
-const mono: React.CSSProperties = { fontFamily: "ui-monospace, monospace" };
-const sel: React.CSSProperties = { padding: 6, border: "1px solid #ccc", borderRadius: 6, font: "inherit" };
+const selCls =
+  "rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50";
 
 // Friendly labels for the SES-inbound regions (the only ones where receiving works).
 const REGION_LABELS: Record<string, string> = {
@@ -75,36 +75,37 @@ export function RegionPicker({ lockedRegion, load, save }: RegionPickerProps) {
 
   return (
     <div>
-      <label style={{ fontSize: 14, fontWeight: 600 }}>
+      <label className="block text-sm font-semibold text-on-surface">
         AWS region (where your mail is stored)
-        <br />
-        {lockedRegion ? (
-          <span style={{ fontSize: 14, fontWeight: 400 }}>
-            <code style={mono}>{label(lockedRegion)}</code>{" "}
-            <span style={{ color: "#999", fontSize: 12 }}>· locked — already deployed here</span>
-          </span>
-        ) : (
-          <select
-            aria-label="AWS region"
-            value={region}
-            onChange={(e) => void onChange(e.target.value)}
-            disabled={busy || available.length === 0}
-            style={sel}
-          >
-            {available.map((r) => (
-              <option key={r} value={r}>
-                {label(r)}
-              </option>
-            ))}
-          </select>
-        )}
+        <div className="mt-2 font-normal">
+          {lockedRegion ? (
+            <span className="text-sm">
+              <code className="font-mono text-on-surface">{label(lockedRegion)}</code>{" "}
+              <span className="text-xs text-on-surface-variant/70">· locked — already deployed here</span>
+            </span>
+          ) : (
+            <select
+              aria-label="AWS region"
+              value={region}
+              onChange={(e) => void onChange(e.target.value)}
+              disabled={busy || available.length === 0}
+              className={selCls}
+            >
+              {available.map((r) => (
+                <option key={r} value={r}>
+                  {label(r)}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </label>
-      <p style={{ fontSize: 12, color: "#666", margin: "6px 0 0", maxWidth: 560 }}>
-        Choose this <b>before deploying</b>. All received mail and attachments are stored in this region — pick the one
-        your data-residency rules require (e.g. an EU region for EU personal data). A deployment can't be moved later;
-        you'd tear down and redeploy elsewhere.
+      <p className="mt-2 max-w-xl text-xs text-on-surface-variant">
+        Choose this <b className="text-on-surface">before deploying</b>. All received mail and attachments are stored in
+        this region — pick the one your data-residency rules require (e.g. an EU region for EU personal data). A
+        deployment can't be moved later; you'd tear down and redeploy elsewhere.
       </p>
-      {err && <p style={{ color: "crimson", fontSize: 12 }}>{err}</p>}
+      {err && <p className="mt-1 text-xs text-tertiary">{err}</p>}
     </div>
   );
 }

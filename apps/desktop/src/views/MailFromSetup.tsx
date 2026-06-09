@@ -11,6 +11,7 @@ import {
   setupMailFrom as defaultSetupMailFrom,
   type SetupMailFromResult,
 } from "../lib/mailFrom";
+import { Button } from "../ui";
 
 // "Improve deliverability (SPF alignment)" card for the wizard's Sending-access
 // section. SES's default Return-Path (…amazonses.com) leaves SPF unaligned to the
@@ -18,49 +19,34 @@ import {
 // custom MAIL FROM subdomain + its DNS makes SPF align too. load/setup are
 // injectable so the card is unit-tested without a live sidecar.
 
-const mono: React.CSSProperties = { fontFamily: "ui-monospace, monospace" };
-const btn = (disabled: boolean): React.CSSProperties => ({
-  padding: "8px 14px",
-  borderRadius: 8,
-  border: "none",
-  background: disabled ? "#cbd5e1" : "#7c3aed",
-  color: "#fff",
-  fontWeight: 600,
-  cursor: disabled ? "default" : "pointer",
-});
-
-function banner(bg: string, border: string, color: string): React.CSSProperties {
-  return { background: bg, border: `1px solid ${border}`, color, borderRadius: 8, padding: "10px 12px", fontSize: 14 };
-}
-
-const recommendedBadge: React.CSSProperties = {
-  marginLeft: 8,
-  fontSize: 11,
-  fontWeight: 700,
-  color: "#166534",
-  background: "#dcfce7",
-  border: "1px solid #bbf7d0",
-  borderRadius: 999,
-  padding: "2px 8px",
-  verticalAlign: "middle",
+type Tone = "success" | "info" | "danger" | "warn" | "neutral";
+const bannerCls: Record<Tone, string> = {
+  success: "border-secondary/30 bg-secondary/10 text-secondary",
+  info: "border-primary/30 bg-primary/10 text-primary",
+  danger: "border-tertiary/30 bg-tertiary-container/15 text-tertiary",
+  warn: "border-amber-400/30 bg-amber-400/10 text-amber-100",
+  neutral: "border-outline-variant/20 bg-surface-container-lowest text-on-surface-variant",
 };
+function Banner({ tone, children }: { tone: Tone; children: React.ReactNode }) {
+  return <div className={`rounded-lg border px-3 py-2.5 text-sm ${bannerCls[tone]}`}>{children}</div>;
+}
 
 function RecordsTable({ records }: { records: DnsRecord[] }) {
   return (
-    <table style={{ fontSize: 12, borderCollapse: "collapse", marginTop: 8 }}>
+    <table className="mt-2 border-collapse text-xs">
       <thead>
-        <tr style={{ textAlign: "left", color: "#666" }}>
-          <th style={{ paddingRight: 16 }}>Type</th>
-          <th style={{ paddingRight: 16 }}>Name</th>
-          <th>Value</th>
+        <tr className="text-left text-on-surface-variant">
+          <th className="pr-4 font-medium">Type</th>
+          <th className="pr-4 font-medium">Name</th>
+          <th className="font-medium">Value</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody className="text-on-surface">
         {records.map((r) => (
           <tr key={`${r.type}-${r.name}`}>
-            <td style={{ paddingRight: 16 }}>{r.type}</td>
-            <td style={{ paddingRight: 16, ...mono }}>{r.name}</td>
-            <td style={mono}>{r.value}</td>
+            <td className="pr-4 align-top">{r.type}</td>
+            <td className="pr-4 align-top font-mono">{r.name}</td>
+            <td className="align-top font-mono">{r.value}</td>
           </tr>
         ))}
       </tbody>
@@ -120,81 +106,81 @@ export function MailFromSetup({ domain, region = "eu-west-1", load, setup }: Mai
   const previewRecords = mailFromDnsRecords(mailFromDomain, region);
 
   return (
-    <div style={{ marginTop: 16, borderTop: "1px solid #eee", paddingTop: 14 }}>
-      <h3 style={{ margin: "0 0 4px" }}>
+    <div className="mt-4 border-t border-outline-variant/10 pt-4">
+      <h3 className="flex items-center gap-2 text-base font-semibold text-on-surface">
         Improve deliverability — SPF alignment
-        <span style={recommendedBadge}>Recommended</span>
+        <span className="rounded-full border border-secondary/20 bg-secondary/10 px-2 py-0.5 text-xs font-semibold text-secondary">Recommended</span>
       </h3>
-      <p style={{ fontSize: 13, color: "#666", margin: "0 0 10px" }}>
-        <b>Recommended.</b> A custom <b>MAIL&nbsp;FROM</b> subdomain makes SPF align to{" "}
-        <code style={mono}>{domain}</code> (not just Amazon's domain), which improves inbox placement at strict
-        providers like Outlook/Hotmail. It's safe and additive — your existing setup and mailboxes are unaffected.
+      <p className="mb-2.5 mt-1 text-sm text-on-surface-variant">
+        <b className="text-on-surface">Recommended.</b> A custom <b>MAIL&nbsp;FROM</b> subdomain makes SPF align to{" "}
+        <code className="font-mono text-on-surface">{domain}</code> (not just Amazon's domain), which improves inbox
+        placement at strict providers like Outlook/Hotmail. It's safe and additive — your existing setup and mailboxes are
+        unaffected.
       </p>
 
-      {loading && <p style={{ fontSize: 14, color: "#666" }}>Checking MAIL FROM status…</p>}
+      {loading && <p className="text-sm text-on-surface-variant">Checking MAIL FROM status…</p>}
 
       {!loading && (
         <>
           {alignment === "aligned" && (
-            <div style={banner("#f0fdf4", "#bbf7d0", "#166534")}>
-              ✅ <b>Custom MAIL FROM active</b> — <code style={mono}>{mailFromDomain}</code> is verified. SPF now aligns
-              with your domain.
-            </div>
+            <Banner tone="success">
+              ✅ <b>Custom MAIL FROM active</b> — <code className="font-mono">{mailFromDomain}</code> is verified. SPF now
+              aligns with your domain.
+            </Banner>
           )}
 
           {alignment === "pending" && (
-            <div style={banner("#eff6ff", "#bfdbfe", "#1e40af")}>
-              ⏳ <b>DNS written — SES is verifying</b> <code style={mono}>{mailFromDomain}</code>. This can take a few
-              minutes (DNS propagation). It keeps sending via the default Return-Path until verified, so nothing breaks.
-              <div style={{ marginTop: 8 }}>
-                <button onClick={() => void refresh()} disabled={busy} style={btn(busy)}>
+            <Banner tone="info">
+              ⏳ <b>DNS written — SES is verifying</b> <code className="font-mono">{mailFromDomain}</code>. This can take a
+              few minutes (DNS propagation). It keeps sending via the default Return-Path until verified, so nothing breaks.
+              <div className="mt-2">
+                <Button size="sm" variant="secondary" onClick={() => void refresh()} disabled={busy}>
                   Check verification status
-                </button>
+                </Button>
               </div>
-            </div>
+            </Banner>
           )}
 
           {alignment === "failed" && (
-            <div style={banner("#fef2f2", "#fecaca", "#b91c1c")}>
-              ⚠️ <b>MAIL FROM verification failed</b> for <code style={mono}>{mailFromDomain}</code> — the MX/TXT records
-              may be missing. You can re-apply them below.
-            </div>
+            <Banner tone="danger">
+              ⚠️ <b>MAIL FROM verification failed</b> for <code className="font-mono">{mailFromDomain}</code> — the MX/TXT
+              records may be missing. You can re-apply them below.
+            </Banner>
           )}
 
           {alignment === "not-configured" && (
-            <div style={banner("#fffbeb", "#fde68a", "#92400e")}>
+            <Banner tone="warn">
               Not configured yet. Mail currently passes DMARC on DKIM alone (SPF is not aligned to your domain).{" "}
               <b>Enabling this is recommended</b> for better inbox placement.
-            </div>
+            </Banner>
           )}
 
           {/* Offer setup when not configured or failed. */}
           {(alignment === "not-configured" || alignment === "failed") && (
-            <div style={{ marginTop: 10 }}>
-              <p style={{ fontSize: 13, color: "#444", margin: "0 0 4px" }}>
-                Mailpoppy will point SES at <code style={mono}>{mailFromDomain}</code> and add these DNS records:
+            <div className="mt-2.5">
+              <p className="mb-1 text-sm text-on-surface-variant">
+                Mailpoppy will point SES at <code className="font-mono text-on-surface">{mailFromDomain}</code> and add these
+                DNS records:
               </p>
               <RecordsTable records={previewRecords} />
 
               {!confirming ? (
-                <button onClick={() => setConfirming(true)} disabled={busy} style={{ ...btn(busy), marginTop: 10 }}>
+                <Button className="mt-2.5" onClick={() => setConfirming(true)} disabled={busy}>
                   Set up custom MAIL FROM (recommended)
-                </button>
+                </Button>
               ) : (
-                <div style={{ ...banner("#f8fafc", "#e2e8f0", "#334155"), marginTop: 10 }}>
-                  This adds the DNS records above to <b>{domain}</b> and updates SES. Continue?
-                  <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-                    <button onClick={() => void doSetup()} disabled={busy} style={btn(busy)}>
-                      {busy ? "Applying…" : "Apply DNS changes"}
-                    </button>
-                    <button
-                      onClick={() => setConfirming(false)}
-                      disabled={busy}
-                      style={{ background: "none", border: "none", color: "#777", cursor: "pointer" }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
+                <div className="mt-2.5">
+                  <Banner tone="neutral">
+                    This adds the DNS records above to <b className="text-on-surface">{domain}</b> and updates SES. Continue?
+                    <div className="mt-2 flex items-center gap-2">
+                      <Button size="sm" onClick={() => void doSetup()} disabled={busy}>
+                        {busy ? "Applying…" : "Apply DNS changes"}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setConfirming(false)} disabled={busy}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </Banner>
                 </div>
               )}
             </div>
@@ -202,7 +188,7 @@ export function MailFromSetup({ domain, region = "eu-west-1", load, setup }: Mai
         </>
       )}
 
-      {err && <p style={{ color: "crimson", fontSize: 13 }}>{err}</p>}
+      {err && <p className="mt-2 text-sm text-tertiary">{err}</p>}
     </div>
   );
 }

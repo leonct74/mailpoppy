@@ -1,24 +1,18 @@
 import { useEffect, useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { isValidListEntry, type SpamPolicy } from "@mailpoppy/core";
 import { getSpamPolicy as defaultGet, setSpamPolicy as defaultSet } from "../lib/policy";
+import { Button } from "../ui";
 
 // "Mail rules" editor for the wizard: per-verdict actions (spam / auth-fail /
 // virus → junk/tag/reject) + sender allow/block lists. The inbound-processor
 // Lambda enforces these on incoming mail (block-list → allow-list → virus → spam
 // → auth → clean). load/save are injectable so the view is unit-tested.
 
-const mono: React.CSSProperties = { fontFamily: "ui-monospace, monospace" };
-const sel: React.CSSProperties = { padding: 6, border: "1px solid #ccc", borderRadius: 6, font: "inherit" };
-const ta: React.CSSProperties = { width: "100%", padding: 8, border: "1px solid #ccc", borderRadius: 6, font: "inherit", resize: "vertical" };
-const btn = (disabled: boolean): React.CSSProperties => ({
-  padding: "8px 14px",
-  borderRadius: 8,
-  border: "none",
-  background: disabled ? "#cbd5e1" : "#7c3aed",
-  color: "#fff",
-  fontWeight: 600,
-  cursor: disabled ? "default" : "pointer",
-});
+const selCls =
+  "rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30";
+const taCls =
+  "w-full resize-y rounded-lg border border-outline-variant/30 bg-surface-container-lowest p-2 font-mono text-sm text-on-surface placeholder:text-outline-variant focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30";
 
 const SPAM_OPTS = [
   { v: "junk", label: "Move to Junk" },
@@ -110,100 +104,101 @@ export function PolicyEditor({ stackName, load, save }: PolicyEditorProps) {
 
   return (
     <section aria-label="Mail rules">
-      <h2>Mail rules — spam &amp; allow/block</h2>
-      <p style={{ fontSize: 13, color: "#666", marginTop: 0 }}>
+      <h2 className="text-lg font-semibold text-on-surface">Mail rules — spam &amp; allow/block</h2>
+      <p className="mt-1 text-sm text-on-surface-variant">
         How incoming mail is handled. Order: <b>block list</b> → <b>allow list</b> → virus → spam → failed
         authentication → clean. Changes apply to <b>newly received</b> mail.
       </p>
 
-      {loading && <p style={{ fontSize: 14, color: "#666" }}>Loading mail rules…</p>}
+      {loading && <p className="mt-3 text-sm text-on-surface-variant">Loading mail rules…</p>}
 
       {!loading && (
         <>
           {/* Everyday controls: per-sender allow/block lists. */}
-          <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
-            <label style={{ fontSize: 13, fontWeight: 600, flex: 1, minWidth: 240 }}>
-              Allow list <span style={{ fontWeight: 400, color: "#999" }}>(always inbox, skips spam/auth checks)</span>
-              <textarea aria-label="Allow list" value={allowText} onChange={(e) => setAllowText(e.target.value)} rows={4} style={ta} placeholder={"boss@partner.com\npartner.com"} autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+          <div className="mt-4 flex flex-wrap gap-5">
+            <label className="min-w-60 flex-1 text-sm font-semibold text-on-surface">
+              Allow list <span className="font-normal text-on-surface-variant/70">(always inbox, skips spam/auth checks)</span>
+              <textarea aria-label="Allow list" value={allowText} onChange={(e) => setAllowText(e.target.value)} rows={4} className={`mt-1.5 ${taCls}`} placeholder={"boss@partner.com\npartner.com"} autoCapitalize="off" autoCorrect="off" spellCheck={false} />
             </label>
-            <label style={{ fontSize: 13, fontWeight: 600, flex: 1, minWidth: 240 }}>
-              Block list <span style={{ fontWeight: 400, color: "#999" }}>(rejected, never stored)</span>
-              <textarea aria-label="Block list" value={blockText} onChange={(e) => setBlockText(e.target.value)} rows={4} style={ta} placeholder={"spammer@bad.com\nbad.com"} autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+            <label className="min-w-60 flex-1 text-sm font-semibold text-on-surface">
+              Block list <span className="font-normal text-on-surface-variant/70">(rejected, never stored)</span>
+              <textarea aria-label="Block list" value={blockText} onChange={(e) => setBlockText(e.target.value)} rows={4} className={`mt-1.5 ${taCls}`} placeholder={"spammer@bad.com\nbad.com"} autoCapitalize="off" autoCorrect="off" spellCheck={false} />
             </label>
           </div>
-          <p style={{ fontSize: 12, color: "#999", margin: "4px 0 0" }}>
-            One entry per line — an address (<code style={mono}>a@b.com</code>), a domain (<code style={mono}>b.com</code>), or{" "}
-            <code style={mono}>@b.com</code>.
+          <p className="mt-1 text-xs text-on-surface-variant/70">
+            One entry per line — an address (<code className="font-mono text-on-surface-variant">a@b.com</code>), a domain (
+            <code className="font-mono text-on-surface-variant">b.com</code>), or{" "}
+            <code className="font-mono text-on-surface-variant">@b.com</code>.
           </p>
 
           {invalid.length > 0 && (
-            <div style={{ color: "#b45309", fontSize: 13, marginTop: 8 }}>
+            <div className="mt-2 text-sm text-amber-300">
               These entries don't look like an address or domain and won't match anything:{" "}
               {invalid.map((e) => (
-                <code key={e} style={{ ...mono, marginRight: 8 }}>{e}</code>
+                <code key={e} className="mr-2 font-mono">{e}</code>
               ))}
             </div>
           )}
 
           {/* Advanced: per-verdict actions. Hidden by default with a "leave the
               defaults" recommendation so a non-technical admin won't break delivery. */}
-          <div style={{ marginTop: 16, borderTop: "1px solid #eee", paddingTop: 12 }}>
+          <div className="mt-4 border-t border-outline-variant/10 pt-3">
             <button
               onClick={() => setShowAdvanced((v) => !v)}
               aria-expanded={showAdvanced}
-              style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "#7c3aed", fontWeight: 600, fontSize: 14 }}
+              className="flex items-center gap-1 text-sm font-semibold text-primary"
             >
-              {showAdvanced ? "▾" : "▸"} Advanced: spam &amp; virus handling
+              {showAdvanced ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />} Advanced: spam &amp; virus handling
             </button>
 
             {showAdvanced && (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e", borderRadius: 8, padding: "8px 12px", fontSize: 13 }}>
+              <div className="mt-2.5">
+                <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
                   <b>Recommended: leave these at their defaults.</b> Virus mail is quarantined and spam goes to Junk —
                   this suits almost everyone. Changing them can cause wanted mail to be hidden or lost. Only adjust these
                   if you know exactly why.
                 </div>
-                <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 12 }}>
-                  <label style={{ fontSize: 13, fontWeight: 600 }}>
-                    Spam → <br />
-                    <select aria-label="Spam action" value={onSpam} onChange={(e) => setOnSpam(e.target.value as SpamPolicy["onSpam"])} style={sel}>
+                <div className="mt-3 flex flex-wrap gap-5">
+                  <label className="flex flex-col gap-1.5 text-sm font-semibold text-on-surface">
+                    Spam →
+                    <select aria-label="Spam action" value={onSpam} onChange={(e) => setOnSpam(e.target.value as SpamPolicy["onSpam"])} className={selCls}>
                       {SPAM_OPTS.map((o) => (
                         <option key={o.v} value={o.v}>{o.label}</option>
                       ))}
                     </select>
                   </label>
-                  <label style={{ fontSize: 13, fontWeight: 600 }}>
-                    Failed SPF/DKIM/DMARC → <br />
-                    <select aria-label="Auth-fail action" value={onAuthFail} onChange={(e) => setOnAuthFail(e.target.value as SpamPolicy["onAuthFail"])} style={sel}>
+                  <label className="flex flex-col gap-1.5 text-sm font-semibold text-on-surface">
+                    Failed SPF/DKIM/DMARC →
+                    <select aria-label="Auth-fail action" value={onAuthFail} onChange={(e) => setOnAuthFail(e.target.value as SpamPolicy["onAuthFail"])} className={selCls}>
                       {AUTH_OPTS.map((o) => (
                         <option key={o.v} value={o.v}>{o.label}</option>
                       ))}
                     </select>
                   </label>
-                  <label style={{ fontSize: 13, fontWeight: 600 }}>
-                    Virus → <br />
-                    <select aria-label="Virus action" value={onVirus} onChange={(e) => setOnVirus(e.target.value as SpamPolicy["onVirus"])} style={sel}>
+                  <label className="flex flex-col gap-1.5 text-sm font-semibold text-on-surface">
+                    Virus →
+                    <select aria-label="Virus action" value={onVirus} onChange={(e) => setOnVirus(e.target.value as SpamPolicy["onVirus"])} className={selCls}>
                       {VIRUS_OPTS.map((o) => (
                         <option key={o.v} value={o.v}>{o.label}</option>
                       ))}
                     </select>
-                    <div style={{ fontWeight: 400, color: "#999", fontSize: 11 }}>A virus is never delivered to the inbox.</div>
+                    <span className="text-xs font-normal text-on-surface-variant/70">A virus is never delivered to the inbox.</span>
                   </label>
                 </div>
               </div>
             )}
           </div>
 
-          <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>
-            <button onClick={() => void onSave()} disabled={saving} style={btn(saving)}>
+          <div className="mt-4 flex items-center gap-3">
+            <Button onClick={() => void onSave()} disabled={saving}>
               {saving ? "Saving…" : "Save mail rules"}
-            </button>
-            {saved && <span style={{ color: "#166534", fontSize: 13 }}>✅ Saved — applies to new mail.</span>}
+            </Button>
+            {saved && <span className="text-sm text-secondary">✅ Saved — applies to new mail.</span>}
           </div>
         </>
       )}
 
-      {err && <p style={{ color: "crimson", fontSize: 13 }}>{err}</p>}
+      {err && <p className="mt-2 text-sm text-tertiary">{err}</p>}
     </section>
   );
 }
