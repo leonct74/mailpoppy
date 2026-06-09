@@ -39,11 +39,14 @@ function parseList(text: string): string[] {
 
 export interface PolicyEditorProps {
   stackName: string;
-  load?: (stackName: string) => Promise<SpamPolicy>;
-  save?: (input: { stackName: string; policy: SpamPolicy }) => Promise<{ ok: true; policy: SpamPolicy }>;
+  /** When set, edits a per-domain override (`policy#<domain>`); omitted = the
+   *  deployment-wide default (`policy#default`). */
+  domain?: string;
+  load?: (stackName: string, domain?: string) => Promise<SpamPolicy>;
+  save?: (input: { stackName: string; policy: SpamPolicy; domain?: string }) => Promise<{ ok: true; policy: SpamPolicy }>;
 }
 
-export function PolicyEditor({ stackName, load, save }: PolicyEditorProps) {
+export function PolicyEditor({ stackName, domain, load, save }: PolicyEditorProps) {
   const loadPolicy = load ?? defaultGet;
   const savePolicy = save ?? defaultSet;
 
@@ -71,7 +74,7 @@ export function PolicyEditor({ stackName, load, save }: PolicyEditorProps) {
     setLoading(true);
     setErr(null);
     try {
-      applyPolicy(await loadPolicy(stackName));
+      applyPolicy(await loadPolicy(stackName, domain));
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -81,7 +84,7 @@ export function PolicyEditor({ stackName, load, save }: PolicyEditorProps) {
   useEffect(() => {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stackName]);
+  }, [stackName, domain]);
 
   const allowList = parseList(allowText);
   const blockList = parseList(blockText);
@@ -92,7 +95,7 @@ export function PolicyEditor({ stackName, load, save }: PolicyEditorProps) {
     setErr(null);
     setSaved(false);
     try {
-      const res = await savePolicy({ stackName, policy: { onVirus, onSpam, onAuthFail, allowList, blockList } });
+      const res = await savePolicy({ stackName, policy: { onVirus, onSpam, onAuthFail, allowList, blockList }, domain });
       applyPolicy(res.policy); // reflect server-normalized (deduped/lowercased) lists
       setSaved(true);
     } catch (e) {
@@ -107,7 +110,13 @@ export function PolicyEditor({ stackName, load, save }: PolicyEditorProps) {
       <h2 className="text-lg font-semibold text-on-surface">Mail rules — spam &amp; allow/block</h2>
       <p className="mt-1 text-sm text-on-surface-variant">
         How incoming mail is handled. Order: <b>block list</b> → <b>allow list</b> → virus → spam → failed
-        authentication → clean. Changes apply to <b>newly received</b> mail.
+        authentication → clean. Changes apply to <b>newly received</b> mail
+        {domain ? (
+          <>
+            {" "}addressed to <b className="text-on-surface">{domain}</b>
+          </>
+        ) : null}
+        .
       </p>
 
       {loading && <p className="mt-3 text-sm text-on-surface-variant">Loading mail rules…</p>}

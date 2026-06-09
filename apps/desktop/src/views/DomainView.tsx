@@ -11,14 +11,17 @@ import {
 import { getMailFromStatus as defaultGetMailFrom } from "../lib/mailFrom";
 import { getDomainIdentityStatus as defaultGetDomainStatus, type DomainIdentityStatus } from "../lib/provision";
 import { MailboxStorageRow } from "./MailboxStorageRow";
+import { PolicyEditor } from "./PolicyEditor";
+import { RetentionEditor } from "./RetentionEditor";
 import { Card, Button, Spinner, cn } from "../ui";
 
 // Domain workspace — the per-domain drill-in reached from a Home card. A
 // Mailpoppy admin runs several domains on ONE shared backend, so this view
 // scopes everything genuinely per-domain: its SES/DKIM/MAIL FROM health, the
-// mailboxes on this domain, adding a mailbox, opening its inbox, and importing
-// old mail into it. Account-wide concerns (region, deploy, mail rules, the AWS
-// inventory + teardown) stay out of here — they live in Setup / AWS Resources.
+// mailboxes on this domain, adding a mailbox, opening its inbox, importing old
+// mail, and this domain's mail rules + retention (each scoped to `policy#<domain>`
+// / `retention#<domain>`). The truly account-wide concerns — SES sending access,
+// the AWS resource inventory + teardown — live in the Account tab instead.
 
 type Tone = "ok" | "warn" | "muted" | "bad";
 const TONE: Record<Tone, string> = {
@@ -399,6 +402,16 @@ export function DomainView({
           </div>
         </Card>
       )}
+
+      {/* Per-domain mail rules + retention. Each writes a `<kind>#<domain>`
+          override; the inbound-processor / janitor fall back to the deployment
+          default for any domain that hasn't set one. */}
+      <Card>
+        <PolicyEditor stackName={stackName} domain={domain} />
+      </Card>
+      <Card>
+        <RetentionEditor stackName={stackName} domain={domain} />
+      </Card>
 
       <p className="text-xs text-on-surface-variant/70">
         To remove this domain's DNS/SES or tear down the whole backend, use the{" "}

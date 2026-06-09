@@ -13,11 +13,14 @@ const numInput =
 
 export interface RetentionEditorProps {
   stackName: string;
-  load?: (stackName: string) => Promise<RetentionSettings>;
-  save?: (input: { stackName: string; retention: RetentionSettings }) => Promise<{ ok: true; retention: RetentionSettings }>;
+  /** When set, edits a per-domain override (`retention#<domain>`); omitted = the
+   *  deployment-wide default (`retention#default`). */
+  domain?: string;
+  load?: (stackName: string, domain?: string) => Promise<RetentionSettings>;
+  save?: (input: { stackName: string; retention: RetentionSettings; domain?: string }) => Promise<{ ok: true; retention: RetentionSettings }>;
 }
 
-export function RetentionEditor({ stackName, load, save }: RetentionEditorProps) {
+export function RetentionEditor({ stackName, domain, load, save }: RetentionEditorProps) {
   const loadRetention = load ?? defaultGet;
   const saveRetention = save ?? defaultSet;
 
@@ -41,7 +44,7 @@ export function RetentionEditor({ stackName, load, save }: RetentionEditorProps)
       setLoading(true);
       setErr(null);
       try {
-        apply(await loadRetention(stackName));
+        apply(await loadRetention(stackName, domain));
       } catch (e) {
         setErr(String(e));
       } finally {
@@ -49,7 +52,7 @@ export function RetentionEditor({ stackName, load, save }: RetentionEditorProps)
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stackName]);
+  }, [stackName, domain]);
 
   async function onSave() {
     setSaving(true);
@@ -60,7 +63,7 @@ export function RetentionEditor({ stackName, load, save }: RetentionEditorProps)
         trashPurgeDays: Math.max(1, Math.floor(Number(trashPurgeDays) || 30)),
         retentionDays: keepForever ? null : Math.max(1, Math.floor(Number(retentionDays) || 0)) || null,
       };
-      const res = await saveRetention({ stackName, retention });
+      const res = await saveRetention({ stackName, retention, domain });
       apply(res.retention);
       setSaved(true);
     } catch (e) {
@@ -76,6 +79,11 @@ export function RetentionEditor({ stackName, load, save }: RetentionEditorProps)
       <p className="mt-1 text-sm text-on-surface-variant">
         AWS never deletes mail on its own — Mailpoppy keeps it until you say otherwise. Some rules require a{" "}
         <i>minimum</i> retention, others a <i>maximum</i> — so this is your call.
+        {domain ? (
+          <>
+            {" "}These settings apply to mail on <b className="text-on-surface">{domain}</b>.
+          </>
+        ) : null}
       </p>
 
       {loading && <p className="mt-3 text-sm text-on-surface-variant">Loading retention…</p>}

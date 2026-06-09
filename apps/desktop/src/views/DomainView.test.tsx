@@ -14,6 +14,15 @@ vi.mock("./MailboxStorageRow", () => ({
   ),
 }));
 
+// Mail rules + retention editors self-load from the sidecar; stub them and echo
+// the domain so we can assert they're mounted scoped to THIS domain.
+vi.mock("./PolicyEditor", () => ({
+  PolicyEditor: ({ domain }: { domain?: string }) => <div>MAIL RULES {domain}</div>,
+}));
+vi.mock("./RetentionEditor", () => ({
+  RetentionEditor: ({ domain }: { domain?: string }) => <div>RETENTION {domain}</div>,
+}));
+
 afterEach(() => cleanup());
 
 const BACKEND = {
@@ -106,6 +115,14 @@ describe("DomainView", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "open support@boxord.com" }));
     expect(onOpenInbox).toHaveBeenCalledWith("support@boxord.com");
+  });
+
+  it("hosts this domain's own mail rules + retention, scoped to the domain", async () => {
+    render(<DomainView domain="boxord.com" {...loaders()} />);
+    await screen.findByRole("heading", { name: "boxord.com" });
+
+    expect(screen.getByText("MAIL RULES boxord.com")).toBeInTheDocument();
+    expect(screen.getByText("RETENTION boxord.com")).toBeInTheDocument();
   });
 
   it("shows a deploy hint when no backend exists yet", async () => {

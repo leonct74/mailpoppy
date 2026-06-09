@@ -35,4 +35,21 @@ describe("RetentionEditor", () => {
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     expect(save.mock.calls[0]![0].retention).toEqual({ trashPurgeDays: 30, retentionDays: 180 });
   });
+
+  it("threads the domain scope into load + save when given one", async () => {
+    const load = vi.fn(async (_stack: string, _domain?: string) => keepForever);
+    const save = vi.fn(async (i: { stackName: string; retention: RetentionSettings; domain?: string }) => ({
+      ok: true as const,
+      retention: i.retention,
+    }));
+    render(<RetentionEditor stackName="MailpoppyMailStack" domain="boxord.com" load={load} save={save} />);
+
+    await waitFor(() => expect(load).toHaveBeenCalled());
+    expect(load.mock.calls[0]).toEqual(["MailpoppyMailStack", "boxord.com"]);
+    expect(screen.getByText(/boxord\.com/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Save retention/i }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]![0].domain).toBe("boxord.com");
+  });
 });

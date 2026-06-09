@@ -63,4 +63,22 @@ describe("PolicyEditor", () => {
     fireEvent.change(await screen.findByLabelText("Allow list"), { target: { value: "not-an-address" } });
     expect(await screen.findByText(/don't look like an address or domain/i)).toBeInTheDocument();
   });
+
+  it("threads the domain scope into load + save when given one", async () => {
+    const load = vi.fn(async (_stack: string, _domain?: string) => policy);
+    const save = vi.fn(async (input: { stackName: string; policy: SpamPolicy; domain?: string }) => ({
+      ok: true as const,
+      policy: input.policy,
+    }));
+    render(<PolicyEditor stackName="MailpoppyMailStack" domain="boxord.com" load={load} save={save} />);
+
+    await waitFor(() => expect(load).toHaveBeenCalled());
+    expect(load.mock.calls[0]).toEqual(["MailpoppyMailStack", "boxord.com"]);
+    // The scope is surfaced to the admin.
+    expect(screen.getByText("boxord.com")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Save mail rules/i }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]![0].domain).toBe("boxord.com");
+  });
 });
