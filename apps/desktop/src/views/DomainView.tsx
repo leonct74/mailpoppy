@@ -387,7 +387,7 @@ export function DomainView({
 
       <p className="text-xs text-on-surface-variant/70">
         To remove this domain's DNS/SES or tear down the whole backend, use the{" "}
-        <b className="text-on-surface">AWS Resources</b> tab.
+        <b className="text-on-surface">Account</b> tab.
       </p>
     </div>
   );

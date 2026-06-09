@@ -7,8 +7,6 @@ import { saveDeploymentConfig, loadDeploymentConfig, resolveStackName, DEFAULT_S
 import { MailboxStorageRow } from "./MailboxStorageRow";
 import { SendingAccessView } from "./SendingAccessView";
 import { MailFromSetup } from "./MailFromSetup";
-import { PolicyEditor } from "./PolicyEditor";
-import { RetentionEditor } from "./RetentionEditor";
 import { RegionPicker } from "./RegionPicker";
 import { AdminPrivacyNotice } from "./AdminPrivacyNotice";
 import { Card, Button, Spinner, cn } from "../ui";
@@ -750,19 +748,9 @@ export function SetupWizard() {
         </Card>
       )}
 
-      {/* ---- Mail rules: spam / auth actions + allow/block lists ---- */}
-      {ready && !mbNoBackend && (
-        <Card>
-          <PolicyEditor stackName={stackName} />
-        </Card>
-      )}
-
-          {/* ---- Retention: how long mail is kept ---- */}
-          {ready && !mbNoBackend && (
-            <Card>
-              <RetentionEditor stackName={stackName} />
-            </Card>
-          )}
+          {/* Mail rules + retention are account-wide (one backend per install),
+              so they live in the Account tab — not here, where the focus is
+              first-domain onboarding. */}
         </div>
 
         {/* Right column — guidance ("running this the right way"). */}

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { LayoutDashboard, Inbox, Settings, ArrowLeftRight, Database, ShieldCheck, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Inbox, Settings, ArrowLeftRight, SlidersHorizontal, ShieldCheck, type LucideIcon } from "lucide-react";
 import { HomeView } from "./views/HomeView";
 import { DomainView } from "./views/DomainView";
 import { SetupWizard } from "./views/SetupWizard";
 import { InboxView } from "./views/InboxView";
-import { ResourcesView } from "./views/ResourcesView";
+import { AccountView } from "./views/AccountView";
 import { MigrationView } from "./views/MigrationView";
 import { ConnectView } from "./views/ConnectView";
 import { LoginView } from "./views/LoginView";
@@ -18,14 +18,14 @@ import {
   type DeploymentConfig,
 } from "./lib/deploymentConfig";
 
-type Tab = "home" | "setup" | "inbox" | "migrate" | "resources";
+type Tab = "home" | "setup" | "inbox" | "migrate" | "account";
 
 const NAV: { id: Tab; label: string; icon: LucideIcon; blurb: string }[] = [
   { id: "home", label: "Home", icon: LayoutDashboard, blurb: "Overview of your domains and mailboxes" },
   { id: "setup", label: "Setup", icon: Settings, blurb: "Provision your AWS email infrastructure" },
   { id: "inbox", label: "Inbox", icon: Inbox, blurb: "Read and send mail" },
   { id: "migrate", label: "Migrate", icon: ArrowLeftRight, blurb: "Bring your old mail across via IMAP" },
-  { id: "resources", label: "AWS Resources", icon: Database, blurb: "Manage the infrastructure Mailpoppy provisioned" },
+  { id: "account", label: "Account", icon: SlidersHorizontal, blurb: "Shared settings & the AWS resources Mailpoppy manages" },
 ];
 
 const CREDENTIALS_TOOLTIP =
@@ -234,10 +234,10 @@ export function App() {
               </div>
             </div>
           )}
-          {visited.has("resources") && (
-            <div className={cn("h-full overflow-y-auto px-8 py-8", tab === "resources" ? "block" : "hidden")}>
+          {visited.has("account") && (
+            <div className={cn("h-full overflow-y-auto px-8 py-8", tab === "account" ? "block" : "hidden")}>
               <div className="mx-auto max-w-6xl">
-                <ResourcesView />
+                <AccountView />
               </div>
             </div>
           )}
