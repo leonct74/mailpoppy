@@ -198,7 +198,13 @@ export class MailStack extends Stack {
     // ---- Inbound pipeline: SES receipt rule → S3 + Lambda ------------------
     const ruleSet = new ses.ReceiptRuleSet(this, "MailRuleSet");
     ruleSet.addRule("InboundRule", {
-      recipients: [mailDomain.valueAsString],
+      // Catch-all (no `recipients` → matches every recipient that reaches our MX).
+      // Only the domains we provision point their MX at SES inbound, so this rule
+      // only ever sees our own mail; the inbound-processor then decides acceptance
+      // per recipient against the LIVE Cognito mailbox set. This is what lets a
+      // newly-added domain receive mail without re-deploying the stack just to
+      // widen a recipients list. (`mailDomain` still seeds the Lambda's
+      // HOSTED_DOMAINS fallback, used only if the mailbox lookup transiently fails.)
       scanEnabled: true, // populate spam/virus verdicts
       actions: [
         new sesActions.S3({ bucket: mailBucket, objectKeyPrefix: "inbound/" }),

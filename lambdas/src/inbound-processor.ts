@@ -51,7 +51,12 @@ const SETTINGS_TABLE = process.env.SETTINGS_TABLE ?? "";
 const MAIL_BUCKET = process.env.MAIL_BUCKET ?? "";
 const USER_POOL_ID = process.env.USER_POOL_ID ?? "";
 const INBOUND_PREFIX = process.env.INBOUND_PREFIX ?? "inbound/";
-/** Domains this deployment hosts; mail to other recipients is ignored. Empty = accept all. */
+/**
+ * Fallback allowlist of hosted domains, used ONLY when the live Cognito mailbox
+ * lookup fails (so we don't drop mail on a transient blip). In normal operation
+ * the mailbox set is authoritative and spans every provisioned domain. Empty =
+ * accept all recipients the catch-all receipt rule delivered.
+ */
 const HOSTED_DOMAINS = (process.env.HOSTED_DOMAINS ?? "")
   .split(",")
   .map((d) => d.trim().toLowerCase())
@@ -278,13 +283,19 @@ export async function handler(event: SESEvent): Promise<void> {
     const subject = parsed.subject ?? "(no subject)";
     const snippet = (parsed.text ?? "").replace(/\s+/g, " ").trim().slice(0, 140);
 
-    // Which hosted recipients are real mailboxes? If the mailbox list couldn't be
-    // read (empty set), fall back to delivering to all hosted recipients — never
-    // reject mail because of a transient lookup failure.
-    const hosted = (receipt.recipients ?? []).map(normalizeAddress).filter(isHosted);
+    // Who do we accept this message for? The LIVE Cognito mailbox set is the
+    // authority — across EVERY hosted domain — so a mailbox on a newly-added
+    // domain (e.g. marco@ollydigital.com) is delivered without re-deploying.
+    // Only if that list can't be read (transient failure → empty set) do we fall
+    // back to the static HOSTED_DOMAINS allowlist, so we never drop mail on a
+    // lookup blip. (Only our own domains' MX point at SES, so the catch-all
+    // receipt rule means `receipt.recipients` are already all ours.)
+    const recipients = (receipt.recipients ?? []).map(normalizeAddress);
     const enforceKnown = knownMailboxes.size > 0;
-    const known = enforceKnown ? hosted.filter((r) => isKnownMailbox(r, knownMailboxes)) : hosted;
-    const unknown = enforceKnown ? hosted.filter((r) => !isKnownMailbox(r, knownMailboxes)) : [];
+    const known = enforceKnown
+      ? recipients.filter((r) => isKnownMailbox(r, knownMailboxes))
+      : recipients.filter(isHosted);
+    const unknown = enforceKnown ? recipients.filter((r) => !isKnownMailbox(r, knownMailboxes)) : [];
 
     // Mail addressed only to non-existent mailboxes: store nothing (no DynamoDB
     // row), DELETE the raw object SES wrote to S3, and bounce a genuine sender.
