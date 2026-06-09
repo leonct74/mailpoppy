@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup } from "@testing-library/react";
 import { ResourcesView } from "./ResourcesView";
 import type { Inventory } from "../lib/resources";
 
@@ -67,75 +67,16 @@ describe("ResourcesView", () => {
     expect(screen.getByText(/boom/)).toBeInTheDocument();
   });
 
-  it("gates the danger zone behind typing the domain, then runs teardown", async () => {
-    const teardown = vi.fn(async () => ({
-      ok: true as const,
-      domain: "ollydigital.com",
-      domains: ["boxord.com", "ollydigital.com"],
-      stackName: "MailpoppyMailStack",
-      deleted: ["CloudFormation stack MailpoppyMailStack", "S3 bucket mailpoppy-bucket-abc"],
-      warnings: [],
-    }));
-    const listMailboxes = vi.fn(async () => ({
-      mailboxes: [
-        { email: "marco@ollydigital.com", status: "CONFIRMED" },
-        { email: "support@boxord.com", status: "CONFIRMED" },
-      ],
-    }));
-    const listDomains = vi.fn(async () => ({ domains: ["boxord.com", "ollydigital.com"] }));
-    render(
-      <ResourcesView
-        load={vi.fn(async () => POPULATED)}
-        teardown={teardown}
-        listMailboxes={listMailboxes}
-        listDomains={listDomains}
-      />,
-    );
+  // The whole-backend "remove everything" control was intentionally removed: it is
+  // too easy to trigger by accident and too blunt. Teardown is per-domain only
+  // (each domain's workspace has its own scoped danger zone), so this read-only
+  // inventory must never render a destructive control.
+  it("has no whole-backend teardown control", async () => {
+    render(<ResourcesView load={vi.fn(async () => POPULATED)} />);
 
-    // The danger zone is collapsed by default — the destructive control is hidden
-    // until the admin expands it.
-    await screen.findByRole("button", { name: "Toggle danger zone" });
+    await screen.findByText("mailpoppy-bucket-abc");
+    expect(screen.queryByRole("button", { name: "Toggle danger zone" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Remove everything" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Toggle danger zone" }));
-
-    // It lists EVERY mailbox that will be destroyed, across all domains — so the
-    // imported boxord.com mailbox is named even though the prompt asks for ollydigital.com.
-    expect(await screen.findByText("support@boxord.com")).toBeInTheDocument();
-    expect(screen.getByText("marco@ollydigital.com")).toBeInTheDocument();
-    expect(screen.getByText(/across every domain/i)).toBeInTheDocument();
-    // …and it lists every provisioned domain whose DNS/SES will be removed.
-    expect(await screen.findByText(/every provisioned domain/i)).toBeInTheDocument();
-    expect(screen.getByText("boxord.com")).toBeInTheDocument();
-
-    const btn = await screen.findByRole("button", { name: "Remove everything" });
-    expect(btn).toBeDisabled();
-
-    const input = screen.getByLabelText("Type domain to confirm teardown");
-    fireEvent.change(input, { target: { value: "wrong.com" } });
-    expect(btn).toBeDisabled();
-
-    fireEvent.change(input, { target: { value: "ollydigital.com" } });
-    expect(btn).not.toBeDisabled();
-
-    fireEvent.click(btn);
-    await waitFor(() =>
-      expect(teardown).toHaveBeenCalledWith({ domain: "ollydigital.com", stackName: "MailpoppyMailStack" }),
-    );
-    expect(await screen.findByText(/Removed 2 item\(s\)/)).toBeInTheDocument();
-    expect(screen.getByText("S3 bucket mailpoppy-bucket-abc")).toBeInTheDocument();
-  });
-
-  it("hides the danger zone when nothing is deployed", async () => {
-    const empty: Inventory = {
-      stackName: "MailpoppyMailStack",
-      region: "eu-west-1",
-      stackExists: false,
-      resources: [],
-      ledger: [],
-    };
-    render(<ResourcesView load={vi.fn(async () => empty)} />);
-
-    await screen.findByText(/No Mailpoppy backend is deployed/);
-    expect(screen.queryByRole("button", { name: "Remove everything" })).toBeNull();
+    expect(screen.queryByText(/danger zone/i)).toBeNull();
   });
 });

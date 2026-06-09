@@ -7,9 +7,10 @@ import { Card } from "../ui";
 // Account — the home for what's genuinely shared across the whole install rather
 // than scoped to a single domain. There is ONE backend per install (one stack,
 // one user pool, one SES rule set), so this is where SES sending access (an AWS
-// account+region property) and the AWS resource inventory + teardown live.
-// Per-domain concerns — DNS/DKIM, mailboxes, migration, inbox, and now mail rules
-// + retention — live in each domain's workspace instead.
+// account+region property) and the AWS resource inventory live. Per-domain
+// concerns — DNS/DKIM, mailboxes, migration, inbox, mail rules + retention, and
+// teardown — live in each domain's workspace instead. There is deliberately no
+// "remove everything" control here; teardown is per-domain only.
 
 export function AccountView({ stackName = resolveStackName() }: { stackName?: string }) {
   return (
@@ -33,7 +34,8 @@ export function AccountView({ stackName = resolveStackName() }: { stackName?: st
         <SendingAccessView />
       </Card>
 
-      {/* AWS resource inventory + teardown (self-loads; handles no-backend itself). */}
+      {/* AWS resource inventory — read-only (self-loads; handles no-backend itself).
+          Teardown is per-domain, in each domain's workspace. */}
       <ResourcesView stackName={stackName} />
     </div>
   );
