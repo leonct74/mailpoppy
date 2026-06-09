@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { LayoutDashboard, Inbox, Settings, ArrowLeftRight, SlidersHorizontal, ShieldCheck, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Inbox, ArrowLeftRight, SlidersHorizontal, ShieldCheck, type LucideIcon } from "lucide-react";
 import { HomeView } from "./views/HomeView";
 import { DomainView } from "./views/DomainView";
 import { SetupWizard } from "./views/SetupWizard";
@@ -18,15 +18,20 @@ import {
   type DeploymentConfig,
 } from "./lib/deploymentConfig";
 
-type Tab = "home" | "setup" | "inbox" | "migrate" | "account";
+// "Setup" is intentionally NOT a sidebar tab — it's a per-domain flow reached
+// from "Add domain" (Home) or a domain card's "Domain setup" action, so it's
+// never ambiguous which domain you're configuring.
+type Tab = "home" | "inbox" | "migrate" | "account";
 
 const NAV: { id: Tab; label: string; icon: LucideIcon; blurb: string }[] = [
   { id: "home", label: "Home", icon: LayoutDashboard, blurb: "Overview of your domains and mailboxes" },
-  { id: "setup", label: "Setup", icon: Settings, blurb: "Provision your AWS email infrastructure" },
   { id: "inbox", label: "Inbox", icon: Inbox, blurb: "Read and send mail" },
   { id: "migrate", label: "Migrate", icon: ArrowLeftRight, blurb: "Bring your old mail across via IMAP" },
   { id: "account", label: "Account", icon: SlidersHorizontal, blurb: "Shared settings & the AWS resources Mailpoppy manages" },
 ];
+
+/** Setup drill-in target: a new domain ({}) or re-running an existing one. */
+type SetupTarget = { domain?: string };
 
 const CREDENTIALS_TOOLTIP =
   "Mailpoppy reads your AWS credentials from your machine's own configuration (~/.aws profile, SSO, or environment) using AWS's official SDK — the same way the AWS CLI does — and uses them only on this computer. They are never copied, uploaded, or stored: not on Mailpoppy's servers, not in any cloud.";
@@ -115,6 +120,9 @@ export function App() {
   // domain instead of the overview. Clicking the Home nav (or the in-view back
   // button) clears it to return to the overview.
   const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
+  // When set, the Home tab shows the Setup wizard (add a new domain, or re-run
+  // setup for an existing one) instead of the overview / domain workspace.
+  const [setupTarget, setSetupTarget] = useState<SetupTarget | null>(null);
   // Cross-tab hand-offs from the domain workspace: which domain the Migrate tab
   // should default its destination to, and which mailbox the Inbox login should
   // be pre-filled for.
@@ -146,8 +154,11 @@ export function App() {
                 key={id}
                 onClick={() => {
                   // The Home nav always lands on the overview, even if a domain
-                  // drill-in is currently open.
-                  if (id === "home") setSelectedDomain(null);
+                  // drill-in or the setup wizard is currently open.
+                  if (id === "home") {
+                    setSelectedDomain(null);
+                    setSetupTarget(null);
+                  }
                   go(id);
                 }}
                 aria-current={active ? "page" : undefined}
@@ -201,10 +212,13 @@ export function App() {
           {visited.has("home") && (
             <div className={cn("h-full overflow-y-auto px-8 py-8", tab === "home" ? "block" : "hidden")}>
               <div className="mx-auto max-w-6xl">
-                {selectedDomain ? (
+                {setupTarget ? (
+                  <SetupWizard presetDomain={setupTarget.domain} onExit={() => setSetupTarget(null)} />
+                ) : selectedDomain ? (
                   <DomainView
                     domain={selectedDomain}
                     onBack={() => setSelectedDomain(null)}
+                    onRunSetup={() => setSetupTarget({ domain: selectedDomain })}
                     onOpenInbox={(email) => {
                       setInboxEmail(email);
                       go("inbox");
@@ -215,15 +229,8 @@ export function App() {
                     }}
                   />
                 ) : (
-                  <HomeView onGoToSetup={() => go("setup")} onOpenDomain={(d) => setSelectedDomain(d)} />
+                  <HomeView onGoToSetup={() => setSetupTarget({})} onOpenDomain={(d) => setSelectedDomain(d)} />
                 )}
-              </div>
-            </div>
-          )}
-          {visited.has("setup") && (
-            <div className={cn("h-full overflow-y-auto px-8 py-8", tab === "setup" ? "block" : "hidden")}>
-              <div className="mx-auto max-w-6xl">
-                <SetupWizard />
               </div>
             </div>
           )}

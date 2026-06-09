@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowLeft, Globe, Inbox, Mail, Plus, RefreshCw, Server, ArrowLeftRight } from "lucide-react";
+import { ArrowLeft, Globe, Inbox, Mail, Plus, RefreshCw, Server, ArrowLeftRight, Settings } from "lucide-react";
 import type { MailFromState } from "@mailpoppy/core";
 import { resolveStackName, saveDeploymentConfig } from "../lib/deploymentConfig";
 import {
@@ -50,6 +50,7 @@ export function DomainView({
   domain,
   stackName = resolveStackName(),
   onBack,
+  onRunSetup,
   onOpenInbox,
   onMigrateInto,
   listMailboxes = defaultListMailboxes,
@@ -60,6 +61,7 @@ export function DomainView({
   domain: string;
   stackName?: string;
   onBack?: () => void;
+  onRunSetup?: () => void;
   onOpenInbox?: (email: string) => void;
   onMigrateInto?: (domain: string) => void;
   listMailboxes?: (stackName: string) => Promise<BackendInfo & { ok: true; mailboxes: Mailbox[] }>;
@@ -177,9 +179,16 @@ export function DomainView({
           <h2 className="truncate text-2xl font-bold tracking-tight text-on-surface">{domain}</h2>
         </div>
       </div>
-      <Button variant="secondary" onClick={() => setReloadKey((k) => k + 1)}>
-        <RefreshCw className="size-4" /> Refresh
-      </Button>
+      <div className="flex gap-2">
+        {onRunSetup && (
+          <Button variant="secondary" onClick={onRunSetup}>
+            <Settings className="size-4" /> Domain setup
+          </Button>
+        )}
+        <Button variant="secondary" onClick={() => setReloadKey((k) => k + 1)}>
+          <RefreshCw className="size-4" /> Refresh
+        </Button>
+      </div>
     </div>
   );
 
@@ -269,8 +278,14 @@ export function DomainView({
         </div>
         {domStatus && domStatus !== "error" && !domStatus.verifiedForSending && (
           <p className="mt-3 text-xs text-on-surface-variant/80">
-            DNS for this domain isn't fully verified yet. Finish or re-check it in{" "}
-            <b className="text-on-surface">Setup</b>.
+            DNS for this domain isn't fully verified yet.{" "}
+            {onRunSetup ? (
+              <button onClick={onRunSetup} className="text-primary underline-offset-2 hover:underline">
+                Finish or re-check its setup →
+              </button>
+            ) : (
+              <>Finish or re-check it from <b className="text-on-surface">Domain setup</b>.</>
+            )}
           </p>
         )}
       </Card>

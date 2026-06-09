@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Terminal, KeyRound, ShieldCheck, Rocket, Globe, RefreshCw, Mail, Sparkles } from "lucide-react";
+import { Terminal, KeyRound, ShieldCheck, Rocket, Globe, RefreshCw, Mail, Sparkles, ArrowLeft } from "lucide-react";
 import { sidecar } from "../lib/sidecar";
 import { createMailbox, listMailboxes, type Mailbox, type BackendInfo } from "../lib/mailbox";
 import { deployBackend, deployStatus, type DeployStatus } from "../lib/deploy";
 import { saveDeploymentConfig, loadDeploymentConfig, resolveStackName, DEFAULT_STACK_NAME } from "../lib/deploymentConfig";
 import { MailboxStorageRow } from "./MailboxStorageRow";
-import { SendingAccessView } from "./SendingAccessView";
 import { MailFromSetup } from "./MailFromSetup";
 import { RegionPicker } from "./RegionPicker";
 import { AdminPrivacyNotice } from "./AdminPrivacyNotice";
@@ -97,14 +96,26 @@ const permTone = (v: "ok" | "denied" | "error") =>
       : "border-amber-400/30 bg-amber-400/10 text-amber-300";
 const permIcon = (v: "ok" | "denied" | "error") => (v === "ok" ? "✓" : v === "denied" ? "⛔" : "⚠");
 
-export function SetupWizard() {
+export function SetupWizard({
+  presetDomain,
+  onExit,
+}: {
+  // When set, this is a re-run for an existing domain: the domain is fixed.
+  presetDomain?: string;
+  onExit?: () => void;
+} = {}) {
   // Step 0 — environment readiness
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [checking, setChecking] = useState(true);
   const retryRef = useRef<number | null>(null);
 
+  // The backend stack is deployed once (with the first domain). For every
+  // subsequent domain — and for any re-run — it already exists, so the deploy
+  // step is skipped and we go straight from preflight to provisioning DNS/SES.
+  const backendDeployed = !!loadDeploymentConfig();
+
   // Steps 1–3
-  const [domain, setDomain] = useState("");
+  const [domain, setDomain] = useState(presetDomain ?? "");
   const [recipient, setRecipient] = useState("");
   const [step, setStep] = useState<Step>("start");
   const [preflight, setPreflight] = useState<Preflight | null>(null);
@@ -407,14 +418,25 @@ export function SetupWizard() {
 
       {/* Intro */}
       <div>
-        <div className="font-mono text-xs uppercase tracking-wider text-primary">Environment Setup</div>
+        {onExit && (
+          <button
+            onClick={onExit}
+            className="mb-3 inline-flex items-center gap-1.5 text-sm text-on-surface-variant transition-colors hover:text-on-surface"
+          >
+            <ArrowLeft className="size-4" /> Back to overview
+          </button>
+        )}
+        <div className="font-mono text-xs uppercase tracking-wider text-primary">
+          {presetDomain ? "Domain setup" : "Add a domain"}
+        </div>
         <h2 className="mt-1 flex items-center gap-2 text-2xl font-bold tracking-tight text-on-surface">
           <Sparkles className="size-5 text-primary" />
-          Configure your Mailpoppy backend
+          {presetDomain ? `Set up ${presetDomain}` : "Set up a new domain"}
         </h2>
         <p className="mt-1 max-w-2xl text-on-surface-variant">
-          Provision the SES, Route53, Lambda and Cognito resources for your domain — all in your own AWS account. Your
-          credentials never leave this machine.
+          {backendDeployed
+            ? "Verify the domain in SES and publish its DNS records (DKIM/MX/DMARC) — all in your own AWS account. Your credentials never leave this machine."
+            : "Provision the SES, Route53, Lambda and Cognito resources for your first domain — all in your own AWS account. Your credentials never leave this machine."}
         </p>
       </div>
 
@@ -541,7 +563,7 @@ export function SetupWizard() {
               value={domain}
               onChange={(e) => setDomain(e.target.value.trim().toLowerCase())}
               placeholder="yourdomain.com"
-              disabled={!ready || step !== "start"}
+              disabled={!ready || step !== "start" || !!presetDomain}
               className={cn(inputCls, "w-64")}
               {...noAutoCap}
             />
@@ -559,7 +581,8 @@ export function SetupWizard() {
             <div className="flex items-center gap-1.5 text-secondary">
               <ShieldCheck className="size-4" /> Hosted zone <C>{preflight.zoneId}</C>
             </div>
-            {step === "preflighted" && (
+            {/* First domain: deploy the shared backend stack. */}
+            {step === "preflighted" && !backendDeployed && (
               <div className="mt-2">
                 <label className="mb-3 flex max-w-lg items-start gap-2 text-sm text-on-surface-variant">
                   <input type="checkbox" checked={enableMalware} onChange={(e) => setEnableMalware(e.target.checked)} className="mt-1 size-4 accent-primary" />
@@ -571,6 +594,16 @@ export function SetupWizard() {
                 </label>
                 <Button onClick={onDeploy} disabled={busy}>
                   <Rocket className="size-4" /> 2. Deploy backend
+                </Button>
+              </div>
+            )}
+
+            {/* Backend already exists (additional domain or re-run): skip deploy,
+                go straight to provisioning this domain's mail DNS. */}
+            {step === "preflighted" && backendDeployed && (
+              <div className="mt-2">
+                <Button onClick={provisionDomain} disabled={busy}>
+                  <Globe className="size-4" /> Set up domain mail (SES + DNS)
                 </Button>
               </div>
             )}
@@ -655,11 +688,10 @@ export function SetupWizard() {
         {error && <p className="mt-3 text-sm text-tertiary">{error}</p>}
       </StepCard>
 
-      {/* ---- Sending access (SES sandbox → production) + deliverability ---- */}
-      {ready && (
+      {/* ---- Custom MAIL FROM (per-domain deliverability) ---- */}
+      {ready && domain && (
         <Card>
-          <SendingAccessView defaultWebsite={domain || undefined} />
-          {domain && <MailFromSetup domain={domain} region={preflight?.region} />}
+          <MailFromSetup domain={domain} region={preflight?.region} />
         </Card>
       )}
 

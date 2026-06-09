@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import { SetupWizard } from "./SetupWizard";
 import { sidecar } from "../lib/sidecar";
+import { saveDeploymentConfig } from "../lib/deploymentConfig";
 
 // Mock the local sidecar client so we can drive the readiness states an admin
 // with valid credentials can't otherwise reproduce (missing creds / denied perms).
@@ -188,6 +189,38 @@ describe("SetupWizard · Mailboxes", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     // No deploy was attempted (the /deploy/backend handler would have thrown).
     expect(mockSidecar.mock.calls.find((c) => c[0] === "/deploy/backend")).toBeUndefined();
+  });
+
+  it("re-running for an existing domain locks the domain and skips deploy", async () => {
+    // A backend already exists in this install…
+    saveDeploymentConfig({
+      apiBaseUrl: "https://api.example.com",
+      userPoolId: "eu-west-1_abc123",
+      clientId: "client123",
+      region: "eu-west-1",
+      stackName: "MailpoppyMailStack",
+    });
+    mockSidecar.mockImplementation(async (path: string) => {
+      if (path === "/aws/readiness") return READY;
+      if (path.startsWith("/mailbox/list")) return { ...BACKEND, mailboxes: [] };
+      if (path.startsWith("/aws/preflight")) return { accountId: "123456789012", zoneId: "Z123", region: "eu-west-1" };
+      throw new Error(`unexpected sidecar path ${path}`);
+    });
+
+    render(<SetupWizard presetDomain="second.com" />);
+    await screen.findByText(/Environment ready/i);
+
+    // The domain is preset and locked (can't be edited for a re-run).
+    const input = screen.getByPlaceholderText("yourdomain.com") as HTMLInputElement;
+    expect(input.value).toBe("second.com");
+    expect(input).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Check AWS/i }));
+    await screen.findByText(/Hosted zone/i);
+
+    // No deploy step — the backend exists — so the SES/DNS provision button is shown instead.
+    expect(screen.queryByRole("button", { name: /Deploy backend/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Set up domain mail/i })).toBeInTheDocument();
   });
 
   it("treats a not-yet-deployed backend as the expected first-run state, not a red error", async () => {

@@ -90,6 +90,15 @@ describe("DomainView", () => {
     expect(onMigrateInto).toHaveBeenCalledWith("boxord.com");
   });
 
+  it("launches per-domain setup via the Domain setup action", async () => {
+    const onRunSetup = vi.fn();
+    render(<DomainView domain="boxord.com" onRunSetup={onRunSetup} {...loaders()} />);
+    await screen.findByRole("heading", { name: "boxord.com" });
+
+    fireEvent.click(screen.getByRole("button", { name: /Domain setup/i }));
+    expect(onRunSetup).toHaveBeenCalled();
+  });
+
   it("opens a mailbox's inbox via the per-row action", async () => {
     const onOpenInbox = vi.fn();
     render(<DomainView domain="boxord.com" onOpenInbox={onOpenInbox} {...loaders()} />);

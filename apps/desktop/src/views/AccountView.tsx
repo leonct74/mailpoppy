@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { SlidersHorizontal } from "lucide-react";
 import { loadInventory as defaultLoadInventory, type Inventory } from "../lib/resources";
 import { resolveStackName } from "../lib/deploymentConfig";
+import { SendingAccessView } from "./SendingAccessView";
 import { PolicyEditor } from "./PolicyEditor";
 import { RetentionEditor } from "./RetentionEditor";
 import { ResourcesView } from "./ResourcesView";
@@ -49,6 +50,12 @@ export function AccountView({
           and the AWS resources Mailpoppy manages.
         </p>
       </div>
+
+      {/* Sending access is an AWS account+region property (SES sandbox →
+          production), not per-domain — it lives here. */}
+      <Card>
+        <SendingAccessView />
+      </Card>
 
       {/* Shared, account-wide settings. */}
       {hasBackend === null ? (
