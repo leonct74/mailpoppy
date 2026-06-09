@@ -28,3 +28,31 @@ export function teardownEverything(input: {
 export function listProvisionedDomains(stackName: string): Promise<{ ok: true; domains: string[] }> {
   return sidecar(`/teardown/domains/${encodeURIComponent(stackName)}`);
 }
+
+export interface RemoveDomainResult {
+  ok: true;
+  domain: string;
+  stackName: string;
+  deletedMailboxes: string[];
+  deletedMessages: number;
+  deletedObjects: number;
+  freedBytes: number;
+  sesIdentityDeleted: boolean;
+  dnsRemoved: string[];
+  warnings: string[];
+}
+
+/**
+ * Mutating + DESTRUCTIVE, scoped to ONE domain: removes the domain's mailboxes
+ * (+ their stored mail), its per-domain mail-rules/retention, its SES identity
+ * and its DNS records — leaving the shared backend stack and every OTHER domain
+ * intact. Unlike teardownEverything this does NOT touch CloudFormation, so it
+ * returns quickly.
+ */
+export function removeDomain(input: { domain: string; stackName?: string }): Promise<RemoveDomainResult> {
+  return sidecar("/domain/remove", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}

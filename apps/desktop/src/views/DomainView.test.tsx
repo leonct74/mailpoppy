@@ -125,6 +125,51 @@ describe("DomainView", () => {
     expect(screen.getByText("RETENTION boxord.com")).toBeInTheDocument();
   });
 
+  it("removes just this domain after type-to-confirm", async () => {
+    const removeDomain = vi.fn(async (input: { domain: string; stackName?: string }) => ({
+      ok: true as const,
+      domain: input.domain,
+      stackName: "MailpoppyMailStack",
+      deletedMailboxes: ["support@boxord.com", "info@boxord.com"],
+      deletedMessages: 12,
+      deletedObjects: 20,
+      freedBytes: 100_000,
+      sesIdentityDeleted: true,
+      dnsRemoved: ["MX boxord.com", "DKIM CNAME x._domainkey.boxord.com"],
+      warnings: [],
+    }));
+    const onRemoved = vi.fn();
+    render(<DomainView domain="boxord.com" onRemoved={onRemoved} removeDomain={removeDomain} {...loaders()} />);
+    await screen.findByRole("heading", { name: "boxord.com" });
+
+    // Collapsed by default — expand the danger zone first.
+    fireEvent.click(screen.getByRole("button", { name: /Toggle danger zone/i }));
+
+    const removeBtn = screen.getByRole("button", { name: /Remove domain/i });
+    expect(removeBtn).toBeDisabled(); // gated until the domain is typed
+
+    fireEvent.change(screen.getByLabelText("Type domain to confirm removal"), { target: { value: "boxord.com" } });
+    expect(removeBtn).not.toBeDisabled();
+    fireEvent.click(removeBtn);
+
+    await waitFor(() =>
+      expect(removeDomain).toHaveBeenCalledWith({ domain: "boxord.com", stackName: "MailpoppyMailStack" }),
+    );
+    expect(onRemoved).toHaveBeenCalledWith("boxord.com");
+    expect(await screen.findByText(/Removed boxord\.com/i)).toBeInTheDocument();
+  });
+
+  it("keeps the remove button disabled when the typed domain doesn't match", async () => {
+    const removeDomain = vi.fn();
+    render(<DomainView domain="boxord.com" removeDomain={removeDomain} {...loaders()} />);
+    await screen.findByRole("heading", { name: "boxord.com" });
+    fireEvent.click(screen.getByRole("button", { name: /Toggle danger zone/i }));
+
+    fireEvent.change(screen.getByLabelText("Type domain to confirm removal"), { target: { value: "boxor" } });
+    fireEvent.click(screen.getByRole("button", { name: /Remove domain/i }));
+    expect(removeDomain).not.toHaveBeenCalled();
+  });
+
   it("shows a deploy hint when no backend exists yet", async () => {
     const noBackend = vi.fn(async () => {
       throw new Error('sidecar 404: {"ok":false,"error":"No deployed Mailpoppy backend was found yet."}');

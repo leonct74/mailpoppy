@@ -1543,3 +1543,120 @@ export async function teardownAll(
   await record(ledger);
   return { ok: true, domain, domains: [...domainsToClean], stackName, deleted, warnings };
 }
+
+export interface RemoveDomainResult {
+  ok: true;
+  domain: string;
+  stackName: string;
+  deletedMailboxes: string[]; // emails removed
+  deletedMessages: number; // total stored messages purged across those mailboxes
+  deletedObjects: number; // total S3 objects purged (raw .eml + attachments)
+  freedBytes: number;
+  sesIdentityDeleted: boolean;
+  dnsRemoved: string[]; // human-readable DNS record removals
+  warnings: string[]; // non-fatal issues the user should know about
+}
+
+/**
+ * Remove ONE domain from the shared backend, leaving the CloudFormation stack and
+ * every OTHER domain intact. Deletes everything specific to this domain:
+ *   - each mailbox on it (Cognito user + its stored mail in S3/DynamoDB + quota
+ *     row) via deleteMailbox,
+ *   - the domain's per-domain mail-rules + retention overrides,
+ *   - the SES domain identity (stops sending; clears DKIM/MAIL FROM), and
+ *   - the published DNS records (apex MX / DKIM CNAMEs / DMARC / MAIL FROM MX +
+ *     SPF) in the domain's hosted zone.
+ *
+ * Inbound stops the moment the identity + apex MX are gone, so the shared SES
+ * receipt rule is intentionally left untouched — editing its recipients risks an
+ * empty list, which SES treats as a catch-all. Best-effort + idempotent: each
+ * step tolerates "already gone" and collects failures as warnings rather than
+ * aborting, so a partial run can be finished by running it again.
+ */
+export async function removeDomain(
+  ctx: AwsContext,
+  args: { domain: string; stackName?: string },
+): Promise<RemoveDomainResult> {
+  const { sesv2, dynamodb } = clients(ctx);
+  const region = ctx.region;
+  const stackName = args.stackName ?? "MailpoppyMailStack";
+  const domain = args.domain.trim().toLowerCase();
+  if (!domain || !domain.includes(".")) throw new Error(`invalid domain: ${args.domain}`);
+
+  const deletedMailboxes: string[] = [];
+  const warnings: string[] = [];
+  const ledger: Array<Omit<LedgerEntry, "ts">> = [];
+  let deletedMessages = 0;
+  let deletedObjects = 0;
+  let freedBytes = 0;
+
+  // 1. Delete every mailbox on this domain (sign-in user + its stored mail +
+  //    quota). deleteMailbox records its own ledger entry per mailbox.
+  try {
+    const outputs = await getStackOutputs(ctx, stackName);
+    if (outputs.UserPoolId) {
+      const boxes = (await listMailboxes(ctx, outputs.UserPoolId)).filter((m) => addressDomain(m.email) === domain);
+      for (const m of boxes) {
+        try {
+          const r = await deleteMailbox(ctx, { stackName, email: m.email });
+          deletedMailboxes.push(m.email);
+          deletedMessages += r.deletedMessages;
+          deletedObjects += r.deletedObjects;
+          freedBytes += r.freedBytes;
+        } catch (e) {
+          warnings.push(`mailbox ${m.email}: ${(e as Error).message}`);
+        }
+      }
+      // 2. Drop this domain's per-domain settings overrides (best-effort).
+      const settingsTable = await resolveSettingsTableName(ctx, stackName, outputs);
+      if (settingsTable) {
+        for (const key of [policySettingsKey(domain), retentionSettingsKey(domain)]) {
+          try {
+            await dynamodb.send(new DeleteItemCommand({ TableName: settingsTable, Key: { pk: { S: key } } }));
+          } catch {
+            // a left-over settings row is harmless
+          }
+        }
+      }
+    } else {
+      warnings.push("no user pool in stack outputs — skipped mailbox cleanup");
+    }
+  } catch (e) {
+    warnings.push(`stack outputs unavailable (${(e as Error).message}) — skipped mailbox + settings cleanup`);
+  }
+
+  // 3. Delete the SES domain identity (stops sending; removes DKIM/MAIL FROM).
+  let sesIdentityDeleted = false;
+  try {
+    await sesv2.send(new DeleteEmailIdentityCommand({ EmailIdentity: domain }));
+    sesIdentityDeleted = true;
+    ledger.push({ action: "deleted", service: "SES", resourceType: "EmailIdentity", name: domain, region });
+  } catch (e) {
+    if (!/NotFound/i.test((e as Error).name ?? "")) warnings.push(`SES identity ${domain}: ${(e as Error).message}`);
+  }
+
+  // 4. Remove the DNS records Mailpoppy published in this domain's hosted zone.
+  let dnsRemoved: string[] = [];
+  try {
+    dnsRemoved = await removeDnsRecords(ctx, domain);
+    for (const desc of dnsRemoved) {
+      ledger.push({ action: "deleted", service: "Route53", resourceType: "DNS", name: desc, region });
+    }
+  } catch (e) {
+    warnings.push(`DNS cleanup ${domain}: ${(e as Error).message}`);
+  }
+
+  await record(ledger);
+  return {
+    ok: true,
+    domain,
+    stackName,
+    deletedMailboxes,
+    deletedMessages,
+    deletedObjects,
+    freedBytes,
+    sesIdentityDeleted,
+    dnsRemoved,
+    warnings,
+  };
+}

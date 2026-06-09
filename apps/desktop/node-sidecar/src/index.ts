@@ -532,6 +532,20 @@ app.post("/teardown", async (req, reply) => {
   }
 });
 
+// Mutating + DESTRUCTIVE, but scoped to ONE domain: deletes the domain's
+// mailboxes (+ their stored mail), its per-domain mail-rules/retention, its SES
+// identity and its DNS records — leaving the shared backend stack and every other
+// domain intact. The UI requires the user to type the domain to confirm.
+app.post("/domain/remove", async (req, reply) => {
+  const b = (req.body ?? {}) as { domain?: string; stackName?: string };
+  if (!b.domain) return reply.code(400).send({ ok: false, error: "domain is required" });
+  try {
+    return await prov.removeDomain(ctx(), { domain: b.domain, stackName: b.stackName });
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
 const port = Number(process.env.PORT ?? 8787);
 app
   .listen({ port, host: "127.0.0.1" })

@@ -1,5 +1,19 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowLeft, Globe, Inbox, Mail, Plus, RefreshCw, Server, ArrowLeftRight, Settings } from "lucide-react";
+import {
+  ArrowLeft,
+  Globe,
+  Inbox,
+  Mail,
+  Plus,
+  RefreshCw,
+  Server,
+  ArrowLeftRight,
+  Settings,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Trash2,
+} from "lucide-react";
 import type { MailFromState } from "@mailpoppy/core";
 import { resolveStackName, saveDeploymentConfig } from "../lib/deploymentConfig";
 import {
@@ -10,6 +24,7 @@ import {
 } from "../lib/mailbox";
 import { getMailFromStatus as defaultGetMailFrom } from "../lib/mailFrom";
 import { getDomainIdentityStatus as defaultGetDomainStatus, type DomainIdentityStatus } from "../lib/provision";
+import { removeDomain as defaultRemoveDomain, type RemoveDomainResult } from "../lib/teardown";
 import { MailboxStorageRow } from "./MailboxStorageRow";
 import { PolicyEditor } from "./PolicyEditor";
 import { RetentionEditor } from "./RetentionEditor";
@@ -56,10 +71,12 @@ export function DomainView({
   onRunSetup,
   onOpenInbox,
   onMigrateInto,
+  onRemoved,
   listMailboxes = defaultListMailboxes,
   createMailbox = defaultCreateMailbox,
   getDomainStatus = defaultGetDomainStatus,
   getMailFrom = defaultGetMailFrom,
+  removeDomain = defaultRemoveDomain,
 }: {
   domain: string;
   stackName?: string;
@@ -67,12 +84,14 @@ export function DomainView({
   onRunSetup?: () => void;
   onOpenInbox?: (email: string) => void;
   onMigrateInto?: (domain: string) => void;
+  onRemoved?: (domain: string) => void;
   listMailboxes?: (stackName: string) => Promise<BackendInfo & { ok: true; mailboxes: Mailbox[] }>;
   createMailbox?: (input: { email: string; password: string; stackName?: string }) => Promise<
     BackendInfo & { ok: true; mailbox: Mailbox }
   >;
   getDomainStatus?: (domain: string) => Promise<DomainIdentityStatus>;
   getMailFrom?: (domain: string) => Promise<MailFromState>;
+  removeDomain?: (input: { domain: string; stackName?: string }) => Promise<RemoveDomainResult>;
 }) {
   type Phase = "loading" | "no-backend" | "ready" | "error";
   const [phase, setPhase] = useState<Phase>("loading");
@@ -90,6 +109,14 @@ export function DomainView({
   const [mbBusy, setMbBusy] = useState(false);
   const [mbError, setMbError] = useState<string | null>(null);
   const [mbCreated, setMbCreated] = useState<string | null>(null);
+
+  // Danger zone — remove THIS domain (its mailboxes + mail + SES + DNS), leaving
+  // the shared backend and every other domain intact. Type-to-confirm gates it.
+  const [dangerOpen, setDangerOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [removing, setRemoving] = useState(false);
+  const [removeResult, setRemoveResult] = useState<RemoveDomainResult | null>(null);
+  const [removeErr, setRemoveErr] = useState<string | null>(null);
 
   async function reload() {
     const res = await listMailboxes(stackName);
@@ -160,6 +187,23 @@ export function DomainView({
       setMbError(String(e));
     } finally {
       setMbBusy(false);
+    }
+  }
+
+  const canRemove = confirmText.trim().toLowerCase() === domain.toLowerCase() && !removing;
+
+  async function onRemove() {
+    if (!canRemove) return;
+    setRemoving(true);
+    setRemoveErr(null);
+    try {
+      const res = await removeDomain({ domain, stackName });
+      setRemoveResult(res);
+      onRemoved?.(domain);
+    } catch (e) {
+      setRemoveErr(String(e));
+    } finally {
+      setRemoving(false);
     }
   }
 
@@ -413,9 +457,131 @@ export function DomainView({
         <RetentionEditor stackName={stackName} domain={domain} />
       </Card>
 
+      {/* Danger zone — remove just THIS domain (mailboxes + mail + SES + DNS),
+          leaving the shared backend and other domains intact. */}
+      <div className="overflow-hidden rounded-xl border border-error/20 bg-[#1a0f14]">
+        <button
+          type="button"
+          aria-label="Toggle danger zone"
+          aria-expanded={dangerOpen}
+          onClick={() => setDangerOpen((o) => !o)}
+          className="flex w-full items-center justify-between gap-4 p-6 text-left"
+        >
+          <div>
+            <div className="mb-1 flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-error">
+              <AlertTriangle className="size-4" />
+              Danger zone
+            </div>
+            <h3 className="text-lg font-semibold text-on-surface">Remove this domain</h3>
+            {!dangerOpen && (
+              <p className="mt-1 text-sm text-on-surface-variant">
+                Permanently delete <code className="font-mono text-tertiary">{domain}</code> — its mailboxes &amp;
+                their mail, its mail rules, SES identity and DNS. Other domains and the backend stay.
+              </p>
+            )}
+          </div>
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-error/20 bg-error/5 px-3 py-1.5 text-sm font-medium text-error">
+            {dangerOpen ? (
+              <>
+                Hide <ChevronUp className="size-4" />
+              </>
+            ) : (
+              <>
+                Show <ChevronDown className="size-4" />
+              </>
+            )}
+          </span>
+        </button>
+
+        {dangerOpen && (
+          <div className="border-t border-error/10 p-6 pt-5">
+            <p className="text-sm text-on-surface-variant">
+              Permanently delete everything for <code className="font-mono text-tertiary">{domain}</code>: its{" "}
+              <b className="text-on-surface">mailboxes and all their stored mail</b>, this domain's mail rules &amp;
+              retention, its <b className="text-on-surface">SES identity</b> and its{" "}
+              <b className="text-on-surface">DNS records</b> (MX/DKIM/DMARC/SPF). The shared backend and your other
+              domains are <b className="text-on-surface">not</b> touched.{" "}
+              <b className="text-tertiary">This cannot be undone.</b>
+            </p>
+
+            <div className="mt-3 text-sm text-on-surface-variant">
+              {onDomain.length > 0 ? (
+                <>
+                  <b className="text-on-surface">
+                    This deletes {onDomain.length} mailbox{onDomain.length === 1 ? "" : "es"} on {domain} and their
+                    mail:
+                  </b>
+                  <ul className="mt-1 list-disc pl-5 font-mono text-xs">
+                    {onDomain.map((m) => (
+                      <li key={m.email}>{m.email}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <>No mailboxes on this domain — only its SES identity and DNS will be removed.</>
+              )}
+            </div>
+
+            {removeResult ? (
+              <div className="mt-4 rounded-lg border border-secondary/30 bg-secondary/10 p-4">
+                <strong className="text-secondary">Removed {removeResult.domain}.</strong>
+                <ul className="mt-1.5 list-disc pl-5 text-xs text-on-surface-variant">
+                  <li>
+                    {removeResult.deletedMailboxes.length} mailbox(es), {removeResult.deletedMessages} message(s),{" "}
+                    {removeResult.deletedObjects} file(s) deleted
+                  </li>
+                  <li>SES identity {removeResult.sesIdentityDeleted ? "deleted" : "already gone"}</li>
+                  <li>{removeResult.dnsRemoved.length} DNS record change(s)</li>
+                </ul>
+                {removeResult.warnings.length > 0 && (
+                  <div className="mt-2 text-sm text-amber-300">
+                    <b>Warnings:</b>
+                    <ul className="mt-1 list-disc pl-5">
+                      {removeResult.warnings.map((w, i) => (
+                        <li key={i}>{w}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {onBack && (
+                  <Button variant="secondary" className="mt-3" onClick={onBack}>
+                    <ArrowLeft className="size-4" /> Back to overview
+                  </Button>
+                )}
+              </div>
+            ) : removing ? (
+              <div className="mt-4 flex items-center gap-2 text-sm text-on-surface-variant">
+                <Spinner /> Removing {domain}…
+              </div>
+            ) : (
+              <div className="mt-4 flex flex-wrap items-end gap-3">
+                <label className="text-sm text-on-surface-variant">
+                  <span className="mb-1 block">
+                    Type <code className="font-mono text-tertiary">{domain}</code> to confirm
+                  </span>
+                  <input
+                    aria-label="Type domain to confirm removal"
+                    value={confirmText}
+                    onChange={(e) => setConfirmText(e.target.value)}
+                    placeholder={domain}
+                    {...noAutoCap}
+                    className="w-64 rounded-lg border border-error/30 bg-surface-container-lowest px-3 py-2 font-mono text-sm text-on-surface placeholder:text-outline-variant focus:border-error focus:outline-none focus:ring-2 focus:ring-error/30"
+                  />
+                </label>
+                <Button variant="danger" disabled={!canRemove} onClick={() => void onRemove()}>
+                  <Trash2 className="size-4" /> Remove domain
+                </Button>
+              </div>
+            )}
+
+            {removeErr && <div className="mt-3 text-sm text-tertiary">Remove failed: {removeErr}</div>}
+          </div>
+        )}
+      </div>
+
       <p className="text-xs text-on-surface-variant/70">
-        To remove this domain's DNS/SES or tear down the whole backend, use the{" "}
-        <b className="text-on-surface">Account</b> tab.
+        To tear down the <b className="text-on-surface">whole backend</b> (every domain, all mailboxes and the AWS
+        resources), use the <b className="text-on-surface">Account</b> tab instead.
       </p>
     </div>
   );
