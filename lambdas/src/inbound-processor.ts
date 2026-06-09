@@ -88,19 +88,19 @@ function isHosted(recipient: string): boolean {
 
 /**
  * Load the admin's spam/auth policy (allow/block lists + per-verdict actions)
- * from the settings table. Deployment-wide for now (per-domain override later).
- * Fail-safe: any missing/malformed doc or read error falls back to safe defaults
- * so delivery is never blocked by a settings problem.
+ * for a given scope (a recipient domain, or "default" for the deployment-wide
+ * policy). Returns null if there's no doc for that scope. Fail-safe: any
+ * malformed doc or read error is treated as "no doc" so the caller can fall back.
  */
-async function loadSpamPolicy(): Promise<SpamPolicy> {
-  if (!SETTINGS_TABLE) return DEFAULT_POLICY.spam;
+async function loadSpamPolicyScoped(scope: string): Promise<SpamPolicy | null> {
+  if (!SETTINGS_TABLE) return null;
   try {
-    const out = await ddb.send(new GetCommand({ TableName: SETTINGS_TABLE, Key: { pk: policySettingsKey() } }));
+    const out = await ddb.send(new GetCommand({ TableName: SETTINGS_TABLE, Key: { pk: policySettingsKey(scope) } }));
     const json = out.Item?.json;
-    if (typeof json !== "string") return DEFAULT_POLICY.spam;
+    if (typeof json !== "string") return null;
     return normalizeSpamPolicy(JSON.parse(json) as Partial<SpamPolicy>);
   } catch {
-    return DEFAULT_POLICY.spam;
+    return null;
   }
 }
 
@@ -235,8 +235,22 @@ async function sendUnknownRecipientBounce(recipient: string, sender: string, sub
 }
 
 export async function handler(event: SESEvent): Promise<void> {
-  // One deployment-wide policy per invocation (allow/block + verdict actions).
-  const policy: DeploymentPolicy = { ...DEFAULT_POLICY, spam: await loadSpamPolicy() };
+  // Per-domain spam/auth policy, resolved on demand with a fallback chain:
+  //   policy#<recipientDomain> → policy#default → built-in safe default.
+  // Cached per invocation so each domain's doc is read at most once.
+  const defaultSpamPolicy = (await loadSpamPolicyScoped("default")) ?? DEFAULT_POLICY.spam;
+  const policyByDomain = new Map<string, DeploymentPolicy>([
+    ["default", { ...DEFAULT_POLICY, spam: defaultSpamPolicy }],
+  ]);
+  async function policyForDomain(domain: string): Promise<DeploymentPolicy> {
+    const key = (domain || "default").toLowerCase();
+    const hit = policyByDomain.get(key);
+    if (hit) return hit;
+    const spam = (await loadSpamPolicyScoped(key)) ?? defaultSpamPolicy;
+    const resolved: DeploymentPolicy = { ...DEFAULT_POLICY, spam };
+    policyByDomain.set(key, resolved);
+    return resolved;
+  }
   // The real mailboxes (Cognito users). Mail to anything else is rejected.
   const knownMailboxes = await loadMailboxAddresses();
 
@@ -305,6 +319,8 @@ export async function handler(event: SESEvent): Promise<void> {
 
     // Deliver to each real recipient (apply spam/auth policy + storage quota).
     for (const recipient of known) {
+      // Use this recipient's domain policy (falls back to the deployment default).
+      const policy = await policyForDomain(addressDomain(recipient));
       const decision = classifyDelivery(from.address, verdicts, policy);
       if (decision.folder === null) {
         // Rejected by policy (virus/spam/block-list). Raw object is left in S3

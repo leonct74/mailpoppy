@@ -39,3 +39,22 @@ export function normalizeRetention(input: Partial<RetentionSettings> | null | un
   const retentionDays = raw === null || raw === undefined ? null : Number.isFinite(Number(raw)) && Number(raw) >= 1 ? Math.floor(Number(raw)) : null;
   return { trashPurgeDays, retentionDays };
 }
+
+/**
+ * Pure retention decision used by the janitor: should this stored message be
+ * hard-deleted now under `retention`? Deletes when (a) it's in Trash and older
+ * than `trashPurgeDays`, or (b) a `retentionDays` window is set and it's older
+ * than that (any folder). Fail-safe: an unparseable date is never deleted.
+ */
+export function shouldPurgeMessage(
+  msg: { folder: string; date: string },
+  retention: RetentionSettings,
+  now: number = Date.now(),
+): boolean {
+  const ts = new Date(msg.date).getTime();
+  if (!Number.isFinite(ts)) return false; // can't age an undateable row → keep it
+  const ageDays = (now - ts) / 86_400_000;
+  if (msg.folder === "trash" && ageDays > retention.trashPurgeDays) return true;
+  if (retention.retentionDays !== null && ageDays > retention.retentionDays) return true;
+  return false;
+}

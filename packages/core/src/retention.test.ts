@@ -1,10 +1,39 @@
 import { describe, it, expect } from "vitest";
-import { retentionSettingsKey, normalizeRetention, DEFAULT_RETENTION } from "./retention";
+import { retentionSettingsKey, normalizeRetention, shouldPurgeMessage, DEFAULT_RETENTION } from "./retention";
 
 describe("retentionSettingsKey", () => {
   it("builds a normalized key", () => {
     expect(retentionSettingsKey()).toBe("retention#default");
     expect(retentionSettingsKey("  ")).toBe("retention#default");
+  });
+
+  it("scopes per-domain (case-insensitive)", () => {
+    expect(retentionSettingsKey("Boxord.com")).toBe("retention#boxord.com");
+  });
+});
+
+describe("shouldPurgeMessage", () => {
+  const NOW = Date.parse("2026-06-01T00:00:00Z");
+  const daysAgo = (d: number) => new Date(NOW - d * 86_400_000).toISOString();
+
+  it("keeps everything under the default keep-forever policy except old Trash", () => {
+    const r = { trashPurgeDays: 30, retentionDays: null };
+    expect(shouldPurgeMessage({ folder: "inbox", date: daysAgo(3650) }, r, NOW)).toBe(false);
+    expect(shouldPurgeMessage({ folder: "trash", date: daysAgo(31) }, r, NOW)).toBe(true);
+    expect(shouldPurgeMessage({ folder: "trash", date: daysAgo(10) }, r, NOW)).toBe(false);
+  });
+
+  it("enforces a retention window across every folder", () => {
+    const r = { trashPurgeDays: 30, retentionDays: 365 };
+    expect(shouldPurgeMessage({ folder: "inbox", date: daysAgo(400) }, r, NOW)).toBe(true);
+    expect(shouldPurgeMessage({ folder: "inbox", date: daysAgo(100) }, r, NOW)).toBe(false);
+    // Trash still purges on its own shorter clock.
+    expect(shouldPurgeMessage({ folder: "trash", date: daysAgo(31) }, r, NOW)).toBe(true);
+  });
+
+  it("never deletes a row with an unparseable date (fail-safe)", () => {
+    const r = { trashPurgeDays: 1, retentionDays: 1 };
+    expect(shouldPurgeMessage({ folder: "inbox", date: "not-a-date" }, r, NOW)).toBe(false);
   });
 });
 

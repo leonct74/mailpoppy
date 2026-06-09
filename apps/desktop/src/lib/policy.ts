@@ -5,13 +5,17 @@
 import { sidecar } from "./sidecar";
 import type { SpamPolicy } from "@mailpoppy/core";
 
-/** Read the deployment's current mail-filtering policy (defaults if never set). */
-export function getSpamPolicy(stackName: string): Promise<SpamPolicy> {
-  return sidecar(`/policy/spam/${encodeURIComponent(stackName)}`);
+/**
+ * Read the current mail-filtering policy (defaults if never set). Pass `domain`
+ * for a per-domain override; omit it for the deployment-wide default.
+ */
+export function getSpamPolicy(stackName: string, domain?: string): Promise<SpamPolicy> {
+  const q = domain ? `?domain=${encodeURIComponent(domain)}` : "";
+  return sidecar(`/policy/spam/${encodeURIComponent(stackName)}${q}`);
 }
 
-/** Save the deployment's mail-filtering policy. */
-export function setSpamPolicy(input: { stackName?: string; policy: SpamPolicy }): Promise<{ ok: true; policy: SpamPolicy }> {
+/** Save a mail-filtering policy. Pass `domain` to write a per-domain override. */
+export function setSpamPolicy(input: { stackName?: string; policy: SpamPolicy; domain?: string }): Promise<{ ok: true; policy: SpamPolicy }> {
   return sidecar("/policy/spam", {
     method: "POST",
     headers: { "content-type": "application/json" },

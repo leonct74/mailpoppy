@@ -6,17 +6,23 @@ import {
   DEFAULT_RETENTION,
   normalizeRetention,
   retentionSettingsKey,
+  shouldPurgeMessage,
+  addressDomain,
   type RetentionSettings,
   type MessageMeta,
 } from "@mailpoppy/core";
 
 /**
  * Scheduled (EventBridge) retention enforcement (DESIGN §10). Reads the admin's
- * retention settings from the settings table and:
+ * retention settings and:
  *   - always purges Trash older than `trashPurgeDays` (deleted mail), and
  *   - if a `retentionDays` window is set, hard-deletes ANY message older than it
  *     in every folder (data-minimisation). Default = keep mail indefinitely.
- * More flexible than raw S3 lifecycle (per-deployment windows, never-delete).
+ *
+ * Retention is resolved PER DOMAIN: each message uses its own domain's settings
+ * (`retention#<domain>`), falling back to the deployment default
+ * (`retention#default`) and then the built-in keep-forever default. A single
+ * table scan applies the right window to each row.
  */
 const s3 = new S3Client({});
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
@@ -27,70 +33,68 @@ const INDEX_TABLE = process.env.INDEX_TABLE ?? "";
 const SETTINGS_TABLE = process.env.SETTINGS_TABLE ?? "";
 const MAIL_BUCKET = process.env.MAIL_BUCKET ?? "";
 
-/** Load retention settings; fail-safe to the keep-forever default on any problem. */
-async function loadRetention(): Promise<RetentionSettings> {
-  if (!SETTINGS_TABLE) return DEFAULT_RETENTION;
+/**
+ * Load retention settings for a scope (a domain, or "default"). Returns null if
+ * there's no doc for that scope; fail-safe: a malformed doc or read error is
+ * treated as "no doc" so the caller falls back rather than surprise-deleting.
+ */
+async function loadRetentionScoped(scope: string): Promise<RetentionSettings | null> {
+  if (!SETTINGS_TABLE) return null;
   try {
-    const out = await ddb.send(new GetCommand({ TableName: SETTINGS_TABLE, Key: { pk: retentionSettingsKey() } }));
+    const out = await ddb.send(new GetCommand({ TableName: SETTINGS_TABLE, Key: { pk: retentionSettingsKey(scope) } }));
     const json = out.Item?.json;
-    if (typeof json !== "string") return DEFAULT_RETENTION;
+    if (typeof json !== "string") return null;
     return normalizeRetention(JSON.parse(json) as Partial<RetentionSettings>);
   } catch {
-    return DEFAULT_RETENTION;
+    return null;
   }
 }
 
-/** Scan + hard-delete every row (and its S3 object) matching the filter. Returns the count. */
-async function purge(
-  filterExpression: string,
-  names: Record<string, string>,
-  values: Record<string, unknown>,
-): Promise<number> {
+type Row = MessageMeta & { pk: string; sk: string };
+
+/** Hard-delete a message row and its raw S3 object. */
+async function deleteRow(row: Row): Promise<void> {
+  if (row.s3Key) {
+    await s3
+      .send(new DeleteObjectCommand({ Bucket: MAIL_BUCKET, Key: row.s3Key }))
+      .catch((e) => console.error("s3 delete failed", row.s3Key, e));
+  }
+  await ddb.send(new DeleteCommand({ TableName: INDEX_TABLE, Key: { pk: row.pk, sk: row.sk } }));
+}
+
+export async function handler(_event: ScheduledEvent): Promise<void> {
+  const now = Date.now();
+
+  // Resolve a domain's retention once, with fallback to the deployment default.
+  const cache = new Map<string, RetentionSettings>();
+  const fallback = (await loadRetentionScoped("default")) ?? DEFAULT_RETENTION;
+  cache.set("default", fallback);
+  async function retentionFor(domain: string): Promise<RetentionSettings> {
+    const key = (domain || "default").toLowerCase();
+    const hit = cache.get(key);
+    if (hit) return hit;
+    const resolved = (await loadRetentionScoped(key)) ?? fallback;
+    cache.set(key, resolved);
+    return resolved;
+  }
+
   let lastKey: Record<string, unknown> | undefined;
+  let scanned = 0;
   let purged = 0;
   do {
-    const res = await ddb.send(
-      new ScanCommand({
-        TableName: INDEX_TABLE,
-        FilterExpression: filterExpression,
-        ExpressionAttributeNames: names,
-        ExpressionAttributeValues: values,
-        ExclusiveStartKey: lastKey,
-      }),
-    );
+    const res = await ddb.send(new ScanCommand({ TableName: INDEX_TABLE, ExclusiveStartKey: lastKey }));
     for (const item of res.Items ?? []) {
-      const meta = item as unknown as MessageMeta & { pk: string; sk: string };
-      if (meta.s3Key) {
-        await s3
-          .send(new DeleteObjectCommand({ Bucket: MAIL_BUCKET, Key: meta.s3Key }))
-          .catch((e) => console.error("s3 delete failed", meta.s3Key, e));
+      const row = item as unknown as Row;
+      scanned += 1;
+      const domain = (row.domain || addressDomain(row.mailbox ?? "")).toLowerCase();
+      const retention = await retentionFor(domain);
+      if (shouldPurgeMessage({ folder: row.folder, date: row.date }, retention, now)) {
+        await deleteRow(row);
+        purged += 1;
       }
-      await ddb.send(new DeleteCommand({ TableName: INDEX_TABLE, Key: { pk: meta.pk, sk: meta.sk } }));
-      purged += 1;
     }
     lastKey = res.LastEvaluatedKey as Record<string, unknown> | undefined;
   } while (lastKey);
-  return purged;
-}
 
-const daysAgoIso = (days: number): string => new Date(Date.now() - days * 86_400_000).toISOString();
-
-export async function handler(_event: ScheduledEvent): Promise<void> {
-  const retention = await loadRetention();
-
-  // 1. Always purge Trash older than the window.
-  const trashCutoff = daysAgoIso(retention.trashPurgeDays);
-  const trashed = await purge(
-    "folder = :trash AND #d < :cutoff",
-    { "#d": "date" },
-    { ":trash": "trash", ":cutoff": trashCutoff },
-  );
-  console.log(`janitor purged ${trashed} trashed messages older than ${trashCutoff}`);
-
-  // 2. If a retention window is set, hard-delete ANY message older than it.
-  if (retention.retentionDays !== null) {
-    const cutoff = daysAgoIso(retention.retentionDays);
-    const aged = await purge("#d < :cutoff", { "#d": "date" }, { ":cutoff": cutoff });
-    console.log(`janitor enforced ${retention.retentionDays}d retention: deleted ${aged} messages older than ${cutoff}`);
-  }
+  console.log(`janitor scanned ${scanned} messages, purged ${purged} (per-domain retention)`);
 }

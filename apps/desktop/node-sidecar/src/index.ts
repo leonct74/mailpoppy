@@ -442,25 +442,29 @@ app.post("/ses/mail-from", async (req, reply) => {
 
 // ---- Spam / auth policy (allow-block lists + per-verdict actions) ----
 
-// Read the deployment's mail-filtering policy (defaults if never set).
+// Read a mail-filtering policy (defaults if never set). `?domain=` reads a
+// per-domain override; omitted reads the deployment-wide default.
 app.get("/policy/spam/:stackName", async (req, reply) => {
   const stackName = (req.params as { stackName: string }).stackName;
+  const scope = (req.query as { domain?: string }).domain;
   try {
-    return await prov.getSpamPolicy(ctx(), { stackName });
+    return await prov.getSpamPolicy(ctx(), { stackName, scope });
   } catch (err) {
     return reply.code(502).send({ ok: false, error: (err as Error).message });
   }
 });
 
-// Update the deployment's mail-filtering policy (normalized server-side).
+// Update a mail-filtering policy (normalized server-side). `domain` in the body
+// writes a per-domain override; omitted writes the deployment-wide default.
 app.post("/policy/spam", async (req, reply) => {
-  const b = (req.body ?? {}) as { stackName?: string; policy?: unknown };
+  const b = (req.body ?? {}) as { stackName?: string; policy?: unknown; domain?: string };
   if (!b.policy || typeof b.policy !== "object") {
     return reply.code(400).send({ ok: false, error: "policy is required" });
   }
   try {
     return await prov.setSpamPolicy(ctx(), {
       stackName: b.stackName,
+      scope: b.domain,
       policy: b.policy as Parameters<typeof prov.setSpamPolicy>[1]["policy"],
     });
   } catch (err) {
@@ -472,21 +476,23 @@ app.post("/policy/spam", async (req, reply) => {
 
 app.get("/policy/retention/:stackName", async (req, reply) => {
   const stackName = (req.params as { stackName: string }).stackName;
+  const scope = (req.query as { domain?: string }).domain;
   try {
-    return await prov.getRetention(ctx(), { stackName });
+    return await prov.getRetention(ctx(), { stackName, scope });
   } catch (err) {
     return reply.code(502).send({ ok: false, error: (err as Error).message });
   }
 });
 
 app.post("/policy/retention", async (req, reply) => {
-  const b = (req.body ?? {}) as { stackName?: string; retention?: unknown };
+  const b = (req.body ?? {}) as { stackName?: string; retention?: unknown; domain?: string };
   if (!b.retention || typeof b.retention !== "object") {
     return reply.code(400).send({ ok: false, error: "retention is required" });
   }
   try {
     return await prov.setRetention(ctx(), {
       stackName: b.stackName,
+      scope: b.domain,
       retention: b.retention as Parameters<typeof prov.setRetention>[1]["retention"],
     });
   } catch (err) {

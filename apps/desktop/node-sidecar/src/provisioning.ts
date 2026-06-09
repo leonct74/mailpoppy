@@ -1063,15 +1063,18 @@ export async function deleteMailbox(
 
 // ---- Spam / auth policy (admin: allow-block lists + per-verdict actions, DESIGN §10) ----
 
-/** Read the deployment's spam/auth policy from the settings table (defaults if unset). */
-export async function getSpamPolicy(ctx: AwsContext, args: { stackName?: string }): Promise<SpamPolicy> {
+/**
+ * Read a spam/auth policy from the settings table (defaults if unset). `scope`
+ * is a domain for a per-domain override; omitted → the deployment-wide default.
+ */
+export async function getSpamPolicy(ctx: AwsContext, args: { stackName?: string; scope?: string }): Promise<SpamPolicy> {
   const { dynamodb } = clients(ctx);
   const stackName = args.stackName ?? "MailpoppyMailStack";
   const outputs = await getStackOutputs(ctx, stackName);
   const settingsTable = await resolveSettingsTableName(ctx, stackName, outputs);
   if (!settingsTable) return normalizeSpamPolicy(null);
   const out = await dynamodb.send(
-    new GetItemCommand({ TableName: settingsTable, Key: { pk: { S: policySettingsKey() } } }),
+    new GetItemCommand({ TableName: settingsTable, Key: { pk: { S: policySettingsKey(args.scope) } } }),
   );
   const json = out.Item?.json?.S;
   try {
@@ -1081,10 +1084,10 @@ export async function getSpamPolicy(ctx: AwsContext, args: { stackName?: string 
   }
 }
 
-/** Write the deployment's spam/auth policy (normalized) to the settings table. */
+/** Write a spam/auth policy (normalized). `scope` = a domain for a per-domain override. */
 export async function setSpamPolicy(
   ctx: AwsContext,
-  args: { stackName?: string; policy: Partial<SpamPolicy> },
+  args: { stackName?: string; policy: Partial<SpamPolicy>; scope?: string },
 ): Promise<{ ok: true; policy: SpamPolicy }> {
   const { dynamodb } = clients(ctx);
   const stackName = args.stackName ?? "MailpoppyMailStack";
@@ -1096,7 +1099,7 @@ export async function setSpamPolicy(
   await dynamodb.send(
     new PutItemCommand({
       TableName: settingsTable,
-      Item: { pk: { S: policySettingsKey() }, json: { S: JSON.stringify(policy) } },
+      Item: { pk: { S: policySettingsKey(args.scope) }, json: { S: JSON.stringify(policy) } },
     }),
   );
   return { ok: true, policy };
@@ -1104,15 +1107,18 @@ export async function setSpamPolicy(
 
 // ---- Retention (admin: how long mail is kept, DESIGN §10) ----
 
-/** Read the deployment's retention settings (defaults if unset). */
-export async function getRetention(ctx: AwsContext, args: { stackName?: string }): Promise<RetentionSettings> {
+/**
+ * Read retention settings (defaults if unset). `scope` is a domain for a
+ * per-domain override; omitted → the deployment-wide default.
+ */
+export async function getRetention(ctx: AwsContext, args: { stackName?: string; scope?: string }): Promise<RetentionSettings> {
   const { dynamodb } = clients(ctx);
   const stackName = args.stackName ?? "MailpoppyMailStack";
   const outputs = await getStackOutputs(ctx, stackName);
   const settingsTable = await resolveSettingsTableName(ctx, stackName, outputs);
   if (!settingsTable) return normalizeRetention(null);
   const out = await dynamodb.send(
-    new GetItemCommand({ TableName: settingsTable, Key: { pk: { S: retentionSettingsKey() } } }),
+    new GetItemCommand({ TableName: settingsTable, Key: { pk: { S: retentionSettingsKey(args.scope) } } }),
   );
   const json = out.Item?.json?.S;
   try {
@@ -1122,10 +1128,10 @@ export async function getRetention(ctx: AwsContext, args: { stackName?: string }
   }
 }
 
-/** Write the deployment's retention settings (normalized) to the settings table. */
+/** Write retention settings (normalized). `scope` = a domain for a per-domain override. */
 export async function setRetention(
   ctx: AwsContext,
-  args: { stackName?: string; retention: Partial<RetentionSettings> },
+  args: { stackName?: string; retention: Partial<RetentionSettings>; scope?: string },
 ): Promise<{ ok: true; retention: RetentionSettings }> {
   const { dynamodb } = clients(ctx);
   const stackName = args.stackName ?? "MailpoppyMailStack";
@@ -1137,7 +1143,7 @@ export async function setRetention(
   await dynamodb.send(
     new PutItemCommand({
       TableName: settingsTable,
-      Item: { pk: { S: retentionSettingsKey() }, json: { S: JSON.stringify(retention) } },
+      Item: { pk: { S: retentionSettingsKey(args.scope) }, json: { S: JSON.stringify(retention) } },
     }),
   );
   return { ok: true, retention };
