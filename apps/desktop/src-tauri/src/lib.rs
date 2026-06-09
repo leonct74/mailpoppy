@@ -79,6 +79,23 @@ pub fn run() {
         .manage(SidecarState::default())
         .setup(|app| {
             spawn_sidecar(app.handle())?;
+
+            // The main window starts hidden (`"visible": false`) so users never
+            // see the blank webview flash on launch — the frontend calls
+            // `getCurrentWindow().show()` once React has painted its first frame.
+            // This is a safety net: if the frontend ever fails to do so (a JS
+            // error, a missing permission), reveal the window anyway after a
+            // short delay so the app can never get stuck invisible.
+            if let Some(window) = app.get_webview_window("main") {
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                    if !window.is_visible().unwrap_or(true) {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                });
+            }
+
             Ok(())
         })
         .build(tauri::generate_context!())

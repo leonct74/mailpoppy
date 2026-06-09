@@ -25,17 +25,38 @@ function networkMessage(path: string): string {
     : "Couldn't reach AWS — please check your internet connection and try again.";
 }
 
+const HELPER_UNREACHABLE =
+  "Couldn't reach Mailpoppy's local helper. Please restart the app and try again.";
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Only safe, idempotent reads get auto-retried on a transport failure. A POST
+// that drops mid-flight could have been received and processed by the sidecar,
+// so replaying it (e.g. a deploy or a domain removal) is unsafe — those fail
+// fast with the existing message instead.
+function isIdempotent(init?: RequestInit): boolean {
+  const method = (init?.method ?? "GET").toUpperCase();
+  return method === "GET" || method === "HEAD";
+}
+
 export async function sidecar<T>(path: string, init?: RequestInit): Promise<T> {
+  // The sidecar is a Node binary Rust spawns at launch; on a cold start it may
+  // not be listening yet when the first reads fire, so fetch() rejects at the
+  // transport level (ECONNREFUSED) until it binds. Retry idempotent reads with a
+  // short backoff (~4s total) so the boot race resolves silently instead of
+  // surfacing "restart the app" for what is really just a slow start.
+  const maxAttempts = isIdempotent(init) ? 11 : 1;
   let res: Response;
-  try {
-    res = await fetch(`${SIDECAR}${path}`, init);
-  } catch {
-    // fetch() rejects only on a transport-level failure. The sidecar binds
-    // 127.0.0.1, so this means the local helper process itself isn't reachable
-    // (e.g. still starting, or crashed) — not an internet problem.
-    throw new Error(
-      "Couldn't reach Mailpoppy's local helper. Please restart the app and try again.",
-    );
+  for (let attempt = 1; ; attempt++) {
+    try {
+      res = await fetch(`${SIDECAR}${path}`, init);
+      break;
+    } catch {
+      // Transport-level failure: the local helper isn't reachable (still
+      // starting, or crashed) — not an internet problem.
+      if (attempt >= maxAttempts) throw new Error(HELPER_UNREACHABLE);
+      await sleep(Math.min(500, 100 * attempt));
+    }
   }
   if (!res.ok) {
     const body = await res.text();

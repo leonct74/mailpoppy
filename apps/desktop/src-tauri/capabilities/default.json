@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Core capability for the main window. The sidecar is spawned from Rust (not over IPC), so no shell permissions are exposed to the webview. `opener:default` lets the webview hand https attachment-download URLs to the system browser — it bundles allow-open-url WITH the default http/https/mailto/tel scope. (allow-open-url alone enables the command but grants no URL scope, so every openUrl is denied.)",
+  "description": "Core capability for the main window. The sidecar is spawned from Rust (not over IPC), so no shell permissions are exposed to the webview. `opener:default` lets the webview hand https attachment-download URLs to the system browser — it bundles allow-open-url WITH the default http/https/mailto/tel scope. (allow-open-url alone enables the command but grants no URL scope, so every openUrl is denied.) `core:window:allow-show` lets the frontend reveal the window once it has painted its first frame — the window launches hidden to avoid a blank-webview flash.",
   "windows": ["main"],
-  "permissions": ["core:default", "opener:default"]
+  "permissions": ["core:default", "opener:default", "core:window:allow-show"]
 }
