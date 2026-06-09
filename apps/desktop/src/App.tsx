@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { LayoutDashboard, Inbox, Settings, ArrowLeftRight, Database, ShieldCheck, type LucideIcon } from "lucide-react";
 import { HomeView } from "./views/HomeView";
+import { DomainView } from "./views/DomainView";
 import { SetupWizard } from "./views/SetupWizard";
 import { InboxView } from "./views/InboxView";
 import { ResourcesView } from "./views/ResourcesView";
@@ -103,6 +104,10 @@ export function App() {
   // inactive) so its form data, scroll position and loaded data survive tab
   // switches — its effects still run just once, on first visit.
   const [visited, setVisited] = useState<Set<Tab>>(() => new Set<Tab>(["home"]));
+  // When set, the Home tab shows the per-domain workspace (drill-in) for this
+  // domain instead of the overview. Clicking the Home nav (or the in-view back
+  // button) clears it to return to the overview.
+  const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
   const current = NAV.find((n) => n.id === tab)!;
 
   function go(id: Tab) {
@@ -127,7 +132,12 @@ export function App() {
             return (
               <button
                 key={id}
-                onClick={() => go(id)}
+                onClick={() => {
+                  // The Home nav always lands on the overview, even if a domain
+                  // drill-in is currently open.
+                  if (id === "home") setSelectedDomain(null);
+                  go(id);
+                }}
                 aria-current={active ? "page" : undefined}
                 className={cn(
                   "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors",
@@ -179,7 +189,16 @@ export function App() {
           {visited.has("home") && (
             <div className={cn("h-full overflow-y-auto px-8 py-8", tab === "home" ? "block" : "hidden")}>
               <div className="mx-auto max-w-6xl">
-                <HomeView onGoToSetup={() => go("setup")} />
+                {selectedDomain ? (
+                  <DomainView
+                    domain={selectedDomain}
+                    onBack={() => setSelectedDomain(null)}
+                    onOpenInbox={() => go("inbox")}
+                    onMigrateInto={() => go("migrate")}
+                  />
+                ) : (
+                  <HomeView onGoToSetup={() => go("setup")} onOpenDomain={(d) => setSelectedDomain(d)} />
+                )}
               </div>
             </div>
           )}

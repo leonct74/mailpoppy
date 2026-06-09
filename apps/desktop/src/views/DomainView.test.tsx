@@ -1,0 +1,95 @@
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { DomainView } from "./DomainView";
+
+// MailboxStorageRow fetches each mailbox's storage from the sidecar on mount;
+// stub it to a plain <li> so this test stays focused on DomainView's own
+// behaviour (the row has its own dedicated test).
+vi.mock("./MailboxStorageRow", () => ({
+  MailboxStorageRow: ({ email }: { email: string }) => <li data-testid="mb-row">{email}</li>,
+}));
+
+afterEach(() => cleanup());
+
+const BACKEND = {
+  ok: true as const,
+  region: "eu-west-1",
+  userPoolId: "eu-west-1_abc123",
+  clientId: "client123",
+  apiBaseUrl: "https://api.example.com",
+};
+
+function loaders(overrides: Partial<Parameters<typeof DomainView>[0]> = {}) {
+  return {
+    listMailboxes: vi.fn(async () => ({
+      ...BACKEND,
+      mailboxes: [
+        { email: "support@boxord.com", status: "CONFIRMED" },
+        { email: "info@boxord.com", status: "CONFIRMED" },
+        { email: "hello@example.org", status: "CONFIRMED" }, // different domain — must be filtered out
+      ],
+    })),
+    createMailbox: vi.fn(async (input: { email: string }) => ({
+      ...BACKEND,
+      mailbox: { email: input.email, status: "CONFIRMED" },
+    })),
+    getDomainStatus: vi.fn(async () => ({ verifiedForSending: true, dkim: "SUCCESS" })),
+    getMailFrom: vi.fn(async (d: string) => ({ status: "Success", mailFromDomain: `mail.${d}` })),
+    ...overrides,
+  };
+}
+
+describe("DomainView", () => {
+  it("shows the domain, its health badges, and only the mailboxes on this domain", async () => {
+    render(<DomainView domain="boxord.com" {...loaders()} />);
+
+    // Domain heading.
+    expect(await screen.findByRole("heading", { name: "boxord.com" })).toBeInTheDocument();
+
+    // Health badges (resolve asynchronously).
+    expect(await screen.findByText("DKIM verified")).toBeInTheDocument();
+    expect(screen.getByText("Can send")).toBeInTheDocument();
+    expect(screen.getByText("MAIL FROM aligned")).toBeInTheDocument();
+
+    // Only the two boxord.com mailboxes — example.org is excluded.
+    expect(screen.getByText("support@boxord.com")).toBeInTheDocument();
+    expect(screen.getByText("info@boxord.com")).toBeInTheDocument();
+    expect(screen.queryByText("hello@example.org")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("mb-row")).toHaveLength(2);
+  });
+
+  it("creates a mailbox on this domain (local part + @domain)", async () => {
+    const l = loaders();
+    render(<DomainView domain="boxord.com" {...l} />);
+    await screen.findByRole("heading", { name: "boxord.com" });
+
+    fireEvent.change(screen.getByLabelText("New mailbox name on boxord.com"), { target: { value: "Sales" } });
+    fireEvent.change(screen.getByLabelText("New mailbox password"), { target: { value: "Mailpoppy-Test-1!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create mailbox" }));
+
+    await waitFor(() => expect(l.createMailbox).toHaveBeenCalled());
+    expect(l.createMailbox.mock.calls[0][0].email).toBe("sales@boxord.com");
+    expect(await screen.findByText(/created/i)).toBeInTheDocument();
+  });
+
+  it("calls back and migrate callbacks", async () => {
+    const onBack = vi.fn();
+    const onMigrateInto = vi.fn();
+    render(<DomainView domain="boxord.com" onBack={onBack} onMigrateInto={onMigrateInto} {...loaders()} />);
+    await screen.findByRole("heading", { name: "boxord.com" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to overview" }));
+    expect(onBack).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Open migration/i }));
+    expect(onMigrateInto).toHaveBeenCalledWith("boxord.com");
+  });
+
+  it("shows a deploy hint when no backend exists yet", async () => {
+    const noBackend = vi.fn(async () => {
+      throw new Error('sidecar 404: {"ok":false,"error":"No deployed Mailpoppy backend was found yet."}');
+    });
+    render(<DomainView domain="boxord.com" {...loaders({ listMailboxes: noBackend })} />);
+    expect(await screen.findByText(/No backend is deployed yet/i)).toBeInTheDocument();
+  });
+});

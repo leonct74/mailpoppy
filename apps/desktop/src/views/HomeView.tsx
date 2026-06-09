@@ -41,6 +41,7 @@ const domainOf = (email: string) => email.split("@")[1]?.toLowerCase() ?? "";
 export function HomeView({
   stackName = resolveStackName(),
   onGoToSetup,
+  onOpenDomain,
   listDomains = defaultListDomains,
   listMailboxes = defaultListMailboxes,
   getAccount = defaultGetAccount,
@@ -49,6 +50,7 @@ export function HomeView({
 }: {
   stackName?: string;
   onGoToSetup?: () => void;
+  onOpenDomain?: (domain: string) => void;
   listDomains?: (stackName: string) => Promise<{ domains: string[] }>;
   listMailboxes?: (stackName: string) => Promise<{ mailboxes: Mailbox[]; region?: string }>;
   getAccount?: () => Promise<SesAccountStatus>;
@@ -305,13 +307,14 @@ export function HomeView({
                   )}
                 </div>
 
-                {onGoToSetup && (
+                {(onOpenDomain || onGoToSetup) && (
                   <div className="mt-auto">
                     <button
-                      onClick={onGoToSetup}
+                      onClick={() => (onOpenDomain ? onOpenDomain(d) : onGoToSetup?.())}
+                      aria-label={`Manage ${d}`}
                       className="text-sm text-primary underline-offset-2 hover:underline"
                     >
-                      Manage in Setup →
+                      {onOpenDomain ? "Manage →" : "Manage in Setup →"}
                     </button>
                   </div>
                 )}
