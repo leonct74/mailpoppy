@@ -13,14 +13,21 @@ export async function openExternal(url: string): Promise<boolean> {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
     await openUrl(url);
     return true;
-  } catch {
+  } catch (tauriErr) {
+    // The Tauri opener is unavailable or blocked (commonly a stale build whose
+    // opener plugin/capability isn't active yet — needs a rebuild). Log it so a
+    // failed hand-off is diagnosable from the webview devtools, then fall back to
+    // window.open (a no-op inside the Tauri webview, real in a plain browser).
+    console.warn("openExternal: Tauri opener failed, falling back to window.open:", tauriErr);
     try {
       const w =
         typeof window !== "undefined" && typeof window.open === "function"
           ? window.open(url, "_blank", "noopener,noreferrer")
           : null;
+      if (!w) console.warn("openExternal: window.open could not open a window (expected inside the Tauri webview)");
       return !!w;
-    } catch {
+    } catch (winErr) {
+      console.error("openExternal: both the Tauri opener and window.open threw:", winErr);
       return false;
     }
   }
