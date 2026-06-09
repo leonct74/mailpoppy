@@ -48,6 +48,7 @@ Resources:
               - ses:ListEmailIdentities
               - ses:DeleteEmailIdentity
               - ses:GetAccount
+              - ses:GetSendStatistics
               - ses:SendEmail
               - ses:CreateReceiptRuleSet
               - ses:CreateReceiptRule

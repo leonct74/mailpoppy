@@ -405,6 +405,17 @@ app.get("/ses/account", async (_req, reply) => {
   }
 });
 
+// Read-only: "sending health" — bounce/complaint rates + sending quota from SES,
+// and the do-not-send (suppression) list from the deployed stack's settings table.
+app.get("/ses/deliverability/:stackName", async (req, reply) => {
+  const { stackName } = req.params as { stackName: string };
+  try {
+    return await prov.getDeliverability(ctx(), { stackName });
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
 // Mutating: submit a production-access (sandbox-exit) request to AWS (opens a
 // Support case AWS reviews, ~24h). The UI confirms first. 400 on a bad request
 // (validated in core) so the user gets a clear message, not a raw SES error.

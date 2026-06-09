@@ -17,7 +17,7 @@ Covers what the app does **today** — the direct Route53 / SES / S3 provisionin
 |---|---|
 | `sts:GetCallerIdentity` | Readiness: confirm credentials resolve |
 | Route53 (list/get/change RRsets, GetChange) | Publish MX / SPF / DKIM / DMARC |
-| SES (email identity, receipt rules, send) | Verify the domain, receive → S3, send |
+| SES (email identity, receipt rules, send, `GetSendStatistics`) | Verify the domain, receive → S3, send, and read bounce/complaint stats for the sending-health view |
 | `s3:ListAllMyBuckets` | Readiness probe |
 | S3 on `arn:aws:s3:::mailpoppy-*` | Create/configure the mail bucket + objects |
 | CloudFormation read on `stack/MailpoppyMailStack/*` | The **resource transparency view** (DESIGN §14.1) reads the deployed stack's inventory via `DescribeStackResources` |

@@ -38,6 +38,7 @@ import {
   CreateReceiptRuleCommand,
   SetActiveReceiptRuleSetCommand,
   DescribeActiveReceiptRuleSetCommand,
+  GetSendStatisticsCommand,
 } from "@aws-sdk/client-ses";
 import {
   S3Client,
@@ -55,6 +56,7 @@ import {
   DynamoDBClient,
   DeleteTableCommand,
   QueryCommand,
+  ScanCommand,
   GetItemCommand,
   PutItemCommand,
   DeleteItemCommand,
@@ -74,6 +76,7 @@ import {
   normalizeSpamPolicy,
   retentionSettingsKey,
   normalizeRetention,
+  rate,
   type MailboxStorage,
   type SesAccountStatus,
   type SesReviewStatus,
@@ -83,6 +86,9 @@ import {
   type DnsRecord,
   type SpamPolicy,
   type RetentionSettings,
+  type DeliverabilityStatus,
+  type SendingTotals,
+  type SuppressedAddress,
 } from "@mailpoppy/core";
 import {
   CloudFormationClient,
@@ -664,6 +670,83 @@ export async function getSesAccount(ctx: AwsContext): Promise<SesAccountStatus> 
           sentLast24Hours: q.SentLast24Hours ?? 0,
         }
       : undefined,
+  };
+}
+
+/**
+ * "Sending health" for the whole account + region (DESIGN §13). Reads SES's own
+ * bounce/complaint statistics and sending quota, plus the do-not-send
+ * (suppression) list the bounce/complaint Lambda maintains in the settings
+ * table. All read-only. Everything is best-effort: a fresh account with no send
+ * history returns zeroes, and a missing/locked-down suppression list just yields
+ * an empty list rather than failing the whole call.
+ */
+export async function getDeliverability(
+  ctx: AwsContext,
+  args: { stackName?: string } = {},
+): Promise<DeliverabilityStatus> {
+  const { sesv2, ses, dynamodb } = clients(ctx);
+  const stackName = args.stackName ?? "MailpoppyMailStack";
+
+  // Account quota + enforcement (same source the sandbox view uses).
+  const account = await sesv2.send(new GetAccountCommand({}));
+  const quota = account.SendQuota;
+
+  // Bounce/complaint counts over SES's ~14-day retention window.
+  const stats = await ses.send(new GetSendStatisticsCommand({}));
+  const points = stats.SendDataPoints ?? [];
+  const totals: SendingTotals = points.reduce<SendingTotals>(
+    (acc, p) => ({
+      deliveryAttempts: acc.deliveryAttempts + (p.DeliveryAttempts ?? 0),
+      bounces: acc.bounces + (p.Bounces ?? 0),
+      complaints: acc.complaints + (p.Complaints ?? 0),
+      rejects: acc.rejects + (p.Rejects ?? 0),
+    }),
+    { deliveryAttempts: 0, bounces: 0, complaints: 0, rejects: 0 },
+  );
+  // The actual span the datapoints cover, so the UI label is honest.
+  const times = points.map((p) => p.Timestamp?.getTime()).filter((t): t is number => typeof t === "number");
+  const windowDays =
+    times.length > 1 ? Math.max(1, Math.round((Math.max(...times) - Math.min(...times)) / 86_400_000)) : 14;
+
+  // Do-not-send list (best-effort — needs a deployed stack + Scan permission).
+  let suppressed: SuppressedAddress[] = [];
+  try {
+    const outputs = await getStackOutputs(ctx, stackName);
+    const settingsTable = await resolveSettingsTableName(ctx, stackName, outputs);
+    if (settingsTable) {
+      const scan = await dynamodb.send(
+        new ScanCommand({
+          TableName: settingsTable,
+          FilterExpression: "begins_with(pk, :p)",
+          ExpressionAttributeValues: { ":p": { S: "SUPPRESS#" } },
+        }),
+      );
+      suppressed = (scan.Items ?? []).map((it) => ({
+        address: it.address?.S ?? (it.pk?.S ?? "").replace(/^SUPPRESS#/, ""),
+        reason: it.reason?.S ?? "bounce",
+        detail: it.detail?.S,
+        suppressedAt: it.suppressedAt?.S,
+      }));
+      // Most recently suppressed first.
+      suppressed.sort((a, b) =>
+        a.suppressedAt && b.suppressedAt ? (a.suppressedAt < b.suppressedAt ? 1 : -1) : 0,
+      );
+    }
+  } catch {
+    // No stack, or no read access — leave the list empty.
+  }
+
+  return {
+    totals,
+    bounceRate: rate(totals.bounces, totals.deliveryAttempts),
+    complaintRate: rate(totals.complaints, totals.deliveryAttempts),
+    windowDays,
+    sendingPaused: account.SendingEnabled === false,
+    enforcementStatus: account.EnforcementStatus,
+    dailyUsed: quota?.SentLast24Hours ?? 0,
+    dailyLimit: quota?.Max24HourSend ?? 0,
+    suppressed,
   };
 }
 

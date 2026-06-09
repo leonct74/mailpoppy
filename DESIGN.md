@@ -648,6 +648,15 @@ live-verified on ollydigital.com:**
   open them, + `tauri-plugin-opener` and a fallback link so received attachments download. The
   "still failing" symptom was a **stale prebuilt sidecar binary** masking re-deploys — always
   rebuild the binary after Lambda/template changes.)*
+- **Sending-health / deliverability monitoring** (2026-06-09) — the §18 "reputation monitoring"
+  item. A plain-language **"Sending health"** panel in the Account tab (no AWS jargon): traffic-light
+  bounce rate + spam-complaint rate + daily-send usage (from SES `GetSendStatistics` + SESv2
+  `GetAccount`), a loud "your sending is paused" state, and the **do-not-send list** (the
+  `SUPPRESS#` entries the bounce/complaint Lambda writes to the settings table). Pure health
+  classifiers + thresholds in `@mailpoppy/core` (`deliverability.ts`, unit-tested, warn one band
+  before AWS acts); sidecar `getDeliverability` + `GET /ses/deliverability/:stackName`; IAM gained
+  `ses:GetSendStatistics` + `dynamodb:Scan`. Live-read-verified on the deployed stack. **Still open
+  in Phase 5: DMARC aggregate (RUA) report ingestion.**
 
 **Phase 6 — Mobile.** Flutter/React Native client; Cognito auth; SNS → APNs/FCM push.
 

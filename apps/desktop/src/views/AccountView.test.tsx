@@ -7,14 +7,16 @@ import { AccountView } from "./AccountView";
 // concerns — SES sending access + the AWS resource inventory. Mail rules and
 // retention are per-domain now and live in the domain workspace, not here.
 vi.mock("./SendingAccessView", () => ({ SendingAccessView: () => <div>SENDING STUB</div> }));
+vi.mock("./DeliverabilityView", () => ({ DeliverabilityView: () => <div>HEALTH STUB</div> }));
 vi.mock("./ResourcesView", () => ({ ResourcesView: () => <div>RESOURCES STUB</div> }));
 
 afterEach(() => cleanup());
 
 describe("AccountView", () => {
-  it("shows account-wide sending access and the AWS resource inventory", () => {
+  it("shows account-wide sending access, sending health, and the AWS resource inventory", () => {
     render(<AccountView />);
     expect(screen.getByText("SENDING STUB")).toBeInTheDocument();
+    expect(screen.getByText("HEALTH STUB")).toBeInTheDocument();
     expect(screen.getByText("RESOURCES STUB")).toBeInTheDocument();
   });
 

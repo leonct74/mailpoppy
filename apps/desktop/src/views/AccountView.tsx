@@ -1,6 +1,7 @@
 import { SlidersHorizontal } from "lucide-react";
 import { resolveStackName } from "../lib/deploymentConfig";
 import { SendingAccessView } from "./SendingAccessView";
+import { DeliverabilityView } from "./DeliverabilityView";
 import { ResourcesView } from "./ResourcesView";
 import { Card } from "../ui";
 
@@ -33,6 +34,10 @@ export function AccountView({ stackName = resolveStackName() }: { stackName?: st
       <Card>
         <SendingAccessView />
       </Card>
+
+      {/* Sending health — bounce/complaint rates + do-not-send list, in plain
+          language. Account+region wide (self-loads; handles no-data itself). */}
+      <DeliverabilityView stackName={stackName} />
 
       {/* AWS resource inventory — read-only (self-loads; handles no-backend itself).
           Teardown is per-domain, in each domain's workspace. */}

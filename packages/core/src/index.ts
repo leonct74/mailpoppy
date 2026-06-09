@@ -8,3 +8,4 @@ export * from "./sesAccount";
 export * from "./mailFrom";
 export * from "./policy";
 export * from "./retention";
+export * from "./deliverability";
