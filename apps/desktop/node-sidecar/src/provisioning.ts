@@ -1201,11 +1201,21 @@ export async function discoverProvisionedDomains(ctx: AwsContext, stackName: str
     // no active rule set — ignore
   }
 
-  // SES identities recorded in the local ledger.
+  // SES identities recorded in the local ledger — NET of any later teardown.
+  // The ledger is append-only and chronological, so a domain that was created
+  // and then deleted has both entries; replaying add/remove in order leaves only
+  // the identities that still exist. (Without this, a torn-down domain lingers
+  // forever as a ghost — e.g. shows up on the Home dashboard after teardown.)
   try {
+    const liveIdentities = new Set<string>();
     for (const e of await readLedger()) {
-      if (e.service === "SES" && e.resourceType === "EmailIdentity" && e.action === "created") add(e.name);
+      if (e.service !== "SES" || e.resourceType !== "EmailIdentity") continue;
+      const name = (e.name ?? "").trim().toLowerCase();
+      if (!name) continue;
+      if (e.action === "created") liveIdentities.add(name);
+      else if (e.action === "deleted") liveIdentities.delete(name);
     }
+    for (const name of liveIdentities) add(name);
   } catch {
     // missing/corrupt ledger — ignore
   }

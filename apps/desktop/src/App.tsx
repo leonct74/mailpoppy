@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Inbox, Settings, ArrowLeftRight, Database, ShieldCheck, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Inbox, Settings, ArrowLeftRight, Database, ShieldCheck, type LucideIcon } from "lucide-react";
+import { HomeView } from "./views/HomeView";
 import { SetupWizard } from "./views/SetupWizard";
 import { InboxView } from "./views/InboxView";
 import { ResourcesView } from "./views/ResourcesView";
@@ -16,9 +17,10 @@ import {
   type DeploymentConfig,
 } from "./lib/deploymentConfig";
 
-type Tab = "setup" | "inbox" | "migrate" | "resources";
+type Tab = "home" | "setup" | "inbox" | "migrate" | "resources";
 
 const NAV: { id: Tab; label: string; icon: LucideIcon; blurb: string }[] = [
+  { id: "home", label: "Home", icon: LayoutDashboard, blurb: "Overview of your domains and mailboxes" },
   { id: "setup", label: "Setup", icon: Settings, blurb: "Provision your AWS email infrastructure" },
   { id: "inbox", label: "Inbox", icon: Inbox, blurb: "Read and send mail" },
   { id: "migrate", label: "Migrate", icon: ArrowLeftRight, blurb: "Bring your old mail across via IMAP" },
@@ -96,11 +98,11 @@ function InboxTab() {
 }
 
 export function App() {
-  const [tab, setTab] = useState<Tab>("setup");
+  const [tab, setTab] = useState<Tab>("home");
   // Tabs visited so far. Once visited, a view is kept mounted (hidden when
   // inactive) so its form data, scroll position and loaded data survive tab
   // switches — its effects still run just once, on first visit.
-  const [visited, setVisited] = useState<Set<Tab>>(() => new Set<Tab>(["setup"]));
+  const [visited, setVisited] = useState<Set<Tab>>(() => new Set<Tab>(["home"]));
   const current = NAV.find((n) => n.id === tab)!;
 
   function go(id: Tab) {
@@ -174,6 +176,13 @@ export function App() {
             </div>
           )}
           {/* The page content is the only scroll region for these views. */}
+          {visited.has("home") && (
+            <div className={cn("h-full overflow-y-auto px-8 py-8", tab === "home" ? "block" : "hidden")}>
+              <div className="mx-auto max-w-6xl">
+                <HomeView onGoToSetup={() => go("setup")} />
+              </div>
+            </div>
+          )}
           {visited.has("setup") && (
             <div className={cn("h-full overflow-y-auto px-8 py-8", tab === "setup" ? "block" : "hidden")}>
               <div className="mx-auto max-w-6xl">

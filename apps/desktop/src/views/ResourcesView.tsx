@@ -143,10 +143,26 @@ export function ResourcesView({
   const grouped = inv ? groupByService(inv.resources) : [];
   const ledger = inv ? [...inv.ledger].sort((a, b) => (a.ts < b.ts ? 1 : -1)) : [];
 
-  // The domain to tear down: the SES identity Mailpoppy created (its ledger name
-  // is exactly the domain). If we can't infer it (e.g. a fresh machine), the user
-  // types it freely below.
-  const knownDomain = inv?.ledger.find((e) => e.service === "SES" && e.resourceType === "EmailIdentity")?.name;
+  // The domain to tear down: Mailpoppy's SES identity (its ledger name is exactly
+  // the domain). The ledger is append-only, so replay created/deleted in order and
+  // take the most recently (re)created identity that's still live — otherwise a
+  // long-torn-down domain (the FIRST identity ever created) is shown by mistake.
+  // If none can be inferred (e.g. a fresh machine), the user types it freely below.
+  const knownDomain = (() => {
+    const live: string[] = [];
+    for (const e of inv?.ledger ?? []) {
+      if (e.service !== "SES" || e.resourceType !== "EmailIdentity") continue;
+      const name = e.name?.trim().toLowerCase();
+      if (!name) continue;
+      if (e.action === "created") {
+        if (!live.includes(name)) live.push(name);
+      } else if (e.action === "deleted") {
+        const i = live.indexOf(name);
+        if (i >= 0) live.splice(i, 1);
+      }
+    }
+    return live[live.length - 1];
+  })();
   const somethingDeployed = !!inv && (inv.stackExists || ledger.length > 0);
   const typed = confirmText.trim().toLowerCase();
   const canTearDown =
