@@ -97,6 +97,15 @@ describe("MigrationView", () => {
     expect(await screen.findByText(/AUTHENTICATIONFAILED/)).toBeInTheDocument();
   });
 
+  it("preselects a mailbox on the domain the user drilled in from", async () => {
+    render(<MigrationView test={vi.fn()} run={vi.fn()} loadMailboxes={loadMailboxes} preselectDomain="otherdomain.com" />);
+
+    // The destination trigger should show the otherdomain.com mailbox, not the
+    // first mailbox overall (you@yourdomain.com).
+    expect(await screen.findByText("team@otherdomain.com")).toBeInTheDocument();
+    expect(screen.queryByText("Select a mailbox…")).not.toBeInTheDocument();
+  });
+
   it("passes dryRun when 'Preview only' is checked", async () => {
     const test = vi.fn(async () => ({ ok: true as const, folders }));
     const run = vi.fn(async () => ({

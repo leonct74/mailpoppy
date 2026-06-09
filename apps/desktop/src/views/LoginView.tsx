@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Authenticator } from "../lib/auth";
 import { Card, Button, Spinner } from "../ui";
 
@@ -13,13 +13,20 @@ export function LoginView({
   auth,
   onSignedIn,
   onReconfigure,
+  prefillEmail,
 }: {
   auth: Authenticator;
   onSignedIn: () => void;
   onReconfigure?: () => void;
+  prefillEmail?: string;
 }) {
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(prefillEmail ?? "");
   const [password, setPassword] = useState("");
+  // When the user deep-links here from a specific mailbox (e.g. "Open inbox" in
+  // the domain workspace), pre-fill the email so they only type a password.
+  useEffect(() => {
+    if (prefillEmail) setEmail(prefillEmail);
+  }, [prefillEmail]);
   const [newPassword, setNewPassword] = useState("");
   const [needsNewPassword, setNeedsNewPassword] = useState(false);
   const [busy, setBusy] = useState(false);

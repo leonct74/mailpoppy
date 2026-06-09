@@ -60,7 +60,7 @@ export function DomainView({
   domain: string;
   stackName?: string;
   onBack?: () => void;
-  onOpenInbox?: () => void;
+  onOpenInbox?: (email: string) => void;
   onMigrateInto?: (domain: string) => void;
   listMailboxes?: (stackName: string) => Promise<BackendInfo & { ok: true; mailboxes: Mailbox[] }>;
   createMailbox?: (input: { email: string; password: string; stackName?: string }) => Promise<
@@ -284,18 +284,11 @@ export function DomainView({
               Mailboxes <span className="font-normal text-on-surface-variant">({onDomain.length})</span>
             </h3>
           </div>
-          <div className="flex gap-2">
-            {onOpenInbox && (
-              <Button variant="secondary" size="sm" onClick={onOpenInbox}>
-                <Inbox className="size-4" /> Open inbox
-              </Button>
-            )}
-            {onMigrateInto && (
-              <Button variant="secondary" size="sm" onClick={() => onMigrateInto(domain)}>
-                <ArrowLeftRight className="size-4" /> Import old mail
-              </Button>
-            )}
-          </div>
+          {onMigrateInto && (
+            <Button variant="secondary" size="sm" onClick={() => onMigrateInto(domain)}>
+              <ArrowLeftRight className="size-4" /> Import old mail
+            </Button>
+          )}
         </div>
 
         {/* Add a mailbox on this domain. */}
@@ -359,6 +352,7 @@ export function DomainView({
                   status={m.status}
                   stackName={stackName}
                   onDeleted={() => setReloadKey((k) => k + 1)}
+                  onOpenInbox={onOpenInbox}
                 />
               ))}
             </ul>

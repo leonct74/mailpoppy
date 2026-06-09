@@ -32,6 +32,7 @@ export function MailboxStorageRow({
   del = defaultDelete,
   resetPw = defaultReset,
   onDeleted,
+  onOpenInbox,
 }: {
   email: string;
   status?: string;
@@ -41,6 +42,7 @@ export function MailboxStorageRow({
   del?: (input: { email: string; stackName?: string }) => Promise<MailboxDeletion>;
   resetPw?: (input: { email: string; password: string; stackName?: string }) => Promise<{ ok: true; email: string }>;
   onDeleted?: (email: string) => void;
+  onOpenInbox?: (email: string) => void;
 }) {
   const [info, setInfo] = useState<MailboxStorageInfo | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -176,6 +178,15 @@ export function MailboxStorageRow({
           </span>
         ) : (
           <div className="flex flex-wrap items-center gap-4">
+            {onOpenInbox && (
+              <button
+                onClick={() => onOpenInbox(email)}
+                aria-label={`Open inbox for ${email}`}
+                className={linkBtn}
+              >
+                Open inbox
+              </button>
+            )}
             <button onClick={() => setEditing(true)} className={linkBtn}>
               {info?.quotaBytes ? "Change storage limit" : "Set storage limit"}
             </button>

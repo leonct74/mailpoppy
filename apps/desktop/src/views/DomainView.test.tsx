@@ -6,7 +6,12 @@ import { DomainView } from "./DomainView";
 // stub it to a plain <li> so this test stays focused on DomainView's own
 // behaviour (the row has its own dedicated test).
 vi.mock("./MailboxStorageRow", () => ({
-  MailboxStorageRow: ({ email }: { email: string }) => <li data-testid="mb-row">{email}</li>,
+  MailboxStorageRow: ({ email, onOpenInbox }: { email: string; onOpenInbox?: (e: string) => void }) => (
+    <li data-testid="mb-row">
+      {email}
+      {onOpenInbox && <button onClick={() => onOpenInbox(email)}>open {email}</button>}
+    </li>
+  ),
 }));
 
 afterEach(() => cleanup());
@@ -83,6 +88,15 @@ describe("DomainView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Open migration/i }));
     expect(onMigrateInto).toHaveBeenCalledWith("boxord.com");
+  });
+
+  it("opens a mailbox's inbox via the per-row action", async () => {
+    const onOpenInbox = vi.fn();
+    render(<DomainView domain="boxord.com" onOpenInbox={onOpenInbox} {...loaders()} />);
+    await screen.findByRole("heading", { name: "boxord.com" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "open support@boxord.com" }));
+    expect(onOpenInbox).toHaveBeenCalledWith("support@boxord.com");
   });
 
   it("shows a deploy hint when no backend exists yet", async () => {

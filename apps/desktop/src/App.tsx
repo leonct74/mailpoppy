@@ -37,7 +37,7 @@ const CREDENTIALS_TOOLTIP =
  *   config, signed out   → login
  *   config, signed in    → live inbox (Cognito JWT → API Gateway)
  */
-function InboxTab() {
+function InboxTab({ prefillEmail }: { prefillEmail?: string | null }) {
   const [config, setConfig] = useState<DeploymentConfig | null>(() => loadDeploymentConfig());
   const [editingConfig, setEditingConfig] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
@@ -73,7 +73,14 @@ function InboxTab() {
   }
 
   if (auth && !signedIn) {
-    return <LoginView auth={auth} onSignedIn={() => setSignedIn(true)} onReconfigure={() => setEditingConfig(true)} />;
+    return (
+      <LoginView
+        auth={auth}
+        prefillEmail={prefillEmail ?? undefined}
+        onSignedIn={() => setSignedIn(true)}
+        onReconfigure={() => setEditingConfig(true)}
+      />
+    );
   }
 
   const linkBtn = "text-primary underline-offset-2 hover:underline";
@@ -108,6 +115,11 @@ export function App() {
   // domain instead of the overview. Clicking the Home nav (or the in-view back
   // button) clears it to return to the overview.
   const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
+  // Cross-tab hand-offs from the domain workspace: which domain the Migrate tab
+  // should default its destination to, and which mailbox the Inbox login should
+  // be pre-filled for.
+  const [migrateDomain, setMigrateDomain] = useState<string | null>(null);
+  const [inboxEmail, setInboxEmail] = useState<string | null>(null);
   const current = NAV.find((n) => n.id === tab)!;
 
   function go(id: Tab) {
@@ -182,7 +194,7 @@ export function App() {
             // The mailbox is a full-bleed three-pane layout that fills the
             // viewport (its panes scroll internally — this container does not).
             <div className={cn("min-h-0 flex-1 flex-col px-6 py-6", tab === "inbox" ? "flex" : "hidden")}>
-              <InboxTab />
+              <InboxTab prefillEmail={inboxEmail} />
             </div>
           )}
           {/* The page content is the only scroll region for these views. */}
@@ -193,8 +205,14 @@ export function App() {
                   <DomainView
                     domain={selectedDomain}
                     onBack={() => setSelectedDomain(null)}
-                    onOpenInbox={() => go("inbox")}
-                    onMigrateInto={() => go("migrate")}
+                    onOpenInbox={(email) => {
+                      setInboxEmail(email);
+                      go("inbox");
+                    }}
+                    onMigrateInto={(d) => {
+                      setMigrateDomain(d);
+                      go("migrate");
+                    }}
                   />
                 ) : (
                   <HomeView onGoToSetup={() => go("setup")} onOpenDomain={(d) => setSelectedDomain(d)} />
@@ -212,7 +230,7 @@ export function App() {
           {visited.has("migrate") && (
             <div className={cn("h-full overflow-y-auto px-8 py-8", tab === "migrate" ? "block" : "hidden")}>
               <div className="mx-auto max-w-6xl">
-                <MigrationView />
+                <MigrationView preselectDomain={migrateDomain ?? undefined} />
               </div>
             </div>
           )}

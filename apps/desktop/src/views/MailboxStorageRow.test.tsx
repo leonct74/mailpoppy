@@ -80,6 +80,29 @@ describe("MailboxStorageRow — delete", () => {
   });
 });
 
+describe("MailboxStorageRow — open inbox", () => {
+  it("shows an Open inbox action only when onOpenInbox is given, and passes the email", async () => {
+    const onOpenInbox = vi.fn();
+    const { rerender } = render(
+      <MailboxStorageRow email="old@acme.com" stackName="MailpoppyMailStack" loadStorage={loadStorage} />,
+    );
+    // No action without the callback.
+    await screen.findByText("old@acme.com");
+    expect(screen.queryByRole("button", { name: /Open inbox for/ })).not.toBeInTheDocument();
+
+    rerender(
+      <MailboxStorageRow
+        email="old@acme.com"
+        stackName="MailpoppyMailStack"
+        loadStorage={loadStorage}
+        onOpenInbox={onOpenInbox}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Open inbox for old@acme.com" }));
+    expect(onOpenInbox).toHaveBeenCalledWith("old@acme.com");
+  });
+});
+
 describe("MailboxStorageRow — reset password", () => {
   it("requires a password (≥8 chars) then calls resetPw and confirms", async () => {
     const resetPw = vi.fn(async () => ({ ok: true as const, email: "old@acme.com" }));

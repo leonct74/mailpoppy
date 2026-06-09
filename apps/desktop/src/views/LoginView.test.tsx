@@ -52,6 +52,12 @@ describe("LoginView", () => {
     expect(auth.completeNewPassword).toHaveBeenCalledWith("Permanent123!");
   });
 
+  it("pre-fills the email when deep-linked from a specific mailbox", () => {
+    const auth = mockAuth();
+    render(<LoginView auth={auth} onSignedIn={vi.fn()} prefillEmail="info@boxord.com" />);
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("info@boxord.com");
+  });
+
   it("shows an error when authentication fails", async () => {
     const auth = mockAuth({
       signIn: vi.fn(async () => {

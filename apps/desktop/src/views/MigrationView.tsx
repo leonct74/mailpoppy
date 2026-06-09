@@ -201,17 +201,23 @@ function Td({ children, className }: { children: ReactNode; className?: string }
   return <td className={cn("border-b border-outline-variant/10 px-3 py-2.5 text-sm", className)}>{children}</td>;
 }
 
+const domainOf = (email: string) => email.split("@")[1]?.toLowerCase() ?? "";
+
 export function MigrationView({
   test = defaultTest,
   run = defaultRun,
   // The backend is resolved (one per install), not typed — see deploymentConfig.
   stackName = resolveStackName(),
   loadMailboxes = listMailboxes,
+  // When the user arrives here from a domain's "Import old mail" action, focus
+  // the destination on that domain so imports can't land on the wrong domain.
+  preselectDomain,
 }: {
   test?: typeof defaultTest;
   run?: typeof defaultRun;
   stackName?: string;
   loadMailboxes?: typeof listMailboxes;
+  preselectDomain?: string;
 }) {
   const [host, setHost] = useState("");
   const [port, setPort] = useState("993");
@@ -280,6 +286,17 @@ export function MigrationView({
     }
     return [...m.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [mailboxes]);
+
+  // Focus the destination on the domain the user drilled in from. Runs when the
+  // requested domain or the loaded mailbox list changes. Keeps a destination the
+  // user already chose if it's on that domain; otherwise picks the first mailbox
+  // on it. If the domain has no mailboxes, leaves the current selection alone.
+  useEffect(() => {
+    if (!preselectDomain || !mailboxes || mailboxes.length === 0) return;
+    const onDomain = mailboxes.filter((mb) => domainOf(mb.email) === preselectDomain.toLowerCase());
+    if (onDomain.length === 0) return;
+    setMailbox((prev) => (prev && onDomain.some((mb) => mb.email === prev) ? prev : onDomain[0]!.email));
+  }, [preselectDomain, mailboxes]);
 
   function source() {
     return { host, port: Number(port) || undefined, secure, user, password };
