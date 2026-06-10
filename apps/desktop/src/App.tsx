@@ -48,6 +48,7 @@ function InboxTab({ prefillEmail }: { prefillEmail?: string | null }) {
   const [config, setConfig] = useState<DeploymentConfig | null>(() => loadDeploymentConfig());
   const [editingConfig, setEditingConfig] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
+  const [mailboxEmail, setMailboxEmail] = useState<string | null>(null);
 
   const auth = useMemo(() => (config ? new CognitoAuth(config) : null), [config]);
   const liveClient = useMemo(
@@ -59,6 +60,22 @@ function InboxTab({ prefillEmail }: { prefillEmail?: string | null }) {
   useEffect(() => {
     setSignedIn(auth?.hasSession() ?? false);
   }, [auth]);
+
+  // Resolve the signed-in mailbox address (from the ID-token claims) for the
+  // Inbox header. Async because it reads/refreshes the token.
+  useEffect(() => {
+    if (!signedIn || !auth) {
+      setMailboxEmail(null);
+      return;
+    }
+    let cancelled = false;
+    void auth.currentEmail().then((e) => {
+      if (!cancelled) setMailboxEmail(e);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn, auth]);
 
   if (editingConfig) {
     return (
@@ -107,7 +124,7 @@ function InboxTab({ prefillEmail }: { prefillEmail?: string | null }) {
           Disconnect
         </button>
       </div>
-      {liveClient && <InboxView client={liveClient} mailboxEmail={auth?.currentEmail() ?? null} />}
+      {liveClient && <InboxView client={liveClient} mailboxEmail={mailboxEmail} />}
     </>
   );
 }
