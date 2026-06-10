@@ -155,7 +155,9 @@ export class MailStack extends Stack {
     });
     mailBucket.grantReadWrite(inboundProcessor); // read the raw .eml + write/delete attachments + raw
     indexTable.grantReadWriteData(inboundProcessor); // write rows + read for quota usage
-    settingsTable.grantReadData(inboundProcessor);
+    // read policy/quota docs + WRITE the per-domain DMARC#<domain>#<day> counters
+    // accumulated from incoming aggregate reports (DESIGN §13).
+    settingsTable.grantReadWriteData(inboundProcessor);
     // Send a "mailbox full" / "no such mailbox" bounce to the sender.
     inboundProcessor.addToRolePolicy(
       new iam.PolicyStatement({ actions: ["ses:SendEmail", "ses:SendRawEmail"], resources: ["*"] }),

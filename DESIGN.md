@@ -664,8 +664,25 @@ live-verified on ollydigital.com:**
     unit-tested, warn one band before AWS acts); sidecar `getDeliverabilityOverview` +
     `GET /ses/deliverability/:stackName`; suppression Lambda writes per-domain counters; IAM gained
     `ses:GetSendStatistics` + `dynamodb:Scan`. The per-domain counters need the updated suppression
-    Lambda deployed (Lambda-only UpdateStack). **Still open in Phase 5: DMARC aggregate (RUA)
-    report ingestion** (the one genuinely per-domain signal AWS hands us for free).
+    Lambda deployed (Lambda-only UpdateStack).
+- **DMARC aggregate (RUA) report ingestion** (2026-06-10) — the last per-domain deliverability
+  signal, and the only authentication signal a customer's own AWS account gets for free. Mailpoppy
+  already publishes `_dmarc.<domain> TXT "…; rua=mailto:postmaster@<domain>"` at provisioning, so
+  inbox providers email back **daily aggregate reports** (gzip/zip XML) summarising how much mail
+  claiming to be from the domain passed SPF/DKIM **alignment**. Those reports were previously bounced
+  (postmaster@ isn't a mailbox); now the **inbound-processor** recognises a report (a report-shaped
+  attachment to `postmaster@`/`dmarc@`), decompresses + parses it, tallies `DMARC#<domain>#<day>`
+  pass/fail counters into the settings table, and **absorbs** the message (no inbox row, no bounce —
+  so postmaster@ needn't exist). The "Sending health" view shows each domain an *advisory*
+  Authentication (DMARC) row (pass-rate %, lenient classification since forwarders cause benign
+  fails — never folded into the main bounce/complaint chip).
+  - Pieces: `@mailpoppy/core` `dmarc.ts` (dependency-free block-scoped RFC 7489 parser + per-domain
+    summary/health, 17 unit tests); `inbound-processor` ingestion (`fflate` for gzip/zip,
+    fail-safe); sidecar `getDeliverabilityOverview` reads the `DMARC#` counters; `SendingHealthView`
+    `DmarcRow`. Forward-looking (counters accrue from deploy). Deploy = new Lambda zip **plus one
+    template change** (inbound-processor's settings-table grant widened read→write), so it's a full
+    (changeset-reviewed) UpdateStack, not the Lambda-only kind. **Phase 5 deliverability now
+    complete.**
 
 **Phase 6 — Mobile.** Flutter/React Native client; Cognito auth; SNS → APNs/FCM push.
 

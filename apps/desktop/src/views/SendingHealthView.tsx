@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { HeartPulse, RefreshCw, PauseCircle, CheckCircle2, AlertTriangle, OctagonAlert, Ban } from "lucide-react";
+import { HeartPulse, RefreshCw, PauseCircle, CheckCircle2, AlertTriangle, Ban, ShieldCheck } from "lucide-react";
 import {
   domainHealth,
+  dmarcHealth,
   type DeliverabilityOverview,
   type DomainDeliverability,
+  type DomainDmarc,
   type HealthLevel,
 } from "@mailpoppy/core";
 import { getDeliverabilityOverview as defaultLoad } from "../lib/deliverability";
@@ -64,6 +66,40 @@ function Stat({ label, value, sub, tone = "neutral" }: { label: string; value: s
   );
 }
 
+/**
+ * Per-domain DMARC authentication, from the aggregate reports inbox providers
+ * email back. Advisory (forwarders cause benign fails), so it's shown as its own
+ * sub-row and never changes the card's main health chip.
+ */
+function DmarcRow({ dmarc }: { dmarc: DomainDmarc }) {
+  const level = dmarcHealth(dmarc);
+  const tone: Tone = level === "good" ? "good" : level === "watch" ? "watch" : "action";
+  const passRate = Math.max(0, 1 - dmarc.failRate);
+  return (
+    <div className="mt-4 border-t border-outline-variant/10 pt-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className={cn("inline-flex items-center gap-1.5 text-xs font-medium", toneText[tone])}>
+          <ShieldCheck className="size-3.5" />
+          Authentication (DMARC)
+        </span>
+        <span className={cn("text-xs font-medium", toneText[tone])}>{pct(passRate)} passed</span>
+      </div>
+      {level !== "good" && (
+        <p className="mt-1 text-xs text-on-surface-variant">
+          {pct(dmarc.failRate)} of the mail inbox providers saw claiming to come from this domain failed authentication.
+          That's often a harmless forwarder or mailing list — but if you send a lot from here, it's worth checking that
+          nobody is spoofing your domain.
+        </p>
+      )}
+      <p className="mt-1 text-[11px] text-on-surface-variant">
+        From {dmarc.reports.toLocaleString()} report{dmarc.reports === 1 ? "" : "s"} covering{" "}
+        {dmarc.volume.toLocaleString()} message{dmarc.volume === 1 ? "" : "s"} inbox providers checked over the last{" "}
+        {dmarc.windowDays} days.
+      </p>
+    </div>
+  );
+}
+
 function DomainCard({ d }: { d: DomainDeliverability }) {
   const health = domainHealth(d);
   const sent = d.sends > 0;
@@ -103,6 +139,8 @@ function DomainCard({ d }: { d: DomainDeliverability }) {
           reported spam.
         </div>
       )}
+
+      {d.dmarc && d.dmarc.volume > 0 && <DmarcRow dmarc={d.dmarc} />}
     </div>
   );
 }
@@ -234,6 +272,12 @@ export function SendingHealthView({ stackName = resolveStackName(), load = defau
             {domains[0]?.windowDays ?? 14} days — they started counting when this feature was switched on, so a brand-new
             install will fill in over time. <AlertTriangle className="inline size-3 -translate-y-px" /> A domain showing{" "}
             <span className={toneText.action}>Needs attention</span> is the one to act on first.
+          </p>
+          <p className="text-xs text-on-surface-variant">
+            <ShieldCheck className="inline size-3 -translate-y-px" /> <b className="text-on-surface">DMARC reports</b> appear
+            on a domain once inbox providers start emailing back their daily summaries about it — Mailpoppy already asks for
+            these automatically, and they typically begin arriving within a day or two of a domain sending real mail. They
+            tell you how much mail claiming to be from each domain actually passed authentication.
           </p>
         </>
       ) : null}

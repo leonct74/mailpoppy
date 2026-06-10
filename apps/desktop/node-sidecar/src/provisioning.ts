@@ -89,6 +89,7 @@ import {
   type DeliverabilityStatus,
   type DeliverabilityOverview,
   type DomainDeliverability,
+  type DomainDmarc,
   type SendingTotals,
   type SuppressedAddress,
 } from "@mailpoppy/core";
@@ -763,7 +764,9 @@ const DELIVERABILITY_WINDOW_DAYS = 14;
  *   • sends    — counted from each mailbox's stored Sent copies in the window;
  *   • bounces/complaints — from the STAT#<domain>#<day> counters the suppression
  *     Lambda writes (forward-looking: they accrue from when that Lambda deploys);
- *   • suppressed — the do-not-send entries attributed to that sending domain.
+ *   • suppressed — the do-not-send entries attributed to that sending domain;
+ *   • dmarc — DMARC#<domain>#<day> counters the inbound-processor writes from
+ *     aggregate reports that land at postmaster@<domain> (also forward-looking).
  * Everything is best-effort; a missing table/permission yields zeroes, not an error.
  */
 export async function getDeliverabilityOverview(
@@ -819,6 +822,35 @@ export async function getDeliverabilityOverview(
     }
   }
 
+  // Per-domain DMARC aggregate-report tallies (one scan of the DMARC# counters
+  // the inbound-processor writes when reports arrive at postmaster@<domain>).
+  const dmarcStat = new Map<string, { reports: number; volume: number; pass: number; fail: number }>();
+  if (settingsTable) {
+    try {
+      const scan = await dynamodb.send(
+        new ScanCommand({
+          TableName: settingsTable,
+          FilterExpression: "begins_with(pk, :p)",
+          ExpressionAttributeValues: { ":p": { S: "DMARC#" } },
+        }),
+      );
+      for (const it of scan.Items ?? []) {
+        const day = it.day?.S ?? "";
+        if (day && day < sinceDay) continue; // outside the window
+        const dom = it.domain?.S ?? (it.pk?.S ?? "").split("#")[1] ?? "";
+        if (!dom) continue;
+        const cur = dmarcStat.get(dom) ?? { reports: 0, volume: 0, pass: 0, fail: 0 };
+        cur.reports += Number(it.reports?.N ?? 0);
+        cur.volume += Number(it.volume?.N ?? 0);
+        cur.pass += Number(it.pass?.N ?? 0);
+        cur.fail += Number(it.fail?.N ?? 0);
+        dmarcStat.set(dom, cur);
+      }
+    } catch {
+      // no perms / no table → no per-domain DMARC data
+    }
+  }
+
   // Suppressed addresses attributed to each sending domain.
   const suppressedByDomain = new Map<string, number>();
   for (const s of account.suppressed) {
@@ -852,6 +884,17 @@ export async function getDeliverabilityOverview(
       }
     }
     const counts = stat.get(domain) ?? { bounces: 0, complaints: 0 };
+    const dm = dmarcStat.get(domain);
+    const dmarc: DomainDmarc | undefined = dm
+      ? {
+          reports: dm.reports,
+          volume: dm.volume,
+          pass: dm.pass,
+          fail: dm.fail,
+          failRate: rate(dm.fail, dm.volume),
+          windowDays: DELIVERABILITY_WINDOW_DAYS,
+        }
+      : undefined;
     domains.push({
       domain,
       sends,
@@ -861,6 +904,7 @@ export async function getDeliverabilityOverview(
       complaintRate: rate(counts.complaints, sends),
       suppressedCount: suppressedByDomain.get(domain) ?? 0,
       windowDays: DELIVERABILITY_WINDOW_DAYS,
+      dmarc,
     });
   }
 

@@ -1,10 +1,11 @@
 import type { SESEvent, SESReceipt } from "aws-lambda";
 import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, QueryCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, PutCommand, QueryCommand, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { CognitoIdentityProviderClient, ListUsersCommand } from "@aws-sdk/client-cognito-identity-provider";
-import { simpleParser, type AddressObject } from "mailparser";
+import { simpleParser, type AddressObject, type Attachment } from "mailparser";
+import { gunzipSync, unzipSync, strFromU8 } from "fflate";
 import {
   type MessageMeta,
   type AuthVerdicts,
@@ -12,6 +13,7 @@ import {
   type AttachmentMeta,
   type DeploymentPolicy,
   type SpamPolicy,
+  type DmarcAttachmentKind,
   DEFAULT_POLICY,
   mailboxPk,
   messageSk,
@@ -27,6 +29,9 @@ import {
   policySettingsKey,
   normalizeSpamPolicy,
   isKnownMailbox,
+  parseDmarcAggregate,
+  summarizeAggregate,
+  dmarcAttachmentKind,
 } from "@mailpoppy/core";
 
 /**
@@ -239,6 +244,86 @@ async function sendUnknownRecipientBounce(recipient: string, sender: string, sub
   }
 }
 
+// ---- DMARC aggregate-report ingestion --------------------------------------
+// The role addresses our published `rua=` may point at. We absorb report mail
+// to any of these (postmaster@ is what provisioning publishes today).
+const DMARC_ROLE_LOCALPARTS = new Set(["postmaster", "dmarc", "dmarc-reports", "dmarcreports"]);
+
+/** A hosted role address that DMARC aggregate reports are sent to. */
+function isDmarcRoleRecipient(addr: string): boolean {
+  const local = addr.split("@")[0] ?? "";
+  return DMARC_ROLE_LOCALPARTS.has(local) && isHosted(addr);
+}
+
+/** True if any attachment looks like a (compressed) DMARC report file. */
+function hasReportCandidate(attachments: Attachment[]): boolean {
+  return attachments.some((a) => dmarcAttachmentKind(a.filename, a.contentType) !== null);
+}
+
+/** Decompress a report attachment to its XML text (gzip/zip/plain), or null. */
+function decompressReportXml(kind: DmarcAttachmentKind, content: Buffer): string | null {
+  try {
+    if (kind === "xml") return content.toString("utf8");
+    if (kind === "gzip") return strFromU8(gunzipSync(content));
+    if (kind === "zip") {
+      const files = unzipSync(content);
+      const names = Object.keys(files);
+      const xmlName = names.find((n) => n.toLowerCase().endsWith(".xml")) ?? names[0];
+      return xmlName ? strFromU8(files[xmlName]!) : null;
+    }
+  } catch (e) {
+    console.error("dmarc decompress failed", e);
+  }
+  return null;
+}
+
+/** Accumulate a domain's daily DMARC pass/fail counters (SETTINGS table). */
+async function recordDmarcStats(
+  domain: string,
+  s: { volume: number; pass: number; fail: number },
+): Promise<void> {
+  if (!domain || !SETTINGS_TABLE || s.volume <= 0) return;
+  const day = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  await ddb.send(
+    new UpdateCommand({
+      TableName: SETTINGS_TABLE,
+      Key: { pk: `DMARC#${domain}#${day}` },
+      UpdateExpression:
+        "SET #domain = if_not_exists(#domain, :domain), #day = if_not_exists(#day, :day) ADD #v :v, #p :p, #f :f, #r :one",
+      ExpressionAttributeNames: { "#domain": "domain", "#day": "day", "#v": "volume", "#p": "pass", "#f": "fail", "#r": "reports" },
+      ExpressionAttributeValues: { ":domain": domain, ":day": day, ":v": s.volume, ":p": s.pass, ":f": s.fail, ":one": 1 },
+    }),
+  );
+}
+
+/**
+ * Parse + tally every DMARC report attachment on a message (best-effort).
+ * Returns true if at least one real aggregate report was recognised — the caller
+ * only absorbs the message when that's true, so a non-report message that merely
+ * happens to carry a compressed attachment still falls through to normal mail
+ * handling (never silently dropped).
+ */
+async function ingestDmarcReports(hintDomain: string | undefined, attachments: Attachment[]): Promise<boolean> {
+  let ingested = false;
+  for (const a of attachments) {
+    const kind = dmarcAttachmentKind(a.filename, a.contentType);
+    if (!kind) continue;
+    const xml = decompressReportXml(kind, a.content);
+    if (!xml) continue;
+    const report = parseDmarcAggregate(xml);
+    if (!report) continue;
+    const domain = report.domain || hintDomain;
+    if (!domain) continue;
+    const summary = summarizeAggregate(report);
+    await recordDmarcStats(domain, summary);
+    ingested = true;
+    console.log(
+      `dmarc report: ${domain} vol=${summary.volume} pass=${summary.pass} fail=${summary.fail} (${report.orgName ?? "?"})`,
+    );
+  }
+  return ingested;
+}
+
 export async function handler(event: SESEvent): Promise<void> {
   // Per-domain spam/auth policy, resolved on demand with a fallback chain:
   //   policy#<recipientDomain> → policy#default → built-in safe default.
@@ -291,6 +376,34 @@ export async function handler(event: SESEvent): Promise<void> {
     // lookup blip. (Only our own domains' MX point at SES, so the catch-all
     // receipt rule means `receipt.recipients` are already all ours.)
     const recipients = (receipt.recipients ?? []).map(normalizeAddress);
+
+    // DMARC aggregate reports arrive as ordinary mail to the rua target we
+    // publish (postmaster@<domain>). They're machine reports, not inbox mail:
+    // tally their per-domain authentication counters, then ABSORB the message
+    // (delete the raw S3 object, no inbox row, no bounce). Detection is gated to
+    // these role addresses carrying a report-shaped attachment, so it never
+    // touches normal mail; and it's fully fail-safe — any parse/IO error just
+    // logs and the report is dropped, never blocking delivery. This is also why
+    // postmaster@ needn't be a real mailbox: reports are consumed here directly.
+    const reportRecipient = recipients.find(isDmarcRoleRecipient);
+    const inboundAttachments = parsed.attachments ?? [];
+    if (reportRecipient && hasReportCandidate(inboundAttachments)) {
+      let ingested = false;
+      try {
+        ingested = await ingestDmarcReports(addressDomain(reportRecipient), inboundAttachments);
+      } catch (e) {
+        console.error(`dmarc ingest failed for ${messageId}:`, e);
+      }
+      // Only absorb (delete + skip) genuine reports; otherwise fall through so a
+      // real message to a role address is still handled normally, not dropped.
+      if (ingested) {
+        await s3
+          .send(new DeleteObjectCommand({ Bucket: MAIL_BUCKET, Key: key }))
+          .catch((e) => console.error(`failed to delete dmarc report object ${key}:`, e));
+        continue;
+      }
+    }
+
     const enforceKnown = knownMailboxes.size > 0;
     const known = enforceKnown
       ? recipients.filter((r) => isKnownMailbox(r, knownMailboxes))

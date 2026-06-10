@@ -81,6 +81,44 @@ describe("SendingHealthView", () => {
     expect(await screen.findByText(/stopped emailing 2 addresses/)).toBeInTheDocument();
   });
 
+  it("shows a domain's DMARC authentication once reports arrive", async () => {
+    const data = overview({
+      domains: [
+        domain({
+          domain: "boxord.com",
+          sends: 100,
+          dmarc: { reports: 3, volume: 200, pass: 200, fail: 0, failRate: 0, windowDays: 14 },
+        }),
+      ],
+    });
+    render(<SendingHealthView load={vi.fn(async () => data)} />);
+    expect(await screen.findByText("Authentication (DMARC)")).toBeInTheDocument();
+    expect(screen.getByText(/100% passed/)).toBeInTheDocument();
+  });
+
+  it("warns when a domain's mail is failing DMARC authentication", async () => {
+    const data = overview({
+      domains: [
+        domain({
+          domain: "boxord.com",
+          sends: 100,
+          dmarc: { reports: 2, volume: 100, pass: 60, fail: 40, failRate: 0.4, windowDays: 14 },
+        }),
+      ],
+    });
+    render(<SendingHealthView load={vi.fn(async () => data)} />);
+    expect(await screen.findByText(/failed authentication/)).toBeInTheDocument();
+    expect(screen.getByText(/60% passed/)).toBeInTheDocument();
+  });
+
+  it("omits the per-domain DMARC row until reports have arrived", async () => {
+    const data = overview({ domains: [domain({ domain: "boxord.com", sends: 100 })] });
+    render(<SendingHealthView load={vi.fn(async () => data)} />);
+    await screen.findByText("boxord.com");
+    // The card has no DMARC sub-row (the page-level footnote uses different wording).
+    expect(screen.queryByText("Authentication (DMARC)")).not.toBeInTheDocument();
+  });
+
   it("shows an empty state when no domains have mailboxes", async () => {
     render(<SendingHealthView load={vi.fn(async () => overview({ domains: [] }))} />);
     expect(await screen.findByText(/No domains with mailboxes yet/)).toBeInTheDocument();

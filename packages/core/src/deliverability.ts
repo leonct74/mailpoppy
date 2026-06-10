@@ -108,6 +108,13 @@ export interface DomainDeliverability {
   /** Addresses we've stopped sending to that were triggered by this domain. */
   suppressedCount: number;
   windowDays: number;
+  /**
+   * DMARC aggregate-report rollup for this domain, when any reports have arrived.
+   * An advisory authentication signal (forwarders can cause benign fails), so
+   * it's shown alongside — not folded into — the main bounce/complaint health.
+   * See `./dmarc` (DomainDmarc / dmarcHealth).
+   */
+  dmarc?: import("./dmarc").DomainDmarc;
 }
 
 /** Account-wide header (paused/quota + the authoritative all-domains SES totals) + per-domain rows. */
