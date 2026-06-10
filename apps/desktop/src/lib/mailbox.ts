@@ -96,9 +96,17 @@ export function parseMailboxImport(input: {
   });
 }
 
-/** Fetch the friendly downloadable .xlsx template (base64) for a domain. */
-export function getMailboxImportTemplate(
+/**
+ * Generate the friendly .xlsx template and save it to the user's machine,
+ * returning where it landed. The sidecar writes the file (the webview can't),
+ * normally into the Downloads folder.
+ */
+export function saveMailboxImportTemplate(
   domain: string,
-): Promise<{ ok: true; filename: string; base64: string }> {
-  return sidecar(`/mailbox/import/template/${encodeURIComponent(domain)}`);
+): Promise<{ ok: true; path: string; filename: string; dir: string }> {
+  return sidecar(`/mailbox/import/template`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ domain }),
+  });
 }

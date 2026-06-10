@@ -430,13 +430,16 @@ app.post("/mailbox/import/parse", async (req, reply) => {
   }
 });
 
-// Read-only: generate the friendly downloadable .xlsx template for a domain,
-// returned as base64 so the webview can save it with a Blob.
-app.get("/mailbox/import/template/:domain", async (req, reply) => {
-  const domain = (req.params as { domain: string }).domain;
+// Generate the friendly .xlsx template and save it to the user's machine
+// (Downloads, falling back to temp). The webview can't trigger a real file save
+// itself — the opener plugin only hands http/https URLs to the OS — so the local
+// sidecar writes the file and returns where it landed for the UI to show.
+app.post("/mailbox/import/template", async (req, reply) => {
+  const b = (req.body ?? {}) as { domain?: string };
+  if (!b.domain) return reply.code(400).send({ ok: false, error: "domain is required" });
   try {
-    const buf = await mailboxImport.buildTemplateWorkbook(decodeURIComponent(domain));
-    return { ok: true, filename: `mailpoppy-mailboxes-${domain}.xlsx`, base64: buf.toString("base64") };
+    const saved = await mailboxImport.saveTemplate(b.domain);
+    return { ok: true, ...saved };
   } catch (err) {
     return reply.code(500).send({ ok: false, error: (err as Error).message });
   }

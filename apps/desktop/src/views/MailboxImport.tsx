@@ -3,7 +3,7 @@ import { Upload, Download, FileSpreadsheet, CheckCircle2, XCircle, AlertTriangle
 import type { MailboxImportPlan } from "@mailpoppy/core";
 import {
   parseMailboxImport as defaultParse,
-  getMailboxImportTemplate as defaultGetTemplate,
+  saveMailboxImportTemplate as defaultSaveTemplate,
   fileToBase64 as defaultFileToBase64,
   createMailbox as defaultCreateMailbox,
   type Mailbox,
@@ -36,7 +36,7 @@ export function MailboxImport({
   stackName,
   onImported,
   parse = defaultParse,
-  getTemplate = defaultGetTemplate,
+  saveTemplate = defaultSaveTemplate,
   readFileBase64 = defaultFileToBase64,
   createMailbox = defaultCreateMailbox,
   runMigration = defaultRunMigration,
@@ -45,7 +45,7 @@ export function MailboxImport({
   stackName?: string;
   onImported?: () => void;
   parse?: ParseFn;
-  getTemplate?: (domain: string) => Promise<{ ok: true; filename: string; base64: string }>;
+  saveTemplate?: (domain: string) => Promise<{ ok: true; path: string; filename: string; dir: string }>;
   readFileBase64?: (file: File) => Promise<string>;
   createMailbox?: CreateFn;
   runMigration?: MigrateFn;
@@ -58,6 +58,8 @@ export function MailboxImport({
   const [statuses, setStatuses] = useState<Record<number, RowStatus>>({});
   const [running, setRunning] = useState(false);
   const [finished, setFinished] = useState(false);
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [templateSaved, setTemplateSaved] = useState<{ filename: string; dir: string } | null>(null);
 
   function reset() {
     setFileName(null);
@@ -89,20 +91,18 @@ export function MailboxImport({
 
   async function downloadTemplate() {
     setParseError(null);
+    setTemplateSaved(null);
+    setSavingTemplate(true);
     try {
-      const { filename, base64 } = await getTemplate(domain);
-      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-      const blob = new Blob([bytes], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
+      // The webview can't trigger a file save (blob <a download> is ignored, and
+      // the opener plugin only allows http/https), so the local sidecar writes the
+      // file to disk for us and tells us where it landed.
+      const { filename, dir } = await saveTemplate(domain);
+      setTemplateSaved({ filename, dir });
     } catch (e) {
       setParseError(String(e));
+    } finally {
+      setSavingTemplate(false);
     }
   }
 
@@ -183,8 +183,8 @@ export function MailboxImport({
         <Button variant="secondary" size="sm" disabled={running} onClick={() => fileInput.current?.click()}>
           <Upload className="size-4" /> {plan || parsing ? "Choose a different file" : "Choose file"}
         </Button>
-        <Button variant="ghost" size="sm" disabled={running} onClick={() => void downloadTemplate()}>
-          <Download className="size-4" /> Download template
+        <Button variant="ghost" size="sm" disabled={running || savingTemplate} onClick={() => void downloadTemplate()}>
+          {savingTemplate ? <Spinner /> : <Download className="size-4" />} Download template
         </Button>
         {fileName && (
           <span className="truncate font-mono text-xs text-on-surface-variant" title={fileName}>
@@ -192,6 +192,13 @@ export function MailboxImport({
           </span>
         )}
       </div>
+
+      {templateSaved && (
+        <div className="mt-2 rounded-lg border border-secondary/30 bg-secondary/10 p-2.5 text-sm text-on-surface">
+          ✅ Template saved as <b>{templateSaved.filename}</b> in{" "}
+          <code className="font-mono text-xs text-on-surface-variant">{templateSaved.dir}</code>.
+        </div>
+      )}
 
       {parsing && (
         <div className="mt-3 flex items-center gap-2 text-sm text-on-surface-variant">

@@ -1,16 +1,9 @@
-import { describe, it, expect, vi, beforeAll, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import { MailboxImport } from "./MailboxImport";
 import type { MailboxImportPlan } from "@mailpoppy/core";
 
 afterEach(() => cleanup());
-
-// jsdom has no Blob URL / anchor-download plumbing — stub it for the template test.
-beforeAll(() => {
-  (URL.createObjectURL as unknown) = vi.fn(() => "blob:mock");
-  (URL.revokeObjectURL as unknown) = vi.fn();
-  HTMLAnchorElement.prototype.click = vi.fn();
-});
 
 const BACKEND = {
   ok: true as const,
@@ -49,7 +42,12 @@ function deps(over: Partial<Parameters<typeof MailboxImport>[0]> = {}) {
     stackName: "MailpoppyMailStack",
     readFileBase64: vi.fn(async () => "QkFTRTY0"),
     parse: vi.fn(async () => ({ ok: true as const, plan: plan() })),
-    getTemplate: vi.fn(async () => ({ ok: true as const, filename: "mailpoppy-mailboxes-acme.com.xlsx", base64: "UEs=" })),
+    saveTemplate: vi.fn(async () => ({
+      ok: true as const,
+      path: "/Users/me/Downloads/mailpoppy-mailboxes-acme.com.xlsx",
+      filename: "mailpoppy-mailboxes-acme.com.xlsx",
+      dir: "/Users/me/Downloads",
+    })),
     createMailbox: vi.fn(async (input: { email: string }) => ({ ...BACKEND, mailbox: { email: input.email, status: "CONFIRMED" } })),
     runMigration: vi.fn(async () => ({
       ok: true as const,
@@ -70,13 +68,16 @@ function pickFile() {
 }
 
 describe("MailboxImport", () => {
-  it("makes the optional nature of IMAP explicit and offers a template download", async () => {
+  it("makes the optional nature of IMAP explicit and saves the template to disk", async () => {
     const d = deps();
     render(<MailboxImport {...d} />);
 
     expect(screen.getByText(/the IMAP columns are/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Download template/i }));
-    await waitFor(() => expect(d.getTemplate).toHaveBeenCalledWith("acme.com"));
+    await waitFor(() => expect(d.saveTemplate).toHaveBeenCalledWith("acme.com"));
+    // The UI confirms where the file landed (the webview can't pop a save dialog).
+    expect(await screen.findByText(/Template saved as/i)).toBeInTheDocument();
+    expect(screen.getByText("/Users/me/Downloads")).toBeInTheDocument();
   });
 
   it("parses a chosen file and previews valid/migrate/error counts per row", async () => {
