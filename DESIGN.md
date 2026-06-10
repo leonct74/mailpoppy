@@ -686,6 +686,59 @@ live-verified on ollydigital.com:**
 
 **Phase 6 — Mobile.** Flutter/React Native client; Cognito auth; SNS → APNs/FCM push.
 
+**Phase 7 — Integrations & AI platform.** Make Mailpoppy a *hub*, not an island — and do it the
+BYO-AWS way: integration logic and AI inference run **inside the customer's own AWS account**, so
+mail content and third-party credentials never pass through a Mailpoppy-hosted middleman. This is
+on-brand with "your mail, your cloud, no lock-in" and reuses the same zero-marginal-cost margin
+model as storage/transport (the customer pays their own AWS/AI bill; Mailpoppy ships software).
+Sequenced so each step is a durable primitive the next builds on:
+
+1. **Event/webhook emission (foundation).** The `inbound-processor` emits a "new mail" (and
+   rule-matched) event → EventBridge/SNS → a customer-configured webhook. One primitive powers
+   everything downstream (e.g. *new mail from a lead → log it on the CRM deal*). Cheapest,
+   highest-leverage; an opt-in addition to the existing inbound pipeline.
+2. **Public API + machine auth.** Promote the Cognito-JWT `access-api` into a documented, stable
+   contract with **service credentials (API keys)** + rate limiting, so customers/partners build
+   their own integrations ("custom solutions"). Low effort over what already exists; lets *others*
+   do the per-app work.
+3. **iPaaS connector (Zapier / Make / n8n).** One connector built against the step-2 API ⇒
+   "integrates with thousands of apps" — the breadth play before any bespoke connector.
+4. **First-party CRM connectors** (HubSpot / Salesforce / Pipedrive / Zoho …), **on demand.**
+   Highest perceived value but a per-API maintenance treadmill (each has its own auth + object
+   model that drifts) — build only where real customer pull exists, never speculatively.
+
+**AI layer (rides on 1 + 2; *where the model runs* is the design crux).** The privacy promise
+forbids silently shipping mail to a third-party model, so the model destination is **explicit and
+customer-controlled** — which turns into a differentiator the big SaaS players can't match:
+
+- **Amazon Bedrock** — runs the model inside the customer's own AWS account/region; mail never
+  leaves their boundary; inference billed on *their* AWS bill. The natural default for an all-AWS
+  product.
+- **Bring-your-own-AI-key** — the customer's own OpenAI/Anthropic key, stored in *their* AWS
+  Secrets Manager; calls go from their AWS to the provider. Mailpoppy sees neither key nor content.
+- Headline: *"AI in your own cloud (Bedrock) or with your own key — your mail is never handed to a
+  third-party AI vendor."* Mailpoppy pays **zero** inference cost.
+
+AI splits two ways:
+- **(A) AI features *for* the user:** thread/inbox summarize ("catch me up"), smart compose/reply,
+  AI triage/priority, and **structured extraction** (lead / invoice / action-item) — which feeds
+  primitive (1) → CRM (*arrive → extract → webhook → CRM*), so AI and integrations reinforce each
+  other.
+- **(B) Mailpoppy *as a tool for* AI agents:** expose the mailbox as an **MCP server** (a thin,
+  agent-friendly wrapper over the step-2 API) so a user's own Claude/agent can read, search and
+  send mail natively. The flagship, most-differentiating bet — and bounded. Then **(C) agentic
+  inbound automation** (an agent watches the inbox, classifies / routes / drafts), with
+  **human-in-the-loop for sending by default** (a wrong auto-send in email is costly).
+
+**Monetization:** integrations + AI are the premium hook the *single-domain* SMB will actually pay
+for — broadening the paid tier beyond the multi-domain minority — at near-zero marginal cost to us
+(BYO-AWS / BYO-AI). Likely a Business / "Pro+" tier or add-on (see §12 / §20).
+
+**Cautions:** never silently route mail to a third-party model (it's both a trust requirement and
+the best marketing); don't try to "do all the AI / all the CRMs" — ship one or two high-value
+features + the MCP server and expand on demand; give AI **cost/usage visibility** even though it's
+the customer's own bill.
+
 ---
 
 ## 19. Tech stack (decided)
@@ -725,17 +778,32 @@ API, so it's cross-platform TS (an admin can manage users from mobile too).
 
 - Single combined app (role-aware) vs. separate admin + mail-client apps. *(Leaning: single,
   role-aware.)*
-- IAM least-privilege policy: ✅ **done** in `infra/policies/`. Two validated policies (both
-  pass `accessanalyzer validate-policy` with no findings): the narrow **provisioning** policy
-  (direct-API Route53/SES/S3, S3 scoped to `mailpoppy-*`, + read-only CloudFormation for the
-  §14.1 inventory view) and the broader **deploy-time** policy for the `cloudformation:CreateStack`
+- IAM least-privilege policy: ✅ **done** in `infra/policies/`. The narrow **provisioning** policy
+  now covers the full sidecar surface — Route53 / SES / S3 / **DynamoDB** / **Cognito** /
+  CloudFormation (incl. `CreateStack`/`UpdateStack`/`DeleteStack`), scoped to `mailpoppy-*` /
+  `mailpoppymailstack-*` / `MailpoppyMailStack-*` where AWS allows — and is kept **exact to the
+  sidecar's AWS-SDK commands** (no gaps, no excess) with the `.json` and `.yaml` forms in lock-step
+  (re-verified 2026-06-10). The broader **deploy-time** policy for the `cloudformation:CreateStack`
   path (CFN/IAM/Lambda/DynamoDB/Cognito/API GW/SNS/EventBridge/SES/S3/Logs, scoped to
-  `MailpoppyMailStack-*`/`mailpoppy*`), shipped with a CloudFormation **service role** so the
-  admin's own identity stays at `cloudformation:* + iam:PassRole`.
+  `MailpoppyMailStack-*`/`mailpoppy*`) ships with a CloudFormation **service role** so the admin's
+  own identity stays at `cloudformation:* + iam:PassRole`.
 - DynamoDB key schema details + which GSIs (depends on search/threading needs).
 - Calendar/contacts (CalDAV/CardDAV) — WorkMail had them; out of MVP scope, revisit for parity.
 - Whether to support a hosted-web client later (would change the BYO-AWS trust model — a web
   backend would have to hold credentials).
 - Final **one-time** per-domain price (annual updates ceiling locked at ≤ $15/yr) + free-tier
-  feature gating.
+  feature gating. *(Under discussion: simplify to a two-tier Free [1 domain, unlimited mailboxes,
+  all clients] / **Pro $15.99** [unlimited domains] model with free iOS/Android clients on both
+  tiers — pending two decisions: **one-time vs annual** (leaning annual, since perpetual upkeep of
+  three clients + a license server can't be funded one-time) and **$ vs €**. If it goes annual, the
+  "pay once / no subscription" taglines in README + CLAUDE.md must be retired.)*
+- **Integrations & AI (Phase 7) — tiering:** dedicated Business/"Pro+" tier vs. à-la-carte add-on
+  vs. bundled into Pro. This is the lever that monetizes the single-domain SMB majority (Pro's
+  unlimited-domains hook only reaches the multi-domain minority).
+- **AI default destination:** Amazon Bedrock (in-account) vs. bring-your-own-key as the
+  out-of-the-box path; which models/regions; how to surface cost/usage.
+- **MCP server hosting:** an in-customer-AWS endpoint vs. the local desktop sidecar, and the auth
+  model for third-party agents (service credentials / scopes).
+- **First CRM connector:** which one to build first — demand-driven (HubSpot / Salesforce /
+  Pipedrive / Zoho), only after the generic webhook + iPaaS primitives prove pull.
 - Trademark clearance outcome for "Mailpoppy."
