@@ -684,6 +684,19 @@ live-verified on ollydigital.com:**
     (changeset-reviewed) UpdateStack, not the Lambda-only kind. **Phase 5 deliverability now
     complete.**
 
+- **First-run onboarding for AWS newcomers + in-app credential entry** (2026-06-10) — Setup → Step 0
+  previously assumed an AWS-literate admin: the "no credentials" help jumped straight to `aws
+  configure` / profiles / SSO, which only helps if you already have an account and keys. Added a
+  guided **"Connect your AWS account"** panel (`views/AwsOnboarding.tsx`), shown when no credentials
+  resolve — plain-language steps to create a free account (with honest cost + credit-card
+  expectations and links to AWS sign-up, the IAM console, and the Mailpoppy provisioning policy)
+  **plus an in-app key-entry form so setup never needs a terminal.** Pasted keys are persisted by the
+  sidecar (`POST /aws/credentials`) as a dedicated `[mailpoppy]` profile in `~/.aws/credentials`
+  (0600, every other profile preserved — via the pure, unit-tested `upsertIniSection` in
+  `@mailpoppy/core`); `ctx()` auto-resolves that profile on later launches, so keys survive restarts.
+  CLI/SSO power users keep their flow under an "Advanced" disclosure. We can't create the AWS account
+  for them (AWS needs their own email + card), so it's a guided hand-hold, not automation.
+
 **Phase 6 — Mobile.** Flutter/React Native client; Cognito auth; SNS → APNs/FCM push.
 
 **Phase 7 — Integrations & AI platform.** Make Mailpoppy a *hub*, not an island — and do it the

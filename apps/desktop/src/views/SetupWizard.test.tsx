@@ -59,9 +59,11 @@ describe("SetupWizard · Step 0 readiness gate", () => {
     render(<SetupWizard />);
 
     expect(await screen.findByText(/No usable AWS credentials/i)).toBeInTheDocument();
-    // Guidance should point at the profiles file and how to list profile names.
-    expect(screen.getByText("~/.aws/credentials")).toBeInTheDocument();
-    expect(screen.getByText("aws configure list-profiles")).toBeInTheDocument();
+    // The guided "connect your AWS account" panel appears — account sign-up help
+    // plus an in-app key-entry form, so a newcomer never needs a terminal.
+    expect(screen.getByText(/Connect your AWS account/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /aws\.amazon\.com\/free/i })).toBeInTheDocument();
+    expect(screen.getByLabelText("Access Key ID")).toBeInTheDocument();
     // Domain input is gated until ready.
     expect(screen.getByPlaceholderText("yourdomain.com")).toBeDisabled();
   });
@@ -77,7 +79,7 @@ describe("SetupWizard · Step 0 readiness gate", () => {
 
     render(<SetupWizard />);
 
-    expect(await screen.findByText(/Action needed before setup/i)).toBeInTheDocument();
+    expect(await screen.findByText(/permission is missing/i)).toBeInTheDocument();
     expect(screen.getByText(/access denied/i)).toBeInTheDocument();
     expect(screen.getByText(/AdministratorAccess/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText("yourdomain.com")).toBeDisabled();

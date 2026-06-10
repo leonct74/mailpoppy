@@ -7,6 +7,7 @@ import { saveDeploymentConfig, loadDeploymentConfig, resolveStackName, DEFAULT_S
 import { MailboxStorageRow } from "./MailboxStorageRow";
 import { MailFromSetup } from "./MailFromSetup";
 import { RegionPicker } from "./RegionPicker";
+import { AwsOnboarding } from "./AwsOnboarding";
 import { AdminPrivacyNotice } from "./AdminPrivacyNotice";
 import { Card, Button, Spinner, cn } from "../ui";
 
@@ -504,39 +505,27 @@ export function SetupWizard({
               </div>
             )}
 
-            {!ready && (
+            {/* No usable credentials → the guided "connect your AWS account" panel
+                (create an account + IAM keys, or paste keys you already have).
+                Power-user CLI/SSO guidance lives under its "Advanced" disclosure. */}
+            {!ready && !readiness.credentials.ok && (
+              <AwsOnboarding
+                onResult={(r) => setReadiness(r)}
+                onRecheck={() => void loadReadiness()}
+                cliInstalled={readiness.cli.installed}
+              />
+            )}
+            {/* Credentials resolve but a service permission is missing. */}
+            {!ready && readiness.credentials.ok && (
               <Warn>
-                <b>Action needed before setup:</b>
+                <b>Almost there — a permission is missing:</b>
                 <ul className="ml-4 mt-1.5 list-disc space-y-2">
-                  {!readiness.credentials.ok && (
-                    <li>
-                      <b>Make AWS credentials available, then re-check.</b>
-                      <div className="mt-1">
-                        The app uses your AWS credential profiles in <C>~/.aws/credentials</C> and <C>~/.aws/config</C>. To
-                        target a specific one, start the app with <C>AWS_PROFILE=&lt;profile-name&gt; AWS_REGION=eu-west-1</C>.
-                      </div>
-                      <ul className="ml-4 mt-1 list-disc space-y-1">
-                        <li>
-                          <C>&lt;profile-name&gt;</C> is the <b>name</b> in brackets in those files (e.g. <C>[default]</C> →{" "}
-                          <C>default</C>) — <b>not</b> your AWS account number. List them with <C>aws configure list-profiles</C>.
-                        </li>
-                        <li>
-                          If you have a <C>[default]</C> profile, you can omit <C>AWS_PROFILE</C> entirely.
-                        </li>
-                        <li>
-                          No profiles yet? Run <C>aws configure</C>
-                          {readiness.cli.installed ? "" : " (after installing the AWS CLI)"} or <C>aws sso login</C>.
-                        </li>
-                      </ul>
+                  {SERVICES.filter((k) => readiness.permissions[k] !== "ok").map((k) => (
+                    <li key={k}>
+                      <b>{k}</b>: {readiness.permissions[k] === "denied" ? "access denied — this identity lacks permission" : "could not verify"}.
+                      Attach <b>AdministratorAccess</b> (or the Mailpoppy provisioning policy) to <C>{readiness.credentials.arn}</C>.
                     </li>
-                  )}
-                  {readiness.credentials.ok &&
-                    SERVICES.filter((k) => readiness.permissions[k] !== "ok").map((k) => (
-                      <li key={k}>
-                        <b>{k}</b>: {readiness.permissions[k] === "denied" ? "access denied — this identity lacks permission" : "could not verify"}.
-                        Attach <b>AdministratorAccess</b> (or the Mailpoppy provisioning policy) to <C>{readiness.credentials.arn}</C>.
-                      </li>
-                    ))}
+                  ))}
                 </ul>
                 <Button variant="secondary" size="sm" className="mt-3" onClick={() => void loadReadiness()} disabled={checking}>
                   <RefreshCw className="size-3.5" /> Re-check

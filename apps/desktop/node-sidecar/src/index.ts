@@ -7,6 +7,7 @@ import Fastify from "fastify";
 import * as prov from "./provisioning";
 import * as migration from "./migration";
 import { readLedger } from "./ledger";
+import { writeMailpoppyProfile, mailpoppyProfileExists, MAILPOPPY_PROFILE } from "./awsProfile";
 import { SES_INBOUND_REGIONS } from "@mailpoppy/core";
 
 const app = Fastify({ logger: true });
@@ -102,9 +103,15 @@ app.setErrorHandler((err, _req, reply) => {
 // re-applies its saved choice on launch. Route53 stays global (pinned in clients()).
 let currentRegion = process.env.AWS_REGION ?? "eu-west-1";
 
+// The active credential profile. An explicit AWS_PROFILE (power users) always
+// wins; otherwise, if the in-app key entry has previously written a [mailpoppy]
+// profile, we resolve from it — so pasted keys persist across restarts without a
+// terminal. undefined → the SDK's default provider chain (env / default / SSO).
+let currentProfile: string | undefined = process.env.AWS_PROFILE ?? (mailpoppyProfileExists() ? MAILPOPPY_PROFILE : undefined);
+
 const ctx = (): prov.AwsContext => ({
   region: currentRegion,
-  profile: process.env.AWS_PROFILE,
+  profile: currentProfile,
 });
 
 app.get("/health", async () => ({ ok: true }));
@@ -126,6 +133,29 @@ app.post("/config/region", async (req, reply) => {
 // Step 0: is this environment able to provision at all? (credentials + per-service
 // permission probes + optional CLI detection). Run before anything mutating.
 app.get("/aws/readiness", async () => prov.checkReadiness(ctx()));
+
+// In-app credential entry (onboarding for users with no CLI/profile set up).
+// Persists the pasted keys as a `[mailpoppy]` profile in ~/.aws/credentials
+// (0600, other profiles untouched), switches the sidecar to use it, then returns
+// a fresh readiness so the UI can confirm the keys actually work. Bad keys aren't
+// an error — readiness will simply show credentials not ok, which the UI surfaces.
+app.post("/aws/credentials", async (req, reply) => {
+  const b = (req.body ?? {}) as { accessKeyId?: string; secretAccessKey?: string; sessionToken?: string };
+  if (!b.accessKeyId?.trim() || !b.secretAccessKey?.trim()) {
+    return reply.code(400).send({ ok: false, error: "Both an Access Key ID and a Secret Access Key are required." });
+  }
+  try {
+    writeMailpoppyProfile({
+      accessKeyId: b.accessKeyId,
+      secretAccessKey: b.secretAccessKey,
+      sessionToken: b.sessionToken,
+    });
+  } catch (e) {
+    return reply.code(500).send({ ok: false, error: (e as Error).message });
+  }
+  currentProfile = MAILPOPPY_PROFILE; // use the just-written keys from now on
+  return prov.checkReadiness(ctx());
+});
 
 // Read-only: confirm credentials + that the domain's zone exists (wizard step 1).
 app.get("/aws/preflight/:domain", async (req) => {
