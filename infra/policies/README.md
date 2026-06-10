@@ -10,21 +10,28 @@ IAM user/role you run Mailpoppy as, **instead of full `AdministratorAccess`**.
 
 ## What it grants (current scope)
 
-Covers what the app does **today** — the direct Route53 / SES / S3 provisioning proven in
-`phase0-derisk.md`:
+Covers everything the desktop sidecar does directly in the customer's account — domain setup,
+backend stack lifecycle, mailbox admin, IMAP migration, per-domain settings, and the
+Sending-health reads. The table below is kept **exactly** in step with the AWS SDK commands in
+`apps/desktop/node-sidecar/src/{provisioning,migration}.ts` — no gaps, no excess.
 
-| Service | Why |
-|---|---|
-| `sts:GetCallerIdentity` | Readiness: confirm credentials resolve |
-| Route53 (list/get/change RRsets, GetChange) | Publish MX / SPF / DKIM / DMARC |
-| SES (email identity, receipt rules, send, `GetSendStatistics`) | Verify the domain, receive → S3, send, and read bounce/complaint stats for the sending-health view |
-| `s3:ListAllMyBuckets` | Readiness probe |
-| S3 on `arn:aws:s3:::mailpoppy-*` | Create/configure the mail bucket + objects |
-| CloudFormation read on `stack/MailpoppyMailStack/*` | The **resource transparency view** (DESIGN §14.1) reads the deployed stack's inventory via `DescribeStackResources` |
+| Service | Actions | Why |
+|---|---|---|
+| STS | `GetCallerIdentity` | Readiness: confirm credentials resolve |
+| Route53 (`Resource: *`) | `ListHostedZonesByName`, `ListResourceRecordSets`, `ChangeResourceRecordSets` | Publish (and on teardown remove) MX / SPF / DKIM / DMARC records |
+| SES (`Resource: *`) | `CreateEmailIdentity`, `GetEmailIdentity`, `ListEmailIdentities`, `DeleteEmailIdentity`, `GetAccount`, `GetSendStatistics`, `PutAccountDetails`, `PutEmailIdentityMailFromAttributes`, `SendEmail`, `CreateReceiptRuleSet`, `CreateReceiptRule`, `DescribeActiveReceiptRuleSet`, `SetActiveReceiptRuleSet` | Verify the domain, route inbound → S3, send test mail, sandbox-exit (`PutAccountDetails`), custom MAIL FROM (`PutEmailIdentityMailFromAttributes`), and read account sending/bounce stats for the Sending-health view |
+| S3 readiness (`Resource: *`) | `ListAllMyBuckets` | Readiness probe |
+| S3 on `mailpoppy-*` + `mailpoppymailstack-*` | bucket: `CreateBucket`, `DeleteBucket`, `PutBucketPolicy`, `ListBucket`; object: `PutObject`, `DeleteObject` | Create the deploy bucket + upload the stack template/Lambda zip; write **migrated** mail into the mail bucket; empty + delete both buckets on teardown |
+| CloudFormation on `stack/MailpoppyMailStack/*` | `DescribeStacks`, `DescribeStackResources`, `CreateStack`, `UpdateStack`, `DeleteStack` | Deploy / update / tear down the backend stack, and read its inventory for the resource-transparency view (DESIGN §14.1) |
+| DynamoDB on `table/MailpoppyMailStack-*` | `PutItem`, `BatchWriteItem`, `GetItem`, `Query`, `Scan`, `DeleteItem`, `DeleteTable` | Write migrated messages + per-mailbox quota / per-domain settings; **`Scan`** powers the Sending-health suppression-list (`SUPPRESS#`) and per-domain bounce/complaint + DMARC counter reads; `DeleteTable` on teardown |
+| Cognito on `userpool/*` | `AdminCreateUser`, `AdminSetUserPassword`, `AdminDeleteUser`, `ListUsers`, `DeleteUserPool` | Create / list / delete mailboxes (Cognito users); delete the pool on teardown |
 
-**Scoping notes:** S3 is locked to **`mailpoppy-*`** buckets (the app's naming convention).
-Route53 and SES use `Resource: "*"` because AWS offers only coarse resource-level control for
-those actions — the tightening here is via the explicit *action* allow-list.
+**Scoping notes:** S3 is locked to **`mailpoppy-*`** (deploy bucket) and **`mailpoppymailstack-*`**
+(the stack's mail bucket); DynamoDB to **`MailpoppyMailStack-*`** tables; CloudFormation to the
+**`MailpoppyMailStack`** stack. Route53, SES and Cognito use `Resource: "*"` because AWS offers
+only coarse resource-level control for those actions (the Cognito user-pool id is created at
+deploy time and isn't known in advance) — the tightening there is via the explicit *action*
+allow-list. Both policy files (`.json` and `.yaml`) grant an identical action set.
 
 ## Apply it
 

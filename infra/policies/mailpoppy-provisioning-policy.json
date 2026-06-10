@@ -12,11 +12,8 @@
       "Effect": "Allow",
       "Action": [
         "route53:ListHostedZonesByName",
-        "route53:ListHostedZones",
-        "route53:GetHostedZone",
         "route53:ListResourceRecordSets",
-        "route53:ChangeResourceRecordSets",
-        "route53:GetChange"
+        "route53:ChangeResourceRecordSets"
       ],
       "Resource": "*"
     },
@@ -35,8 +32,6 @@
         "ses:SendEmail",
         "ses:CreateReceiptRuleSet",
         "ses:CreateReceiptRule",
-        "ses:DeleteReceiptRule",
-        "ses:DeleteReceiptRuleSet",
         "ses:DescribeActiveReceiptRuleSet",
         "ses:SetActiveReceiptRuleSet"
       ],
@@ -54,9 +49,6 @@
       "Action": [
         "cloudformation:DescribeStacks",
         "cloudformation:DescribeStackResources",
-        "cloudformation:ListStackResources",
-        "cloudformation:DescribeStackEvents",
-        "cloudformation:GetTemplate",
         "cloudformation:CreateStack",
         "cloudformation:UpdateStack",
         "cloudformation:DeleteStack"
@@ -70,9 +62,6 @@
         "s3:CreateBucket",
         "s3:DeleteBucket",
         "s3:PutBucketPolicy",
-        "s3:GetBucketPolicy",
-        "s3:PutLifecycleConfiguration",
-        "s3:GetLifecycleConfiguration",
         "s3:ListBucket"
       ],
       "Resource": "arn:aws:s3:::mailpoppy-*"
@@ -80,7 +69,7 @@
     {
       "Sid": "S3MailpoppyObjects",
       "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Action": ["s3:PutObject", "s3:DeleteObject"],
       "Resource": "arn:aws:s3:::mailpoppy-*/*"
     },
     {
@@ -92,7 +81,7 @@
     {
       "Sid": "StackObjects",
       "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Action": ["s3:PutObject", "s3:DeleteObject"],
       "Resource": "arn:aws:s3:::mailpoppymailstack-*/*"
     },
     {
@@ -115,7 +104,6 @@
       "Action": [
         "cognito-idp:AdminCreateUser",
         "cognito-idp:AdminSetUserPassword",
-        "cognito-idp:AdminGetUser",
         "cognito-idp:AdminDeleteUser",
         "cognito-idp:ListUsers",
         "cognito-idp:DeleteUserPool"

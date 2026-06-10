@@ -1,9 +1,15 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Mailpoppy provisioning policy — least-privilege permissions for the Mailpoppy
-  desktop app to set up domain email (Route53 + SES + S3). Creates a customer-managed
-  IAM policy you can attach to the IAM user/role you run Mailpoppy as, instead of
-  granting full AdministratorAccess. S3 access is scoped to "mailpoppy-*" buckets.
+  desktop app to set up and run domain email (Route53 + SES + S3 + DynamoDB +
+  Cognito + CloudFormation). Creates a customer-managed IAM policy you can attach
+  to the IAM user/role you run Mailpoppy as, instead of granting full
+  AdministratorAccess. S3/DynamoDB access is scoped to "mailpoppy-*" /
+  "MailpoppyMailStack-*" resources.
+
+  This document is kept in lock-step with infra/policies/mailpoppy-provisioning-policy.json
+  (the canonical policy). Both grant exactly the AWS actions the sidecar calls in
+  apps/desktop/node-sidecar/src/{provisioning,migration}.ts — no more, no less.
 
 Parameters:
   AttachToUser:
@@ -34,11 +40,8 @@ Resources:
             Effect: Allow
             Action:
               - route53:ListHostedZonesByName
-              - route53:ListHostedZones
-              - route53:GetHostedZone
               - route53:ListResourceRecordSets
               - route53:ChangeResourceRecordSets
-              - route53:GetChange
             Resource: "*"
           - Sid: Ses
             Effect: Allow
@@ -49,11 +52,11 @@ Resources:
               - ses:DeleteEmailIdentity
               - ses:GetAccount
               - ses:GetSendStatistics
+              - ses:PutAccountDetails
+              - ses:PutEmailIdentityMailFromAttributes
               - ses:SendEmail
               - ses:CreateReceiptRuleSet
               - ses:CreateReceiptRule
-              - ses:DeleteReceiptRule
-              - ses:DeleteReceiptRuleSet
               - ses:DescribeActiveReceiptRuleSet
               - ses:SetActiveReceiptRuleSet
             Resource: "*"
@@ -61,12 +64,14 @@ Resources:
             Effect: Allow
             Action: ["s3:ListAllMyBuckets"]
             Resource: "*"
-          - Sid: CloudFormationReadForInventory
+          - Sid: CloudFormationStack
             Effect: Allow
             Action:
               - cloudformation:DescribeStacks
               - cloudformation:DescribeStackResources
-              - cloudformation:ListStackResources
+              - cloudformation:CreateStack
+              - cloudformation:UpdateStack
+              - cloudformation:DeleteStack
             Resource: "arn:aws:cloudformation:*:*:stack/MailpoppyMailStack/*"
           - Sid: S3MailpoppyBuckets
             Effect: Allow
@@ -74,18 +79,46 @@ Resources:
               - s3:CreateBucket
               - s3:DeleteBucket
               - s3:PutBucketPolicy
-              - s3:GetBucketPolicy
-              - s3:PutLifecycleConfiguration
-              - s3:GetLifecycleConfiguration
               - s3:ListBucket
             Resource: "arn:aws:s3:::mailpoppy-*"
           - Sid: S3MailpoppyObjects
             Effect: Allow
             Action:
-              - s3:GetObject
               - s3:PutObject
               - s3:DeleteObject
             Resource: "arn:aws:s3:::mailpoppy-*/*"
+          - Sid: StackBucket
+            Effect: Allow
+            Action:
+              - s3:ListBucket
+              - s3:DeleteBucket
+            Resource: "arn:aws:s3:::mailpoppymailstack-*"
+          - Sid: StackObjects
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource: "arn:aws:s3:::mailpoppymailstack-*/*"
+          - Sid: StackTables
+            Effect: Allow
+            Action:
+              - dynamodb:PutItem
+              - dynamodb:BatchWriteItem
+              - dynamodb:GetItem
+              - dynamodb:Query
+              - dynamodb:Scan
+              - dynamodb:DeleteItem
+              - dynamodb:DeleteTable
+            Resource: "arn:aws:dynamodb:*:*:table/MailpoppyMailStack-*"
+          - Sid: MailboxAdmin
+            Effect: Allow
+            Action:
+              - cognito-idp:AdminCreateUser
+              - cognito-idp:AdminSetUserPassword
+              - cognito-idp:AdminDeleteUser
+              - cognito-idp:ListUsers
+              - cognito-idp:DeleteUserPool
+            Resource: "arn:aws:cognito-idp:*:*:userpool/*"
 
 Outputs:
   PolicyArn:
