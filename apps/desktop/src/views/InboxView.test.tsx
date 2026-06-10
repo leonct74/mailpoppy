@@ -49,6 +49,22 @@ describe("InboxView", () => {
     expect(client.list).toHaveBeenCalledWith({ folder: "inbox", limit: 100 });
   });
 
+  it("shows which mailbox is signed in", async () => {
+    const client = mockClient();
+    render(<InboxView client={client} mailboxEmail="you@ollydigital.com" />);
+
+    expect(await screen.findByText("Signed in as")).toBeInTheDocument();
+    expect(screen.getAllByText("you@ollydigital.com").length).toBeGreaterThan(0);
+  });
+
+  it("omits the mailbox identity header when no mailbox is given (e.g. demo mode)", async () => {
+    const client = mockClient();
+    render(<InboxView client={client} />);
+
+    await screen.findByRole("button", { name: "Open: Hello from test" });
+    expect(screen.queryByText("Signed in as")).not.toBeInTheDocument();
+  });
+
   it("opens a message, renders its body and marks it read", async () => {
     const client = mockClient();
     render(<InboxView client={client} />);

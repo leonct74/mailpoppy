@@ -15,6 +15,7 @@ import {
   Forward,
   MailOpen,
   Mail,
+  AtSign,
   Undo2,
   Download,
   X,
@@ -71,10 +72,14 @@ export function InboxView({
   client,
   demo,
   onConnect,
+  mailboxEmail,
 }: {
   client?: MailClient;
   demo?: boolean;
   onConnect?: () => void;
+  /** The signed-in mailbox address, shown atop the folder pane so it's always
+   *  clear which inbox you're viewing. Omitted in demo mode. */
+  mailboxEmail?: string | null;
 }) {
   const mail = useMemo<MailClient>(() => client ?? makeMailClient(), [client]);
 
@@ -257,6 +262,17 @@ export function InboxView({
       <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-low shadow-lg">
         {/* Pane 1 — folders & actions */}
         <div className="flex w-60 shrink-0 flex-col border-r border-outline-variant/20 bg-surface-container-lowest/60">
+          {mailboxEmail && (
+            <div className="flex items-center gap-2.5 border-b border-outline-variant/10 px-4 py-3" title={mailboxEmail}>
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary-container/20 text-primary">
+                <AtSign className="size-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">Signed in as</div>
+                <div className="truncate text-sm font-medium text-on-surface">{mailboxEmail}</div>
+              </div>
+            </div>
+          )}
           <div className="border-b border-outline-variant/10 p-4">
             <Button className="w-full" onClick={() => setComposeInit({ to: [], subject: "", text: "" })}>
               <PenSquare className="size-4" />

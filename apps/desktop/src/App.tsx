@@ -107,7 +107,7 @@ function InboxTab({ prefillEmail }: { prefillEmail?: string | null }) {
           Disconnect
         </button>
       </div>
-      {liveClient && <InboxView client={liveClient} />}
+      {liveClient && <InboxView client={liveClient} mailboxEmail={auth?.currentEmail() ?? null} />}
     </>
   );
 }

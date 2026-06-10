@@ -25,6 +25,9 @@ export interface Authenticator {
   getToken(): Promise<string>;
   signOut(): void;
   hasSession(): boolean;
+  /** The signed-in mailbox address, or null when signed out. Works for sessions
+   *  restored across restarts (Cognito persists the last user in localStorage). */
+  currentEmail(): string | null;
 }
 
 export class CognitoAuth implements Authenticator {
@@ -86,5 +89,12 @@ export class CognitoAuth implements Authenticator {
 
   hasSession(): boolean {
     return this.pool.getCurrentUser() != null;
+  }
+
+  currentEmail(): string | null {
+    // Users sign in with their email as the Cognito username, so getUsername()
+    // is the mailbox address. getCurrentUser() reads the persisted LastAuthUser,
+    // so this resolves on a restored session without needing getSession().
+    return this.pool.getCurrentUser()?.getUsername() ?? null;
   }
 }
