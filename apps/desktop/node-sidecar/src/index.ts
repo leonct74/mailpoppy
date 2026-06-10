@@ -411,7 +411,7 @@ app.post("/mailbox/quota", async (req, reply) => {
 // shows the plan as a preview, then drives the existing /mailbox/create and
 // /migrate/imap/run routes per row, so it can show progress and survive a bad row.
 app.post("/mailbox/import/parse", async (req, reply) => {
-  const b = (req.body ?? {}) as { domain?: string; fileBase64?: string };
+  const b = (req.body ?? {}) as { domain?: string; fileBase64?: string; filename?: string };
   if (!b.domain) return reply.code(400).send({ ok: false, error: "domain is required" });
   if (!b.fileBase64) return reply.code(400).send({ ok: false, error: "fileBase64 (the spreadsheet) is required" });
   let buffer: Buffer;
@@ -421,7 +421,7 @@ app.post("/mailbox/import/parse", async (req, reply) => {
     return reply.code(400).send({ ok: false, error: "the uploaded file could not be decoded" });
   }
   try {
-    const plan = await mailboxImport.planFromBuffer(buffer, b.domain);
+    const plan = await mailboxImport.planFromBuffer(buffer, b.domain, b.filename);
     return { ok: true, plan };
   } catch (err) {
     // Malformed/unreadable spreadsheet or no recognizable columns → 400 (client

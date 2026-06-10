@@ -93,7 +93,7 @@ describe("MailboxImport", () => {
     expect(screen.getByText(/problems and will be skipped/i)).toBeInTheDocument();
     // The bad row surfaces its reason.
     expect(screen.getByText(/address is on other\.com/)).toBeInTheDocument();
-    expect(d.parse).toHaveBeenCalledWith({ domain: "acme.com", fileBase64: "QkFTRTY0" });
+    expect(d.parse).toHaveBeenCalledWith({ domain: "acme.com", fileBase64: "QkFTRTY0", filename: "mailboxes.xlsx" });
   });
 
   it("creates only the valid rows and migrates the rows that opted in, then summarizes", async () => {

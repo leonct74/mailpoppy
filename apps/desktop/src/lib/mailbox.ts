@@ -88,6 +88,7 @@ export function fileToBase64(file: File): Promise<string> {
 export function parseMailboxImport(input: {
   domain: string;
   fileBase64: string;
+  filename?: string;
 }): Promise<{ ok: true; plan: MailboxImportPlan }> {
   return sidecar(`/mailbox/import/parse`, {
     method: "POST",

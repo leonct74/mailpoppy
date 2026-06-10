@@ -27,7 +27,7 @@ type RowStatus =
   | { kind: "ok"; existed: boolean; imported?: number; migrateError?: string }
   | { kind: "failed"; message: string };
 
-type ParseFn = (input: { domain: string; fileBase64: string }) => Promise<{ ok: true; plan: MailboxImportPlan }>;
+type ParseFn = (input: { domain: string; fileBase64: string; filename?: string }) => Promise<{ ok: true; plan: MailboxImportPlan }>;
 type CreateFn = (input: { email: string; password: string; stackName?: string }) => Promise<BackendInfo & { ok: true; mailbox: Mailbox }>;
 type MigrateFn = (input: RunInput) => Promise<MigrateSummary & { ok: true }>;
 
@@ -77,7 +77,7 @@ export function MailboxImport({
     setParsing(true);
     try {
       const fileBase64 = await readFileBase64(file);
-      const { plan } = await parse({ domain, fileBase64 });
+      const { plan } = await parse({ domain, fileBase64, filename: file.name });
       setPlan(plan);
       const init: Record<number, RowStatus> = {};
       for (const r of plan.rows) init[r.row] = r.errors.length ? { kind: "skipped" } : { kind: "pending" };
@@ -164,6 +164,10 @@ export function MailboxImport({
         <b className="text-on-surface">email</b> and a <b className="text-on-surface">password</b> are required per
         row — the IMAP columns are <b className="text-on-surface">optional</b>, used only if you also want to import a
         mailbox's old mail.
+      </p>
+      <p className="mt-1 text-xs text-on-surface-variant/70">
+        Tip: if you edit the template in Apple Numbers, export it back to Excel or CSV
+        (File ▸ Export To) before uploading — Numbers' own <code className="font-mono">.numbers</code> files can't be read.
       </p>
 
       {/* File chooser + template download (always available). */}

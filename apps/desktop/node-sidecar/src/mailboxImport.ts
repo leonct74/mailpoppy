@@ -41,8 +41,31 @@ function worksheetToGrid(ws: ExcelJS.Worksheet): Cell[][] {
   return grid;
 }
 
+/**
+ * Detect common files that look plausible but ExcelJS can't read, and return a
+ * clear, actionable message instead of a cryptic failure. The big one: an Apple
+ * Numbers file is ALSO a zip ("PK…"), so it sails past the xlsx magic-byte check
+ * and then loads with zero worksheets. We recognize it by its iWork payload entry
+ * (or a .numbers/.pages/.key name) and tell the user how to export to Excel/CSV.
+ */
+function unsupportedFileMessage(buffer: Buffer, filename?: string): string | null {
+  const name = (filename ?? "").toLowerCase();
+  const isIWork = /\.(numbers|pages|key)$/.test(name) || buffer.includes(Buffer.from("Document.iwa"));
+  if (isIWork) {
+    return "This looks like an Apple Numbers file, which can't be read directly. In Numbers, choose File ▸ Export To ▸ Excel… (or CSV…), then upload that file.";
+  }
+  // Legacy binary Excel (.xls) is an OLE/CFB document (magic D0 CF 11 E0), not a zip.
+  if (buffer.length >= 4 && buffer[0] === 0xd0 && buffer[1] === 0xcf && buffer[2] === 0x11 && buffer[3] === 0xe0) {
+    return "This is an old Excel format (.xls). Please re-save it as Excel Workbook (.xlsx) or CSV, then upload that file.";
+  }
+  return null;
+}
+
 /** Read an uploaded workbook (xlsx by magic bytes, else CSV) into a cell grid. */
-export async function readImportGrid(buffer: Buffer): Promise<Cell[][]> {
+export async function readImportGrid(buffer: Buffer, filename?: string): Promise<Cell[][]> {
+  const unsupported = unsupportedFileMessage(buffer, filename);
+  if (unsupported) throw new Error(unsupported);
+
   const wb = new ExcelJS.Workbook();
   const isXlsx = buffer.length >= 2 && buffer[0] === 0x50 && buffer[1] === 0x4b; // "PK" zip header
   if (isXlsx) {
@@ -57,13 +80,15 @@ export async function readImportGrid(buffer: Buffer): Promise<Cell[][]> {
     wb.worksheets.find((w) => w.name.toLowerCase() === "mailboxes") ??
     wb.worksheets.find((w) => w.rowCount > 0) ??
     wb.worksheets[0];
-  if (!sheet) throw new Error("The file has no worksheets.");
+  if (!sheet) {
+    throw new Error("Couldn't find a sheet to read. Please upload an Excel (.xlsx) or CSV file — the template you downloaded works.");
+  }
   return worksheetToGrid(sheet);
 }
 
 /** Parse + validate an uploaded file into an import plan for one domain. */
-export async function planFromBuffer(buffer: Buffer, domain: string): Promise<MailboxImportPlan> {
-  return planFromGrid(await readImportGrid(buffer), { domain });
+export async function planFromBuffer(buffer: Buffer, domain: string, filename?: string): Promise<MailboxImportPlan> {
+  return planFromGrid(await readImportGrid(buffer, filename), { domain });
 }
 
 const BLUE = "FF1A73E8";
