@@ -673,7 +673,10 @@ export function SetupWizard({
       </StepCard>
 
       {/* ---- Custom MAIL FROM (per-domain deliverability) ---- */}
-      {ready && domain && (
+      {/* Only after provision() has created the domain's SES identity. Rendering it
+          before the identity exists makes getMailFromStatus fail ("Email identity …
+          does not exist"); the post-provision steps guarantee it's there. */}
+      {ready && domain && ["verifying", "verified", "sending", "sent"].includes(step) && (
         <Card>
           <MailFromSetup domain={domain} region={preflight?.region} />
         </Card>

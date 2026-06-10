@@ -957,13 +957,24 @@ export async function requestProductionAccess(
 /** Read-only: the identity's current MAIL FROM configuration + verification status. */
 export async function getMailFromStatus(ctx: AwsContext, domain: string): Promise<MailFromState> {
   const { sesv2 } = clients(ctx);
-  const out = await sesv2.send(new GetEmailIdentityCommand({ EmailIdentity: domain }));
-  const m = out.MailFromAttributes;
-  return {
-    mailFromDomain: m?.MailFromDomain,
-    status: m?.MailFromDomainStatus as MailFromStatus | undefined,
-    behaviorOnMxFailure: m?.BehaviorOnMxFailure,
-  };
+  try {
+    const out = await sesv2.send(new GetEmailIdentityCommand({ EmailIdentity: domain }));
+    const m = out.MailFromAttributes;
+    return {
+      mailFromDomain: m?.MailFromDomain,
+      status: m?.MailFromDomainStatus as MailFromStatus | undefined,
+      behaviorOnMxFailure: m?.BehaviorOnMxFailure,
+    };
+  } catch (e) {
+    // The SES identity may not exist yet — the domain hasn't been provisioned, or
+    // is mid-verification during first setup. A status *read* must degrade to
+    // "not configured" rather than 502 (mirrors getDomainIdentityStatus and the
+    // other read helpers above). setupMailFrom still surfaces real errors.
+    if (/does not exist|ValidationError|NotFound/i.test((e as Error).message ?? "")) {
+      return { mailFromDomain: undefined, status: undefined };
+    }
+    throw e;
+  }
 }
 
 /**
