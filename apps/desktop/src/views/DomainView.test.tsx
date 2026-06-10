@@ -48,7 +48,7 @@ function loaders(overrides: Partial<Parameters<typeof DomainView>[0]> = {}) {
       mailbox: { email: input.email, status: "CONFIRMED" },
     })),
     getDomainStatus: vi.fn(async () => ({ verifiedForSending: true, dkim: "SUCCESS" })),
-    getMailFrom: vi.fn(async (d: string) => ({ status: "Success", mailFromDomain: `mail.${d}` })),
+    getMailFrom: vi.fn(async (d: string) => ({ status: "SUCCESS" as const, mailFromDomain: `mail.${d}` })),
     ...overrides,
   };
 }
@@ -70,6 +70,32 @@ describe("DomainView", () => {
     expect(screen.getByText("info@boxord.com")).toBeInTheDocument();
     expect(screen.queryByText("hello@example.org")).not.toBeInTheDocument();
     expect(screen.getAllByTestId("mb-row")).toHaveLength(2);
+  });
+
+  it("surfaces the MAIL FROM setup panel prominently when SPF alignment is missing", async () => {
+    // A freshly added domain with no custom MAIL FROM yet → not-configured.
+    const getMailFrom = vi.fn(async () => ({ status: "NOT_STARTED" as const }));
+    render(<DomainView domain="boxord.com" {...loaders({ getMailFrom })} />);
+    await screen.findByRole("heading", { name: "boxord.com" });
+
+    // Not just the muted pill — the full, actionable deliverability panel shows
+    // its call-to-action right here in the domain management view. (Await the
+    // button: the panel loads its MAIL FROM status async before the CTA appears.)
+    expect(await screen.findByRole("button", { name: /Set up custom MAIL FROM/i })).toBeInTheDocument();
+    expect(screen.getByText(/Improve deliverability/i)).toBeInTheDocument();
+    // And the health badge reflects the un-set state.
+    expect(screen.getByText("MAIL FROM not set")).toBeInTheDocument();
+  });
+
+  it("hides the MAIL FROM panel once aligned (badge alone suffices)", async () => {
+    // Default loaders() report an aligned custom MAIL FROM.
+    render(<DomainView domain="boxord.com" {...loaders()} />);
+    await screen.findByRole("heading", { name: "boxord.com" });
+
+    expect(await screen.findByText("MAIL FROM aligned")).toBeInTheDocument();
+    // The big setup panel is NOT rendered when there's nothing to do.
+    expect(screen.queryByText(/Improve deliverability/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Set up custom MAIL FROM/i })).not.toBeInTheDocument();
   });
 
   it("creates a mailbox on this domain (local part + @domain)", async () => {

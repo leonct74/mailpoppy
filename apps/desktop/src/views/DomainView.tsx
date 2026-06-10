@@ -14,7 +14,7 @@ import {
   ChevronUp,
   Trash2,
 } from "lucide-react";
-import type { MailFromState } from "@mailpoppy/core";
+import { mailFromAlignment, type MailFromState } from "@mailpoppy/core";
 import { resolveStackName, saveDeploymentConfig } from "../lib/deploymentConfig";
 import {
   listMailboxes as defaultListMailboxes,
@@ -28,6 +28,7 @@ import { removeDomain as defaultRemoveDomain, type RemoveDomainResult } from "..
 import { MailboxStorageRow } from "./MailboxStorageRow";
 import { PolicyEditor } from "./PolicyEditor";
 import { RetentionEditor } from "./RetentionEditor";
+import { MailFromSetup } from "./MailFromSetup";
 import { Card, Button, Spinner, cn } from "../ui";
 
 // Domain workspace — the per-domain drill-in reached from a Home card. A
@@ -336,6 +337,23 @@ export function DomainView({
           </p>
         )}
       </Card>
+
+      {/* When MAIL FROM (SPF alignment) isn't aligned yet, surface the full setup
+          panel prominently here — not buried at the tail of the domain-setup wizard —
+          so the admin actually completes this deliverability step. It hides itself
+          once aligned (the Domain-health pill then reads "MAIL FROM aligned"). The
+          same getMailFrom loader is shared so the panel and the badge agree, and
+          onStateChange keeps the badge live after the admin applies the change. */}
+      {mailFrom && mailFrom !== "error" && mailFromAlignment(mailFrom) !== "aligned" && (
+        <Card className="border-amber-400/30 bg-amber-400/5">
+          <MailFromSetup
+            domain={domain}
+            region={backend?.region}
+            load={getMailFrom}
+            onStateChange={(s) => setMailFrom(s)}
+          />
+        </Card>
+      )}
 
       {/* Mailboxes on this domain. */}
       <Card>

@@ -59,9 +59,13 @@ export interface MailFromSetupProps {
   region?: string;
   load?: (domain: string) => Promise<MailFromState>;
   setup?: (input: { domain: string; subdomain?: string }) => Promise<SetupMailFromResult>;
+  /** Notified whenever the resolved MAIL FROM state changes (initial load + after
+   *  applying setup), so a host view (e.g. DomainView) can keep its own status —
+   *  badges, visibility of this panel — in sync without a full reload. */
+  onStateChange?: (state: MailFromState) => void;
 }
 
-export function MailFromSetup({ domain, region = "eu-west-1", load, setup }: MailFromSetupProps) {
+export function MailFromSetup({ domain, region = "eu-west-1", load, setup, onStateChange }: MailFromSetupProps) {
   const loadStatus = load ?? defaultGetMailFromStatus;
   const runSetup = setup ?? defaultSetupMailFrom;
 
@@ -75,7 +79,9 @@ export function MailFromSetup({ domain, region = "eu-west-1", load, setup }: Mai
     setLoading(true);
     setErr(null);
     try {
-      setState(await loadStatus(domain));
+      const s = await loadStatus(domain);
+      setState(s);
+      onStateChange?.(s);
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -93,6 +99,7 @@ export function MailFromSetup({ domain, region = "eu-west-1", load, setup }: Mai
     try {
       const res = await runSetup({ domain });
       setState(res.state);
+      onStateChange?.(res.state);
       setConfirming(false);
     } catch (e) {
       setErr(String(e));
