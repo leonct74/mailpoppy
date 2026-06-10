@@ -6,11 +6,15 @@
 import Fastify from "fastify";
 import * as prov from "./provisioning";
 import * as migration from "./migration";
+import * as mailboxImport from "./mailboxImport";
 import { readLedger } from "./ledger";
 import { writeMailpoppyProfile, mailpoppyProfileExists, MAILPOPPY_PROFILE } from "./awsProfile";
 import { SES_INBOUND_REGIONS } from "@mailpoppy/core";
 
-const app = Fastify({ logger: true });
+// 25 MiB body limit (Fastify defaults to 1 MiB): the bulk-mailbox importer POSTs
+// the chosen spreadsheet as base64 JSON, and base64 inflates the bytes by ~33%.
+// A spreadsheet of mailboxes is tiny, but this leaves generous headroom.
+const app = Fastify({ logger: true, bodyLimit: 25 * 1024 * 1024 });
 
 // CORS allowlist. The sidecar binds 127.0.0.1 only, but we still scope CORS to
 // known origins rather than reflecting any origin — a random web page must not be
@@ -397,6 +401,44 @@ app.post("/mailbox/quota", async (req, reply) => {
     });
   } catch (err) {
     return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
+// ---- Bulk mailbox import (parse a spreadsheet; the UI runs create/migrate) ----
+
+// Read-only: parse + validate an uploaded .xlsx/.csv (base64 in the body) into a
+// per-row import plan for one domain. No mailboxes are created here — the UI
+// shows the plan as a preview, then drives the existing /mailbox/create and
+// /migrate/imap/run routes per row, so it can show progress and survive a bad row.
+app.post("/mailbox/import/parse", async (req, reply) => {
+  const b = (req.body ?? {}) as { domain?: string; fileBase64?: string };
+  if (!b.domain) return reply.code(400).send({ ok: false, error: "domain is required" });
+  if (!b.fileBase64) return reply.code(400).send({ ok: false, error: "fileBase64 (the spreadsheet) is required" });
+  let buffer: Buffer;
+  try {
+    buffer = Buffer.from(b.fileBase64, "base64");
+  } catch {
+    return reply.code(400).send({ ok: false, error: "the uploaded file could not be decoded" });
+  }
+  try {
+    const plan = await mailboxImport.planFromBuffer(buffer, b.domain);
+    return { ok: true, plan };
+  } catch (err) {
+    // Malformed/unreadable spreadsheet or no recognizable columns → 400 (client
+    // error), with the user-facing message from core where we set one.
+    return reply.code(400).send({ ok: false, error: (err as Error).message });
+  }
+});
+
+// Read-only: generate the friendly downloadable .xlsx template for a domain,
+// returned as base64 so the webview can save it with a Blob.
+app.get("/mailbox/import/template/:domain", async (req, reply) => {
+  const domain = (req.params as { domain: string }).domain;
+  try {
+    const buf = await mailboxImport.buildTemplateWorkbook(decodeURIComponent(domain));
+    return { ok: true, filename: `mailpoppy-mailboxes-${domain}.xlsx`, base64: buf.toString("base64") };
+  } catch (err) {
+    return reply.code(500).send({ ok: false, error: (err as Error).message });
   }
 });
 

@@ -2,6 +2,7 @@
 // users in the deployed backend's Cognito user pool; the sidecar resolves the
 // pool from the stack's CloudFormation outputs.
 import { sidecar } from "./sidecar";
+import type { MailboxImportPlan } from "@mailpoppy/core";
 
 export interface Mailbox {
   email: string;
@@ -64,4 +65,40 @@ export function resetMailboxPassword(input: {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
   });
+}
+
+// ---- Bulk import from a spreadsheet ----
+
+/** Read a chosen file as base64 (the sidecar's import/parse endpoint wants that). */
+export function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error("could not read file"));
+    reader.onload = () => {
+      // readAsDataURL → "data:<type>;base64,<data>"; keep just the base64 payload.
+      const result = String(reader.result);
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Parse + validate an uploaded .xlsx/.csv into a per-row import plan (no writes). */
+export function parseMailboxImport(input: {
+  domain: string;
+  fileBase64: string;
+}): Promise<{ ok: true; plan: MailboxImportPlan }> {
+  return sidecar(`/mailbox/import/parse`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+/** Fetch the friendly downloadable .xlsx template (base64) for a domain. */
+export function getMailboxImportTemplate(
+  domain: string,
+): Promise<{ ok: true; filename: string; base64: string }> {
+  return sidecar(`/mailbox/import/template/${encodeURIComponent(domain)}`);
 }

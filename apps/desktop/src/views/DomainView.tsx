@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronUp,
   Trash2,
+  FileSpreadsheet,
 } from "lucide-react";
 import { mailFromAlignment, type MailFromState } from "@mailpoppy/core";
 import { resolveStackName, saveDeploymentConfig } from "../lib/deploymentConfig";
@@ -29,6 +30,7 @@ import { MailboxStorageRow } from "./MailboxStorageRow";
 import { PolicyEditor } from "./PolicyEditor";
 import { RetentionEditor } from "./RetentionEditor";
 import { MailFromSetup } from "./MailFromSetup";
+import { MailboxImport } from "./MailboxImport";
 import { Card, Button, Spinner, cn } from "../ui";
 
 // Domain workspace — the per-domain drill-in reached from a Home card. A
@@ -110,6 +112,9 @@ export function DomainView({
   const [mbBusy, setMbBusy] = useState(false);
   const [mbError, setMbError] = useState<string | null>(null);
   const [mbCreated, setMbCreated] = useState<string | null>(null);
+  // Bulk import (many mailboxes from a spreadsheet) — toggled open under the
+  // single-create form. Gated by the same "domain verified for sending" rule.
+  const [showImport, setShowImport] = useState(false);
 
   // Danger zone — remove THIS domain (its mailboxes + mail + SES + DNS), leaving
   // the shared backend and every other domain intact. Type-to-confirm gates it.
@@ -369,11 +374,22 @@ export function DomainView({
               Mailboxes <span className="font-normal text-on-surface-variant">({onDomain.length})</span>
             </h3>
           </div>
-          {onMigrateInto && (
-            <Button variant="secondary" size="sm" onClick={() => onMigrateInto(domain)}>
-              <ArrowLeftRight className="size-4" /> Import old mail
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={domainUnverified}
+              title={domainUnverified ? "Finish this domain's SES + DNS setup first" : undefined}
+              onClick={() => setShowImport((v) => !v)}
+            >
+              <FileSpreadsheet className="size-4" /> Import from Excel
             </Button>
-          )}
+            {onMigrateInto && (
+              <Button variant="secondary" size="sm" onClick={() => onMigrateInto(domain)}>
+                <ArrowLeftRight className="size-4" /> Import old mail
+              </Button>
+            )}
+          </div>
         </div>
 
         {domainUnverified && (
@@ -436,6 +452,18 @@ export function DomainView({
         {mbError && (
           <div className="mt-3 rounded-lg border border-tertiary/30 bg-tertiary-container/10 p-3 text-sm text-tertiary">
             {mbError}
+          </div>
+        )}
+
+        {/* Bulk import from a spreadsheet — opens under the single-create form,
+            and only when the domain is verified for sending (same gate). */}
+        {showImport && !domainUnverified && (
+          <div className="mt-4">
+            <MailboxImport
+              domain={domain}
+              stackName={stackName}
+              onImported={() => setReloadKey((k) => k + 1)}
+            />
           </div>
         )}
 

@@ -23,6 +23,12 @@ vi.mock("./RetentionEditor", () => ({
   RetentionEditor: ({ domain }: { domain?: string }) => <div>RETENTION {domain}</div>,
 }));
 
+// The bulk importer has its own dedicated test; stub it so DomainView's test only
+// checks that it's reachable + scoped to this domain.
+vi.mock("./MailboxImport", () => ({
+  MailboxImport: ({ domain }: { domain: string }) => <div>BULK IMPORT {domain}</div>,
+}));
+
 afterEach(() => cleanup());
 
 const BACKEND = {
@@ -132,6 +138,25 @@ describe("DomainView", () => {
     fireEvent.change(screen.getByLabelText("New mailbox name on boxord.com"), { target: { value: "sales" } });
     fireEvent.change(screen.getByLabelText("New mailbox password"), { target: { value: "Mailpoppy-Test-1!" } });
     expect(screen.getByRole("button", { name: "Create mailbox" })).not.toBeDisabled();
+  });
+
+  it("reveals the bulk Excel importer (scoped to this domain) when verified", async () => {
+    render(<DomainView domain="boxord.com" {...loaders()} />);
+    await screen.findByText("Can send");
+
+    const importBtn = screen.getByRole("button", { name: /Import from Excel/i });
+    expect(importBtn).not.toBeDisabled();
+    // Hidden until toggled.
+    expect(screen.queryByText("BULK IMPORT boxord.com")).not.toBeInTheDocument();
+    fireEvent.click(importBtn);
+    expect(await screen.findByText("BULK IMPORT boxord.com")).toBeInTheDocument();
+  });
+
+  it("disables the bulk Excel importer until the domain is verified for sending", async () => {
+    const getDomainStatus = vi.fn(async () => ({ verifiedForSending: false, dkim: "PENDING" }));
+    render(<DomainView domain="boxord.com" onRunSetup={vi.fn()} {...loaders({ getDomainStatus })} />);
+    await screen.findByText(/isn't verified for sending yet/i);
+    expect(screen.getByRole("button", { name: /Import from Excel/i })).toBeDisabled();
   });
 
   it("calls back and migrate callbacks", async () => {
