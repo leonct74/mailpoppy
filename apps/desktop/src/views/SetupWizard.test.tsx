@@ -106,23 +106,55 @@ describe("SetupWizard · Step 0 readiness gate", () => {
 });
 
 describe("SetupWizard · Mailboxes", () => {
-  it("creates a mailbox and saves the backend config so the Inbox can connect", async () => {
-    route({
-      readiness: READY,
-      list: { ...BACKEND, mailboxes: [] },
-      create: { ...BACKEND, mailbox: { email: "you@yourdomain.com", status: "CONFIRMED" } },
+  it("blocks mailbox creation until the domain's SES + DNS verify, then creates + saves config", async () => {
+    mockSidecar.mockImplementation(async (path: string) => {
+      if (path === "/aws/readiness") return READY;
+      if (path.startsWith("/mailbox/list")) return { ...BACKEND, mailboxes: [] };
+      if (path.startsWith("/aws/preflight")) return { accountId: "123456789012", zoneId: "Z123", region: "eu-west-1" };
+      if (path === "/deploy/backend") return { ok: true, stackName: "MailpoppyMailStack", operation: "CREATE", bucket: "b", region: "eu-west-1" };
+      // Provision status (DKIM verified). Checked before the generic deploy /status.
+      if (path.includes("/provision/") && path.endsWith("/status")) return { dkim: "SUCCESS", verifiedForSending: true };
+      if (path.endsWith("/status")) {
+        return {
+          status: "CREATE_COMPLETE",
+          complete: true,
+          failed: false,
+          outputs: { ApiBaseUrl: "https://api.example.com", UserPoolId: "eu-west-1_abc123", UserPoolClientId: "client123", DeployRegion: "eu-west-1" },
+        };
+      }
+      if (path.startsWith("/provision/")) return { ok: true, dkimTokens: ["t1", "t2", "t3"] };
+      if (path === "/mailbox/create") return { ...BACKEND, mailbox: { email: "you@yourdomain.com", status: "CONFIRMED" } };
+      throw new Error(`unexpected sidecar path ${path}`);
     });
 
     render(<SetupWizard />);
     await screen.findByText(/Environment ready/i);
 
+    // Deploy the backend for a brand-new domain (its SES/DNS isn't verified yet).
+    fireEvent.change(screen.getByPlaceholderText("yourdomain.com"), { target: { value: "yourdomain.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /Check AWS/i }));
+    await screen.findByText(/Hosted zone/i);
+    fireEvent.click(screen.getByRole("button", { name: /Deploy backend/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Yes, continue/i }));
+    await screen.findByText(/Backend deployed/i);
+
+    // Backend exists but the domain isn't verified → creation is BLOCKED.
     fireEvent.change(await screen.findByLabelText("Mailbox email"), { target: { value: "You@YourDomain.com" } });
     fireEvent.change(screen.getByLabelText("Mailbox password"), { target: { value: "Mailpoppy-Test-1!" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create mailbox" }));
+    expect(screen.getByText(/must verify before you can add mailboxes/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create mailbox" })).toBeDisabled();
+
+    // Provision + verify the domain → creation UNBLOCKS.
+    fireEvent.click(screen.getByRole("button", { name: /Set up domain mail/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Yes, continue/i }));
+    await screen.findByText(/DKIM verified/i);
+
+    const createBtn = screen.getByRole("button", { name: "Create mailbox" });
+    expect(createBtn).not.toBeDisabled();
+    fireEvent.click(createBtn);
 
     // Success banner + the create call gets a lower-cased email.
     expect(await screen.findByText(/tab is now connected/i)).toBeInTheDocument();
-    await waitFor(() => expect(mockSidecar).toHaveBeenCalledWith("/mailbox/create", expect.anything()));
     const createCall = mockSidecar.mock.calls.find((c) => c[0] === "/mailbox/create")!;
     const body = JSON.parse((createCall[1] as RequestInit).body as string);
     expect(body.email).toBe("you@yourdomain.com");

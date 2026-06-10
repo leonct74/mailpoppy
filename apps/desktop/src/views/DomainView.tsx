@@ -285,6 +285,11 @@ export function DomainView({
   }
 
   // ---- Ready ----
+  // Block adding mailboxes until the domain's SES + DNS are verified for sending —
+  // a mailbox on a domain that can't yet send or receive is a dead end. Only block
+  // when we KNOW it's unverified (status loaded, not an error) so a transient status
+  // hiccup never falsely blocks a working domain.
+  const domainUnverified = domStatus !== null && domStatus !== "error" && !domStatus.verifiedForSending;
   return (
     <div className="flex flex-col gap-6">
       {header}
@@ -371,6 +376,20 @@ export function DomainView({
           )}
         </div>
 
+        {domainUnverified && (
+          <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-200">
+            This domain isn't verified for sending yet. Finish its{" "}
+            {onRunSetup ? (
+              <button onClick={onRunSetup} className="underline underline-offset-2 hover:no-underline">
+                SES + DNS setup
+              </button>
+            ) : (
+              <b className="text-on-surface">SES + DNS setup</b>
+            )}{" "}
+            before adding mailboxes — until it verifies, mail to these addresses won't be delivered.
+          </div>
+        )}
+
         {/* Add a mailbox on this domain. */}
         <div className="mt-4 flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
@@ -399,7 +418,7 @@ export function DomainView({
               className={cn(inputCls, "w-56")}
             />
           </label>
-          <Button onClick={() => void createMb()} disabled={mbBusy || !localPart || !password}>
+          <Button onClick={() => void createMb()} disabled={mbBusy || !localPart || !password || domainUnverified}>
             {mbBusy ? <Spinner className="border-white/40 border-t-white" /> : <Plus className="size-4" />}
             {mbBusy ? "Creating…" : "Create mailbox"}
           </Button>

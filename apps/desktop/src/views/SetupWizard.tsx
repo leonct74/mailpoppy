@@ -691,12 +691,17 @@ export function SetupWizard({
             backend stack must be deployed first.
           </p>
 
-          {mbNoBackend && (
+          {mbNoBackend ? (
             <Warn className="mt-3">
               No backend deployed yet. Set up a domain above and run the <b>Deploy backend</b> step to create it — then come
               back here to add mailboxes.
             </Warn>
-          )}
+          ) : !["verified", "sending", "sent"].includes(step) ? (
+            <Warn className="mt-3">
+              Finish this domain's <b>SES + DNS setup</b> above — it must verify before you can add mailboxes. A mailbox on an
+              unverified domain can't send or receive mail yet.
+            </Warn>
+          ) : null}
 
           <div className="mt-4 flex flex-wrap items-end gap-3">
             <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
@@ -720,7 +725,10 @@ export function SetupWizard({
                 className={cn(inputCls, "w-64")}
               />
             </label>
-            <Button onClick={() => void createMb()} disabled={mbBusy || mbNoBackend || !mbEmail || !mbPassword}>
+            <Button
+              onClick={() => void createMb()}
+              disabled={mbBusy || mbNoBackend || !["verified", "sending", "sent"].includes(step) || !mbEmail || !mbPassword}
+            >
               {mbBusy ? <Spinner className="border-white/40 border-t-white" /> : null}
               {mbBusy ? "Creating…" : "Create mailbox"}
             </Button>

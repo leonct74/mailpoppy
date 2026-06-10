@@ -112,6 +112,28 @@ describe("DomainView", () => {
     expect(await screen.findByText(/created/i)).toBeInTheDocument();
   });
 
+  it("blocks adding a mailbox until the domain is verified for sending", async () => {
+    // Domain exists but its SES/DNS isn't verified yet (freshly added, not set up).
+    const getDomainStatus = vi.fn(async () => ({ verifiedForSending: false, dkim: "PENDING" }));
+    render(<DomainView domain="boxord.com" onRunSetup={vi.fn()} {...loaders({ getDomainStatus })} />);
+    await screen.findByRole("heading", { name: "boxord.com" });
+
+    // A clear hint appears and the create button is disabled until it verifies.
+    expect(await screen.findByText(/isn't verified for sending yet/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create mailbox" })).toBeDisabled();
+  });
+
+  it("allows adding a mailbox once the domain is verified", async () => {
+    // Default loaders() report verifiedForSending: true.
+    render(<DomainView domain="boxord.com" {...loaders()} />);
+    await screen.findByText("Can send");
+    expect(screen.queryByText(/isn't verified for sending yet/i)).not.toBeInTheDocument();
+    // Button enabled once a name + password are entered.
+    fireEvent.change(screen.getByLabelText("New mailbox name on boxord.com"), { target: { value: "sales" } });
+    fireEvent.change(screen.getByLabelText("New mailbox password"), { target: { value: "Mailpoppy-Test-1!" } });
+    expect(screen.getByRole("button", { name: "Create mailbox" })).not.toBeDisabled();
+  });
+
   it("calls back and migrate callbacks", async () => {
     const onBack = vi.fn();
     const onMigrateInto = vi.fn();
