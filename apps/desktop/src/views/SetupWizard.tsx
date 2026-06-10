@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Terminal, KeyRound, ShieldCheck, Rocket, Globe, RefreshCw, Mail, Sparkles, ArrowLeft } from "lucide-react";
+import { KeyRound, ShieldCheck, Rocket, Globe, RefreshCw, Mail, Sparkles, ArrowLeft } from "lucide-react";
 import { sidecar } from "../lib/sidecar";
 import { createMailbox, listMailboxes, type Mailbox, type BackendInfo } from "../lib/mailbox";
 import { deployBackend, deployStatus, type DeployStatus } from "../lib/deploy";
@@ -461,17 +461,12 @@ export function SetupWizard({
         )}
         {readiness && (
           <div className="flex flex-col gap-3 text-sm">
-            {/* AWS CLI */}
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-outline-variant/10 bg-surface-container-lowest p-3">
-              <span className="flex items-center gap-2 text-on-surface-variant">
-                <Terminal className="size-4" /> AWS CLI
-              </span>
-              {readiness.cli.installed ? (
-                <OkBadge>{readiness.cli.version}</OkBadge>
-              ) : (
-                <span className="font-mono text-xs text-on-surface-variant/70">not found (optional — reads ~/.aws directly)</span>
-              )}
-            </div>
+            {/* The AWS CLI is optional — provisioning runs entirely through the SDK, so
+                its presence never gates readiness. We deliberately don't render it as a
+                status row: for newcomers using the in-app key entry it reads as "something
+                is missing" when nothing is. `readiness.cli` stays in the payload (the
+                onboarding panel's Advanced hint reads `cliInstalled`) so a future version
+                can resurface it without re-plumbing. */}
             {/* Credentials */}
             <div className="flex items-center justify-between gap-3 rounded-lg border border-outline-variant/10 bg-surface-container-lowest p-3">
               <span className="flex items-center gap-2 text-on-surface-variant">
