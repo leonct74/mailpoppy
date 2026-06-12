@@ -2,7 +2,13 @@ import type {
   APIGatewayProxyEventV2WithJWTAuthorizer,
   APIGatewayProxyResultV2,
 } from "aws-lambda";
-import { S3Client, GetObjectCommand, PutObjectCommand, GetObjectTaggingCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  GetObjectCommand,
+  PutObjectCommand,
+  DeleteObjectCommand,
+  GetObjectTaggingCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
@@ -51,6 +57,7 @@ const SETTINGS_TABLE = process.env.SETTINGS_TABLE ?? "";
 const MAIL_BUCKET = process.env.MAIL_BUCKET ?? "";
 const BY_MESSAGE_INDEX = process.env.BY_MESSAGE_INDEX ?? "by-message";
 const SENT_PREFIX = process.env.SENT_PREFIX ?? "sent/";
+const DRAFTS_PREFIX = process.env.DRAFTS_PREFIX ?? "drafts/";
 
 function json(statusCode: number, body: unknown): APIGatewayProxyResultV2 {
   return {
@@ -302,6 +309,18 @@ interface SendBody {
   inReplyTo?: string;
   references?: string;
   attachments?: SendAttachmentInput[];
+  /** When the send originates from a saved draft, its id — removed after send. */
+  draftId?: string;
+}
+
+interface DraftBody {
+  draftId?: string;
+  to?: string[];
+  subject?: string;
+  html?: string;
+  text?: string;
+  inReplyTo?: string;
+  references?: string;
 }
 
 async function sendMessage(owned: string[], body: SendBody): Promise<APIGatewayProxyResultV2> {
@@ -436,7 +455,104 @@ async function sendMessage(owned: string[], body: SendBody): Promise<APIGatewayP
     }),
   );
 
+  // If this send originated from a saved draft, remove it now that the mail has
+  // gone out (best-effort: the email already shipped, so a cleanup hiccup must
+  // not fail the request — the draft just lingers until re-saved/deleted).
+  if (body.draftId) {
+    try {
+      await removeDraft(body.draftId, owned);
+    } catch (err) {
+      console.error("draft cleanup after send failed", body.draftId, err);
+    }
+  }
+
   return json(200, { messageId });
+}
+
+// ---- Drafts -----------------------------------------------------------------
+
+/**
+ * Save (or update) a draft. Drafts are stored exactly like any other message —
+ * a `.eml` in S3 + an index row in the "drafts" folder — so they list, read and
+ * send through the same paths. Re-saving with the same `draftId` overwrites in
+ * place (no duplicate). Ownership is the caller's primary address from the JWT.
+ */
+async function saveDraft(owned: string[], body: DraftBody): Promise<APIGatewayProxyResultV2> {
+  const mailbox = owned[0]!;
+  const domain = mailbox.slice(mailbox.lastIndexOf("@") + 1);
+  const to = (body.to ?? []).map(normalizeAddress).filter(Boolean);
+  const subject = body.subject ?? "";
+  const text = body.text ?? "";
+  const html = body.html;
+  const date = new Date().toISOString();
+
+  // Reuse the id on re-save so editing updates the same draft; mint one on first
+  // save. The id is bound to the caller's own domain.
+  const draftId =
+    typeof body.draftId === "string" && body.draftId.trim()
+      ? body.draftId.trim()
+      : `draft-${Date.now()}.${Math.random().toString(36).slice(2)}@${domain}`;
+
+  const rawEml = buildRawEml({
+    from: mailbox,
+    to,
+    subject,
+    text,
+    html,
+    messageId: draftId,
+    date,
+    inReplyTo: body.inReplyTo,
+    references: body.references,
+  });
+  const s3Key = `${DRAFTS_PREFIX}${draftId}`;
+  await s3.send(
+    new PutObjectCommand({ Bucket: MAIL_BUCKET, Key: s3Key, Body: rawEml, ContentType: "message/rfc822" }),
+  );
+
+  // A re-save uses a fresh date → a new sort key, so drop the previous row first
+  // (the S3 object overwrites in place under the stable key).
+  const existing = await findOwnedRow(draftId, owned);
+  if (existing) {
+    await ddb.send(new DeleteCommand({ TableName: INDEX_TABLE, Key: { pk: existing.pk, sk: existing.sk } }));
+  }
+
+  const meta: MessageMeta = {
+    domain,
+    mailbox,
+    messageId: draftId,
+    threadId: body.references?.split(/\s+/)[0]?.replace(/^<|>$/g, "") || draftId,
+    folder: "drafts",
+    from: { address: mailbox },
+    to: to.map((address) => ({ address })),
+    subject,
+    snippet: (text || html || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 140),
+    date,
+    flags: { unread: false },
+    hasAttachments: false,
+    s3Key,
+    sizeBytes: Buffer.byteLength(rawEml, "utf8"),
+  };
+  await ddb.send(
+    new PutCommand({
+      TableName: INDEX_TABLE,
+      Item: { pk: mailboxPk(mailbox), sk: messageSk("drafts", date, draftId), ...meta },
+    }),
+  );
+  return json(200, { draftId, ...meta });
+}
+
+/** Hard-delete a draft (S3 object + index row). Only ever touches "drafts". */
+async function removeDraft(draftId: string, owned: string[]): Promise<boolean> {
+  const row = await findOwnedRow(draftId, owned);
+  if (!row || row.folder !== "drafts") return false;
+  await s3.send(new DeleteObjectCommand({ Bucket: MAIL_BUCKET, Key: String(row.s3Key) }));
+  await ddb.send(new DeleteCommand({ TableName: INDEX_TABLE, Key: { pk: row.pk, sk: row.sk } }));
+  return true;
+}
+
+async function deleteDraft(draftId: string, owned: string[]): Promise<APIGatewayProxyResultV2> {
+  const removed = await removeDraft(draftId, owned);
+  return removed ? json(200, { ok: true }) : json(404, { error: "draft not found" });
 }
 
 function buildRawEml(m: {
@@ -448,6 +564,7 @@ function buildRawEml(m: {
   messageId: string;
   date: string;
   inReplyTo?: string;
+  references?: string;
 }): string {
   const headers = [
     `From: ${m.from}`,
@@ -456,6 +573,7 @@ function buildRawEml(m: {
     `Date: ${new Date(m.date).toUTCString()}`,
     `Message-ID: <${m.messageId}>`,
     ...(m.inReplyTo ? [`In-Reply-To: ${m.inReplyTo}`] : []),
+    ...(m.references ? [`References: ${m.references}`] : []),
     "MIME-Version: 1.0",
     `Content-Type: ${m.html ? "text/html" : "text/plain"}; charset=utf-8`,
   ];
@@ -506,6 +624,10 @@ export async function handler(
       }
       case "POST /send":
         return await sendMessage(owned, parseBody<SendBody>());
+      case "POST /drafts":
+        return await saveDraft(owned, parseBody<DraftBody>());
+      case "DELETE /drafts/{id}":
+        return id ? await deleteDraft(id, owned) : json(400, { error: "missing id" });
       default:
         return json(404, { error: `no route for ${route}` });
     }

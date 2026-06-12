@@ -30,6 +30,18 @@ export interface SendInput {
   inReplyTo?: string;
   references?: string;
   attachments?: SendAttachment[];
+  /** When sending a saved draft, its id — the server removes it after sending. */
+  draftId?: string;
+}
+export interface SaveDraftInput {
+  /** Omit to create a new draft; pass to update an existing one in place. */
+  draftId?: string;
+  to?: string[];
+  subject?: string;
+  html?: string;
+  text?: string;
+  inReplyTo?: string;
+  references?: string;
 }
 export interface MailboxUsage {
   email: string;
@@ -89,6 +101,13 @@ export class MailpoppyClient {
   }
   send(input: SendInput): Promise<{ messageId: string }> {
     return this.req(`/send`, { method: "POST", body: JSON.stringify(input) });
+  }
+  /** Create or update a draft. Returns the (possibly newly minted) draft id. */
+  saveDraft(input: SaveDraftInput): Promise<{ draftId: string } & MessageMeta> {
+    return this.req(`/drafts`, { method: "POST", body: JSON.stringify(input) });
+  }
+  deleteDraft(draftId: string): Promise<{ ok: true }> {
+    return this.req(`/drafts/${encodeURIComponent(draftId)}`, { method: "DELETE" });
   }
   getUsage(): Promise<MailboxUsage> {
     return this.req(`/usage`);

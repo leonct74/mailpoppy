@@ -235,6 +235,7 @@ export class MailStack extends Stack {
           CorsHttpMethod.GET,
           CorsHttpMethod.POST,
           CorsHttpMethod.PATCH,
+          CorsHttpMethod.DELETE,
           CorsHttpMethod.OPTIONS,
         ],
         allowHeaders: ["authorization", "content-type"],
@@ -247,6 +248,8 @@ export class MailStack extends Stack {
     httpApi.addRoutes({ path: "/messages/{id}/flags", methods: [HttpMethod.PATCH], integration });
     httpApi.addRoutes({ path: "/messages/{id}/move", methods: [HttpMethod.POST], integration });
     httpApi.addRoutes({ path: "/send", methods: [HttpMethod.POST], integration });
+    httpApi.addRoutes({ path: "/drafts", methods: [HttpMethod.POST], integration });
+    httpApi.addRoutes({ path: "/drafts/{id}", methods: [HttpMethod.DELETE], integration });
 
     // ---- Retention janitor (daily) -----------------------------------------
     new events.Rule(this, "JanitorSchedule", {
