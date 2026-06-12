@@ -666,6 +666,10 @@ export function SetupWizard({
           <div className="mt-4 text-sm text-on-surface">
             🎉 Sent (message <C>{messageId}</C>). Check <b>{recipient}</b> — it should be in the inbox (not spam). Open{" "}
             <b>Show original</b> to confirm SPF/DKIM/DMARC = PASS.
+            <p className="mt-2 text-xs text-on-surface-variant">
+              Landed in spam instead? That's normal for a brand-new domain — not a Mailpoppy fault. See{" "}
+              <b>Sending health</b> for why it happens and how to improve where your mail lands.
+            </p>
           </div>
         )}
 

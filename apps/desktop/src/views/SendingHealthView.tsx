@@ -10,6 +10,7 @@ import {
 } from "@mailpoppy/core";
 import { getDeliverabilityOverview as defaultLoad } from "../lib/deliverability";
 import { resolveStackName } from "../lib/deploymentConfig";
+import { DeliverabilityGuide } from "./DeliverabilityGuide";
 import { Card, Button, Spinner, cn } from "../ui";
 
 // "Sending health" — the dedicated, per-domain view (DESIGN §13/§18 Phase 5).
@@ -193,6 +194,10 @@ export function SendingHealthView({ stackName = resolveStackName(), load = defau
           Refresh
         </Button>
       </div>
+
+      {/* Why-is-my-mail-in-spam explainer. Static + reassurance-first, so it's
+          shown above the metrics and even while they're still loading. */}
+      <DeliverabilityGuide />
 
       {loading && !data ? (
         <Card>
