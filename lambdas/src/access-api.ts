@@ -34,6 +34,12 @@ import {
   resolveContentType,
   buildMimeMessage,
   quotaSettingsKey,
+  devicesSettingsKey,
+  isExpoPushToken,
+  addDeviceToken,
+  removeDeviceToken,
+  pruneDeviceTokens,
+  type DeviceRegistry,
 } from "@mailpoppy/core";
 
 /**
@@ -599,6 +605,62 @@ function buildRawEml(m: {
   return `${headers.join("\r\n")}\r\n\r\n${m.html ?? m.text}`;
 }
 
+// ---- Mobile push device tokens ---------------------------------------------
+// A mailbox's registered Expo push tokens live in SETTINGS under
+// `devices#<address>`. We store the SAME registry under every address the caller
+// owns (primary + aliases) so the inbound-processor — which looks up tokens by
+// the exact recipient address — finds them no matter which alias received mail.
+
+async function loadDeviceRegistry(address: string): Promise<DeviceRegistry> {
+  const out = await ddb.send(
+    new GetCommand({ TableName: SETTINGS_TABLE, Key: { pk: devicesSettingsKey(address) } }),
+  );
+  const raw = out.Item?.json;
+  if (typeof raw !== "string") return { tokens: [] };
+  try {
+    return pruneDeviceTokens(JSON.parse(raw) as DeviceRegistry);
+  } catch {
+    return { tokens: [] };
+  }
+}
+
+async function saveDeviceRegistry(address: string, reg: DeviceRegistry): Promise<void> {
+  await ddb.send(
+    new PutCommand({
+      TableName: SETTINGS_TABLE,
+      Item: { pk: devicesSettingsKey(address), json: JSON.stringify(reg) },
+    }),
+  );
+}
+
+interface DeviceBody {
+  token?: string;
+  platform?: string;
+}
+
+/** Register / refresh the caller's device for new-mail push notifications. */
+async function registerDevice(owned: string[], body: DeviceBody): Promise<APIGatewayProxyResultV2> {
+  const token = typeof body.token === "string" ? body.token.trim() : "";
+  if (!isExpoPushToken(token)) return json(400, { error: "invalid push token" });
+  const platform = body.platform === "android" ? "android" : "ios";
+  for (const address of owned) {
+    const reg = await loadDeviceRegistry(address);
+    await saveDeviceRegistry(address, addDeviceToken(reg, token, platform));
+  }
+  return json(200, { ok: true });
+}
+
+/** Unregister a device token (sign-out, or the app detects it's stale). */
+async function unregisterDevice(owned: string[], token: string): Promise<APIGatewayProxyResultV2> {
+  const t = token.trim();
+  if (!t) return json(400, { error: "missing token" });
+  for (const address of owned) {
+    const reg = await loadDeviceRegistry(address);
+    await saveDeviceRegistry(address, removeDeviceToken(reg, t));
+  }
+  return json(200, { ok: true });
+}
+
 // ---- Dispatcher -------------------------------------------------------------
 
 export async function handler(
@@ -647,6 +709,12 @@ export async function handler(
         return await saveDraft(owned, parseBody<DraftBody>());
       case "DELETE /drafts/{id}":
         return id ? await deleteDraft(id, owned) : json(400, { error: "missing id" });
+      case "POST /devices":
+        return await registerDevice(owned, parseBody<DeviceBody>());
+      case "DELETE /devices/{token}": {
+        const token = event.pathParameters?.token ? decodeURIComponent(event.pathParameters.token) : "";
+        return await unregisterDevice(owned, token);
+      }
       default:
         return json(404, { error: `no route for ${route}` });
     }

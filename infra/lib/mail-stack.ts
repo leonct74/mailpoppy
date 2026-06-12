@@ -176,7 +176,8 @@ export class MailStack extends Stack {
     });
     indexTable.grantReadWriteData(accessApi);
     mailBucket.grantReadWrite(accessApi);
-    settingsTable.grantReadData(accessApi);
+    // Read quota docs; WRITE the per-mailbox push device-token registry (/devices).
+    settingsTable.grantReadWriteData(accessApi);
     // SendEmail covers the simple (no-attachment) path; SendRawEmail is required
     // when we send a hand-built raw MIME message (attachments).
     accessApi.addToRolePolicy(
@@ -250,6 +251,9 @@ export class MailStack extends Stack {
     httpApi.addRoutes({ path: "/send", methods: [HttpMethod.POST], integration });
     httpApi.addRoutes({ path: "/drafts", methods: [HttpMethod.POST], integration });
     httpApi.addRoutes({ path: "/drafts/{id}", methods: [HttpMethod.DELETE], integration });
+    // Mobile push: register/refresh + unregister an Expo device token.
+    httpApi.addRoutes({ path: "/devices", methods: [HttpMethod.POST], integration });
+    httpApi.addRoutes({ path: "/devices/{token}", methods: [HttpMethod.DELETE], integration });
 
     // ---- Retention janitor (daily) -----------------------------------------
     new events.Rule(this, "JanitorSchedule", {

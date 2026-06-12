@@ -32,6 +32,11 @@ import {
   parseDmarcAggregate,
   summarizeAggregate,
   dmarcAttachmentKind,
+  devicesSettingsKey,
+  buildExpoPushMessages,
+  removeDeviceTokens,
+  pruneDeviceTokens,
+  type DeviceRegistry,
 } from "@mailpoppy/core";
 
 /**
@@ -324,6 +329,89 @@ async function ingestDmarcReports(hintDomain: string | undefined, attachments: A
   return ingested;
 }
 
+// ---- New-mail push notifications (Expo) -------------------------------------
+// When a message lands in a real inbox, notify that mailbox's registered mobile
+// devices via the Expo Push Service. Entirely best-effort: any failure is logged
+// and NEVER blocks delivery. Tokens Expo reports as DeviceNotRegistered (the app
+// was uninstalled / token rotated) are pruned from the registry.
+const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
+const PUSH_CHANNEL_ID = "mail"; // Android notification channel (created on device)
+
+async function loadDeviceRegistry(address: string): Promise<DeviceRegistry> {
+  if (!SETTINGS_TABLE) return { tokens: [] };
+  try {
+    const out = await ddb.send(
+      new GetCommand({ TableName: SETTINGS_TABLE, Key: { pk: devicesSettingsKey(address) } }),
+    );
+    const raw = out.Item?.json;
+    if (typeof raw !== "string") return { tokens: [] };
+    return pruneDeviceTokens(JSON.parse(raw) as DeviceRegistry);
+  } catch (e) {
+    console.error(`failed to read device tokens for ${address}:`, e);
+    return { tokens: [] };
+  }
+}
+
+/** POST Expo push messages (chunked ≤100); return the tokens Expo says are dead. */
+async function sendExpoPush(messages: ReturnType<typeof buildExpoPushMessages>): Promise<string[]> {
+  const dead: string[] = [];
+  for (let i = 0; i < messages.length; i += 100) {
+    const batch = messages.slice(i, i + 100);
+    try {
+      const res = await fetch(EXPO_PUSH_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify(batch),
+      });
+      if (!res.ok) {
+        console.error(`expo push HTTP ${res.status}: ${await res.text().catch(() => "")}`);
+        continue;
+      }
+      const out = (await res.json()) as {
+        data?: Array<{ status?: string; details?: { error?: string } }>;
+      };
+      (out.data ?? []).forEach((ticket, idx) => {
+        if (ticket?.status === "error" && ticket.details?.error === "DeviceNotRegistered") {
+          const to = batch[idx]?.to;
+          if (to) dead.push(to);
+        }
+      });
+    } catch (e) {
+      console.error("expo push request failed:", e);
+    }
+  }
+  return dead;
+}
+
+/** Notify one mailbox's devices about a new inbox message (best-effort). */
+async function notifyNewMail(
+  recipient: string,
+  title: string,
+  body: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const reg = await loadDeviceRegistry(recipient);
+    if (reg.tokens.length === 0) return;
+    const messages = buildExpoPushMessages(reg.tokens, { title, body, data, channelId: PUSH_CHANNEL_ID });
+    if (messages.length === 0) return;
+    const dead = await sendExpoPush(messages);
+    if (dead.length > 0 && SETTINGS_TABLE) {
+      const pruned = removeDeviceTokens(reg, dead);
+      await ddb
+        .send(
+          new PutCommand({
+            TableName: SETTINGS_TABLE,
+            Item: { pk: devicesSettingsKey(recipient), json: JSON.stringify(pruned) },
+          }),
+        )
+        .catch((e) => console.error(`failed to prune dead tokens for ${recipient}:`, e));
+    }
+  } catch (e) {
+    console.error(`push notify failed for ${recipient}:`, e);
+  }
+}
+
 export async function handler(event: SESEvent): Promise<void> {
   // Per-domain spam/auth policy, resolved on demand with a fallback chain:
   //   policy#<recipientDomain> → policy#default → built-in safe default.
@@ -343,6 +431,10 @@ export async function handler(event: SESEvent): Promise<void> {
   }
   // The real mailboxes (Cognito users). Mail to anything else is rejected.
   const knownMailboxes = await loadMailboxAddresses();
+
+  // New-mail push notifications, queued during delivery and flushed at the end so
+  // they never sit on the critical path of writing the inbox row.
+  const pushJobs: Promise<void>[] = [];
 
   for (const rec of event.Records) {
     const { mail, receipt } = rec.ses;
@@ -491,6 +583,23 @@ export async function handler(event: SESEvent): Promise<void> {
           Item: { pk: mailboxPk(recipient), sk: messageSk(decision.folder, date, messageId), ...meta },
         }),
       );
+
+      // Fan out a new-mail push to this mailbox's mobile devices — inbox only, so
+      // spam/quarantined mail never buzzes the phone. Queued; flushed below.
+      if (decision.folder === "inbox") {
+        pushJobs.push(
+          notifyNewMail(recipient, from.name || from.address, subject, {
+            messageId,
+            mailbox: recipient,
+            folder: decision.folder,
+            threadId,
+          }),
+        );
+      }
     }
   }
+
+  // Flush queued pushes concurrently. Each is already failure-isolated, so a bad
+  // token or Expo outage can never affect mail that's already safely stored.
+  if (pushJobs.length > 0) await Promise.allSettled(pushJobs);
 }

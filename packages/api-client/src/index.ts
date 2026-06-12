@@ -116,4 +116,12 @@ export class MailpoppyClient {
   getUsage(): Promise<MailboxUsage> {
     return this.req(`/usage`);
   }
+  /** Register / refresh this device's Expo push token for new-mail notifications. */
+  registerDevice(token: string, platform: "ios" | "android"): Promise<{ ok: true }> {
+    return this.req(`/devices`, { method: "POST", body: JSON.stringify({ token, platform }) });
+  }
+  /** Unregister a device token (on sign-out, or when it's reported stale). */
+  unregisterDevice(token: string): Promise<{ ok: true }> {
+    return this.req(`/devices/${encodeURIComponent(token)}`, { method: "DELETE" });
+  }
 }
