@@ -302,6 +302,8 @@ interface SendAttachmentInput {
 }
 interface SendBody {
   to?: string[];
+  cc?: string[];
+  bcc?: string[];
   subject?: string;
   html?: string;
   text?: string;
@@ -325,12 +327,25 @@ interface DraftBody {
 
 async function sendMessage(owned: string[], body: SendBody): Promise<APIGatewayProxyResultV2> {
   const to = (body.to ?? []).map(normalizeAddress).filter(Boolean);
-  if (to.length === 0) return json(400, { error: "at least one recipient required" });
+  const cc = (body.cc ?? []).map(normalizeAddress).filter(Boolean);
+  const bcc = (body.bcc ?? []).map(normalizeAddress).filter(Boolean);
+  if (to.length === 0 && cc.length === 0 && bcc.length === 0) {
+    return json(400, { error: "at least one recipient required" });
+  }
 
   // The From address must be one the caller owns — fall back to the primary.
   const requested = normalizeAddress(body.from);
   const from = requested && owned.includes(requested) ? requested : owned[0];
   if (!from) return json(403, { error: "no sending identity" });
+
+  // SES delivery destination. Cc is also rendered as a header (visible); Bcc is
+  // delivery-only and never written into the message headers, so To/Cc recipients
+  // can't see the bcc list.
+  const destination = {
+    ToAddresses: to,
+    ...(cc.length ? { CcAddresses: cc } : {}),
+    ...(bcc.length ? { BccAddresses: bcc } : {}),
+  };
 
   const subject = body.subject ?? "(no subject)";
   const text = body.text ?? "";
@@ -371,6 +386,7 @@ async function sendMessage(owned: string[], body: SendBody): Promise<APIGatewayP
     rawEml = buildMimeMessage({
       from,
       to,
+      cc,
       subject,
       text,
       html,
@@ -383,7 +399,7 @@ async function sendMessage(owned: string[], body: SendBody): Promise<APIGatewayP
     const sent = await ses.send(
       new SendEmailCommand({
         FromEmailAddress: from,
-        Destination: { ToAddresses: to },
+        Destination: destination,
         Content: { Raw: { Data: Buffer.from(rawEml, "utf8") } },
       }),
     );
@@ -396,7 +412,7 @@ async function sendMessage(owned: string[], body: SendBody): Promise<APIGatewayP
     const sent = await ses.send(
       new SendEmailCommand({
         FromEmailAddress: from,
-        Destination: { ToAddresses: to },
+        Destination: destination,
         Content: {
           Simple: {
             Subject: { Data: subject, Charset: "UTF-8" },
@@ -410,7 +426,7 @@ async function sendMessage(owned: string[], body: SendBody): Promise<APIGatewayP
       }),
     );
     messageId = sent.MessageId ?? `local-${Date.now()}`;
-    rawEml = buildRawEml({ from, to, subject, text, html, messageId, date, inReplyTo: body.inReplyTo });
+    rawEml = buildRawEml({ from, to, cc, subject, text, html, messageId, date, inReplyTo: body.inReplyTo });
   }
 
   // Store each attachment to S3 so the Sent copy's attachments are downloadable
@@ -558,6 +574,7 @@ async function deleteDraft(draftId: string, owned: string[]): Promise<APIGateway
 function buildRawEml(m: {
   from: string;
   to: string[];
+  cc?: string[];
   subject: string;
   text: string;
   html?: string;
@@ -569,6 +586,8 @@ function buildRawEml(m: {
   const headers = [
     `From: ${m.from}`,
     `To: ${m.to.join(", ")}`,
+    // Cc is visible; Bcc is never written to the stored/sent message headers.
+    ...(m.cc && m.cc.length ? [`Cc: ${m.cc.join(", ")}`] : []),
     `Subject: ${m.subject}`,
     `Date: ${new Date(m.date).toUTCString()}`,
     `Message-ID: <${m.messageId}>`,

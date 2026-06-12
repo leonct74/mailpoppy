@@ -44,6 +44,20 @@ describe("buildMimeMessage", () => {
     expect(decodePart(mime, "text/html").toString("utf8")).toBe("<b>rich</b>");
   });
 
+  it("renders a Cc header but never a Bcc header", () => {
+    const mime = buildMimeMessage({ ...base, text: "hi", cc: ["copy@x.com", "two@y.com"] });
+    expect(mime).toContain("Cc: copy@x.com, two@y.com");
+    // The Cc line sits between To and Subject (the ordering we emit).
+    expect(mime.indexOf("To:")).toBeLessThan(mime.indexOf("Cc:"));
+    expect(mime.indexOf("Cc:")).toBeLessThan(mime.indexOf("Subject:"));
+    expect(mime).not.toMatch(/^Bcc:/im);
+  });
+
+  it("omits the Cc header when there are no cc recipients", () => {
+    expect(buildMimeMessage({ ...base, text: "hi" })).not.toMatch(/^Cc:/im);
+    expect(buildMimeMessage({ ...base, text: "hi", cc: [] })).not.toMatch(/^Cc:/im);
+  });
+
   it("emits multipart/mixed with an attachment whose bytes round-trip exactly", () => {
     // A tiny PNG header (non-text bytes) to prove binary safety.
     const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0x10, 0x42]);

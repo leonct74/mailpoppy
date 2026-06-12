@@ -24,6 +24,10 @@ export interface SendAttachment {
 }
 export interface SendInput {
   to: string[];
+  /** Visible carbon-copy recipients. */
+  cc?: string[];
+  /** Blind carbon-copy recipients — delivered, but never shown in the message headers. */
+  bcc?: string[];
   subject: string;
   html?: string;
   text?: string;

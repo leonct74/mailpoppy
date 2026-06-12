@@ -14,6 +14,8 @@ export interface MimeAttachment {
 export interface MimeMessageInput {
   from: string;
   to: string[];
+  /** Visible carbon-copy recipients (added as a Cc header). */
+  cc?: string[];
   subject: string;
   text?: string;
   html?: string;
@@ -89,6 +91,9 @@ export function buildMimeMessage(m: MimeMessageInput): string {
   const headers = [
     `From: ${m.from}`,
     `To: ${m.to.join(", ")}`,
+    // Cc is visible to all recipients; Bcc is intentionally NOT a header — bcc
+    // recipients are delivered via the SES Destination only, never disclosed here.
+    ...(m.cc && m.cc.length ? [`Cc: ${m.cc.join(", ")}`] : []),
     `Subject: ${headerWord(m.subject)}`,
     `Date: ${dateStr}`,
     `Message-ID: <${m.messageId}>`,
