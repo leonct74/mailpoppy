@@ -1,5 +1,59 @@
 import type { MessageMeta, Folder, MessageFlags } from "@mailpoppy/core";
 
+/**
+ * An API call that failed. `message` is always safe to show a user directly;
+ * `status` (0 means the request never reached the server) and `detail` (the raw
+ * server body) are kept for logging/debugging, not for display.
+ */
+export class MailpoppyApiError extends Error {
+  readonly status: number;
+  readonly detail: string;
+  constructor(status: number, detail: string, message: string) {
+    super(message);
+    this.name = "MailpoppyApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+/**
+ * Pull out a human-readable message the access-api Lambda intentionally returned
+ * (`{ "error": "…" }`). API Gateway's own failures use `{ "message": "…" }`
+ * (e.g. the 413 "Request entity too large") — we deliberately ignore those so
+ * infrastructure noise never reaches a user.
+ */
+function serverError(detail: string): string | undefined {
+  try {
+    const j = JSON.parse(detail) as { error?: unknown };
+    if (typeof j.error === "string" && j.error.trim()) return j.error.trim();
+  } catch {
+    /* not JSON */
+  }
+  return undefined;
+}
+
+/** Map an HTTP status (0 = network failure) to a friendly, user-facing message. */
+export function friendlyApiMessage(status: number, detail = ""): string {
+  switch (status) {
+    case 0:
+      return "Couldn't reach the mail server. Check your connection and try again.";
+    case 401:
+      return "Your session has expired. Please sign in again.";
+    case 403:
+      return serverError(detail) ?? "You don't have permission to do that.";
+    case 404:
+      return "That message couldn't be found — it may have been moved or deleted.";
+    case 413:
+      return "This message is too large to send. Attachments must total under about 4 MB — remove or shrink one and try again.";
+    case 408:
+    case 429:
+      return "The mail server is busy. Please wait a moment and try again.";
+    default:
+      if (status >= 500) return "The mail server ran into a problem. Please try again in a moment.";
+      return serverError(detail) ?? "Something went wrong. Please try again.";
+  }
+}
+
 export interface MailpoppyClientConfig {
   /** Base URL of the deployment's API Gateway. */
   apiBaseUrl: string;
@@ -64,15 +118,24 @@ export class MailpoppyClient {
 
   private async req<T>(path: string, init?: RequestInit): Promise<T> {
     const token = await this.cfg.getToken();
-    const res = await fetch(`${this.cfg.apiBaseUrl}${path}`, {
-      ...init,
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${token}`,
-        ...(init?.headers ?? {}),
-      },
-    });
-    if (!res.ok) throw new Error(`Mailpoppy API ${res.status}: ${await res.text()}`);
+    let res: Response;
+    try {
+      res = await fetch(`${this.cfg.apiBaseUrl}${path}`, {
+        ...init,
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+          ...(init?.headers ?? {}),
+        },
+      });
+    } catch (e) {
+      // The request never reached the server (offline, DNS, TLS, aborted).
+      throw new MailpoppyApiError(0, String(e), friendlyApiMessage(0));
+    }
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new MailpoppyApiError(res.status, detail, friendlyApiMessage(res.status, detail));
+    }
     return (await res.json()) as T;
   }
 

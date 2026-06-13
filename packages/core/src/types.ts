@@ -108,5 +108,17 @@ export const DEFAULT_POLICY: DeploymentPolicy = {
 
 // ---- Hard AWS limits (DESIGN §10) ----
 export const SES_MAX_MESSAGE_BYTES = 40 * 1024 * 1024;
+/**
+ * Largest total raw attachment bytes a client should let a user add to one
+ * message. This is NOT bounded by SES's 40 MB ceiling — the binding limit is the
+ * send transport: attachments travel as base64 inside the JSON request body
+ * (base64 inflates raw bytes by ~1.33×), and that request must pass through
+ *   • API Gateway HTTP API — hard 10 MB request payload limit, returns 413, and
+ *   • the access-api Lambda — synchronous invocation payload limit of 6 MB.
+ * The Lambda's 6 MB is the tighter wall: 4 MB raw → ~5.6 MB base64 + headers,
+ * comfortably under 6 MB. Anything larger needs a different upload path
+ * (presigned S3 PUT + server-side MIME assembly), not a config change.
+ */
+export const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
 export const SES_INBOUND_REGIONS = ["eu-west-1", "us-east-1", "us-west-2"] as const;
 export type SesInboundRegion = (typeof SES_INBOUND_REGIONS)[number];
