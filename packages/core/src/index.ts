@@ -8,6 +8,7 @@ export * from "./storage";
 export * from "./sesAccount";
 export * from "./mailFrom";
 export * from "./policy";
+export * from "./sendSettings";
 export * from "./push";
 export * from "./retention";
 export * from "./deliverability";

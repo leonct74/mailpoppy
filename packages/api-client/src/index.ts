@@ -73,8 +73,25 @@ export interface ListResult {
 export interface SendAttachment {
   filename: string;
   contentType: string;
-  /** base64-encoded file bytes. */
-  contentBase64: string;
+  /** base64-encoded file bytes — the inline path, for small files. */
+  contentBase64?: string;
+  /**
+   * S3 staging key returned by presignAttachment() — the large-file path. The
+   * file was uploaded straight to S3, so it never travels through the API. Set
+   * either this or contentBase64, not both.
+   */
+  s3Key?: string;
+}
+export interface PresignAttachmentInput {
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+}
+export interface PresignAttachmentResult {
+  /** Short-lived presigned S3 PUT URL — upload the bytes here. */
+  uploadUrl: string;
+  /** The staging key to pass back as SendAttachment.s3Key. */
+  key: string;
 }
 export interface SendInput {
   to: string[];
@@ -169,6 +186,18 @@ export class MailpoppyClient {
   send(input: SendInput): Promise<{ messageId: string }> {
     return this.req(`/send`, { method: "POST", body: JSON.stringify(input) });
   }
+  /** The deployment's outbound limits (e.g. the admin-set max attachment size). */
+  getSendConfig(): Promise<{ maxAttachmentBytes: number }> {
+    return this.req(`/send-config`);
+  }
+  /**
+   * Reserve an S3 staging slot for a large attachment and get a presigned PUT URL.
+   * Upload the bytes to `uploadUrl` (via putToPresignedUrl or, on React Native,
+   * expo-file-system), then pass `key` back as SendAttachment.s3Key.
+   */
+  presignAttachment(input: PresignAttachmentInput): Promise<PresignAttachmentResult> {
+    return this.req(`/attachments/presign`, { method: "POST", body: JSON.stringify(input) });
+  }
   /** Create or update a draft. Returns the (possibly newly minted) draft id. */
   saveDraft(input: SaveDraftInput): Promise<{ draftId: string } & MessageMeta> {
     return this.req(`/drafts`, { method: "POST", body: JSON.stringify(input) });
@@ -186,5 +215,34 @@ export class MailpoppyClient {
   /** Unregister a device token (on sign-out, or when it's reported stale). */
   unregisterDevice(token: string): Promise<{ ok: true }> {
     return this.req(`/devices/${encodeURIComponent(token)}`, { method: "DELETE" });
+  }
+}
+
+/**
+ * Upload raw bytes to a presigned S3 PUT URL. The signed URL is itself the
+ * credential, so this sends NO Authorization header — it's a direct upload to
+ * S3, not an API call. The content-type MUST match the one passed to
+ * presignAttachment() or S3 rejects the signature. Used by the browser/desktop
+ * clients; React Native uploads via expo-file-system's uploadAsync instead.
+ * Throws MailpoppyApiError on failure.
+ */
+export async function putToPresignedUrl(
+  uploadUrl: string,
+  body: Blob | ArrayBuffer | Uint8Array,
+  contentType: string,
+): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(uploadUrl, {
+      method: "PUT",
+      body: body as BodyInit,
+      headers: { "content-type": contentType },
+    });
+  } catch (e) {
+    throw new MailpoppyApiError(0, String(e), friendlyApiMessage(0));
+  }
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new MailpoppyApiError(res.status, detail, friendlyApiMessage(res.status, detail));
   }
 }

@@ -20,6 +20,7 @@ import {
   GetCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { SESv2Client, SendEmailCommand, type MessageHeader } from "@aws-sdk/client-sesv2";
+import { randomUUID } from "node:crypto";
 import {
   type MessageMeta,
   type Folder,
@@ -40,6 +41,10 @@ import {
   removeDeviceToken,
   pruneDeviceTokens,
   type DeviceRegistry,
+  sendSettingsKey,
+  normalizeSendSettings,
+  type SendSettings,
+  formatBytes,
 } from "@mailpoppy/core";
 
 /**
@@ -64,6 +69,10 @@ const MAIL_BUCKET = process.env.MAIL_BUCKET ?? "";
 const BY_MESSAGE_INDEX = process.env.BY_MESSAGE_INDEX ?? "by-message";
 const SENT_PREFIX = process.env.SENT_PREFIX ?? "sent/";
 const DRAFTS_PREFIX = process.env.DRAFTS_PREFIX ?? "drafts/";
+// Large attachments are uploaded straight to S3 under this prefix (via a presigned
+// PUT), then pulled into the outgoing message by /send. A bucket lifecycle rule
+// expires anything left here, so abandoned uploads clean themselves up.
+const STAGING_PREFIX = process.env.STAGING_PREFIX ?? "outbound-staging/";
 
 function json(statusCode: number, body: unknown): APIGatewayProxyResultV2 {
   return {
@@ -77,6 +86,28 @@ function json(statusCode: number, body: unknown): APIGatewayProxyResultV2 {
 function toMeta(item: Record<string, unknown>): MessageMeta {
   const { pk: _pk, sk: _sk, ...rest } = item;
   return rest as unknown as MessageMeta;
+}
+
+/** The deployment's outbound settings (admin-set max attachment size, etc.). */
+async function loadSendSettings(): Promise<SendSettings> {
+  if (!SETTINGS_TABLE) return normalizeSendSettings(null);
+  try {
+    const res = await ddb.send(
+      new GetCommand({ TableName: SETTINGS_TABLE, Key: { pk: sendSettingsKey() } }),
+    );
+    return normalizeSendSettings(res.Item as Partial<SendSettings> | undefined);
+  } catch {
+    return normalizeSendSettings(null);
+  }
+}
+
+/**
+ * The staging-key prefix segment that belongs to this caller. Presign writes keys
+ * under it and /send only accepts keys under it, so one user can never reference
+ * another user's staged upload (defense in depth, like the rest of this file).
+ */
+function stagingOwnerSegment(owned: string[]): string {
+  return (owned[0] ?? "unknown").replace(/[^a-z0-9._-]+/gi, "_");
 }
 
 /**
@@ -304,7 +335,15 @@ async function moveMessage(
 interface SendAttachmentInput {
   filename: string;
   contentType: string;
-  contentBase64: string;
+  /** Inline base64 bytes (small files) — or set s3Key for the staged-upload path. */
+  contentBase64?: string;
+  /** Staging key from POST /attachments/presign (large files uploaded to S3). */
+  s3Key?: string;
+}
+interface PresignBody {
+  filename?: string;
+  contentType?: string;
+  sizeBytes?: number;
 }
 interface SendBody {
   to?: string[];
@@ -357,21 +396,49 @@ async function sendMessage(owned: string[], body: SendBody): Promise<APIGatewayP
   const text = body.text ?? "";
   const html = body.html;
 
-  // Decode attachments once (shared between the SES send and the Sent-copy store).
+  // Gather attachment bytes (shared between the SES send and the Sent-copy store).
+  // Two paths: small files arrive inline as base64; large files were uploaded
+  // straight to S3 (presigned PUT) and arrive as a staging key we fetch here.
   // Harden the content type server-side too: a generic/empty type makes Gmail and
   // others refuse to open the file ("Unsupported file type"), so infer it from
   // the filename extension when the client didn't send a specific one.
   const inputAttachments = body.attachments ?? [];
-  const decoded = inputAttachments.map((a) => {
-    const filename = a.filename || "attachment";
-    return {
-      filename,
-      contentType: resolveContentType(a.contentType, filename),
-      bytes: Buffer.from(a.contentBase64 ?? "", "base64"),
-    };
-  });
+  const ownerSeg = stagingOwnerSegment(owned);
+  // Never trust a client-supplied key: only accept staged objects under this
+  // caller's own prefix.
+  for (const a of inputAttachments) {
+    if (a.s3Key && !String(a.s3Key).startsWith(`${STAGING_PREFIX}${ownerSeg}/`)) {
+      return json(403, { error: "attachment not authorized" });
+    }
+  }
+  const stagedKeys: string[] = [];
+  let decoded: { filename: string; contentType: string; bytes: Buffer }[];
+  try {
+    decoded = await Promise.all(
+      inputAttachments.map(async (a) => {
+        const filename = a.filename || "attachment";
+        const contentType = resolveContentType(a.contentType, filename);
+        if (a.s3Key) {
+          const key = String(a.s3Key);
+          const obj = await s3.send(new GetObjectCommand({ Bucket: MAIL_BUCKET, Key: key }));
+          const bytes = Buffer.from(await obj.Body!.transformToByteArray());
+          stagedKeys.push(key);
+          return { filename, contentType, bytes };
+        }
+        return { filename, contentType, bytes: Buffer.from(a.contentBase64 ?? "", "base64") };
+      }),
+    );
+  } catch (e) {
+    console.error("send: staged attachment fetch failed", e);
+    return json(400, { error: "a staged attachment couldn't be read — please re-attach and try again" });
+  }
 
   const attachmentBytes = decoded.reduce((n, a) => n + a.bytes.length, 0);
+  // Enforce the admin-configured cap as well as SES's hard 40 MB ceiling.
+  const sendSettings = await loadSendSettings();
+  if (attachmentBytes > sendSettings.maxAttachmentBytes) {
+    return json(413, { error: `attachments exceed the ${formatBytes(sendSettings.maxAttachmentBytes)} limit` });
+  }
   const approxBytes = Buffer.byteLength(subject + text + (html ?? ""), "utf8") + attachmentBytes;
   if (approxBytes > SES_MAX_MESSAGE_BYTES) {
     return json(413, { error: "message exceeds the 40MB SES limit" });
@@ -488,7 +555,51 @@ async function sendMessage(owned: string[], body: SendBody): Promise<APIGatewayP
     }
   }
 
+  // Drop the staged uploads now they've been copied into the Sent attachments.
+  // Best-effort — the bucket lifecycle rule is the backstop if any delete fails.
+  if (stagedKeys.length > 0) {
+    await Promise.allSettled(
+      stagedKeys.map((key) => s3.send(new DeleteObjectCommand({ Bucket: MAIL_BUCKET, Key: key }))),
+    );
+  }
+
   return json(200, { messageId });
+}
+
+// ---- Outbound config + large-attachment staging -----------------------------
+
+/** Expose the deployment's send limits so clients show the right cap up front. */
+async function getSendConfig(): Promise<APIGatewayProxyResultV2> {
+  const settings = await loadSendSettings();
+  return json(200, { maxAttachmentBytes: settings.maxAttachmentBytes });
+}
+
+/**
+ * Reserve an S3 staging slot for a large attachment and hand back a short-lived
+ * presigned PUT URL. The size is validated against the admin-set cap here so the
+ * client is told "too large" before it uploads a single byte. The key is scoped
+ * to the caller (stagingOwnerSegment) so /send can prove ownership later.
+ */
+async function presignUpload(owned: string[], body: PresignBody): Promise<APIGatewayProxyResultV2> {
+  const size = Number(body.sizeBytes);
+  if (!Number.isFinite(size) || size <= 0) {
+    return json(400, { error: "missing or invalid sizeBytes" });
+  }
+  const settings = await loadSendSettings();
+  if (size > settings.maxAttachmentBytes) {
+    return json(413, { error: `attachment exceeds the ${formatBytes(settings.maxAttachmentBytes)} limit` });
+  }
+  const filename = (body.filename || "attachment").replace(/[^\w.\-]+/g, "_").slice(0, 200);
+  const key = `${STAGING_PREFIX}${stagingOwnerSegment(owned)}/${randomUUID()}/${filename}`;
+  // Sign only the bucket + key — not the content-type — so the client can PUT the
+  // bytes with whatever (or no) content-type header without a signature mismatch.
+  // /send rebuilds the MIME with its own resolved content-type regardless.
+  const uploadUrl = await getSignedUrl(
+    s3,
+    new PutObjectCommand({ Bucket: MAIL_BUCKET, Key: key }),
+    { expiresIn: 300 },
+  );
+  return json(200, { uploadUrl, key });
 }
 
 // ---- Drafts -----------------------------------------------------------------
@@ -705,6 +816,10 @@ export async function handler(
       }
       case "POST /send":
         return await sendMessage(owned, parseBody<SendBody>());
+      case "GET /send-config":
+        return await getSendConfig();
+      case "POST /attachments/presign":
+        return await presignUpload(owned, parseBody<PresignBody>());
       case "POST /drafts":
         return await saveDraft(owned, parseBody<DraftBody>());
       case "DELETE /drafts/{id}":

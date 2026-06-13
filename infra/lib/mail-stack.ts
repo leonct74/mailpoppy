@@ -84,6 +84,28 @@ export class MailStack extends Stack {
       encryption: s3.BucketEncryption.S3_MANAGED,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       enforceSSL: true,
+      // Let clients (desktop webview / web app) upload large attachments straight
+      // to S3 via presigned URLs. The signed URL is the credential; CORS only
+      // governs which browser origins may issue the request, so "*" is safe here.
+      cors: [
+        {
+          allowedMethods: [s3.HttpMethods.PUT, s3.HttpMethods.GET, s3.HttpMethods.HEAD],
+          allowedOrigins: ["*"],
+          allowedHeaders: ["*"],
+          exposedHeaders: ["ETag"],
+          maxAge: 3000,
+        },
+      ],
+      // Auto-expire abandoned outbound-staging uploads (the backstop for /send's
+      // own best-effort cleanup) so staged bytes never accrue storage cost.
+      lifecycleRules: [
+        {
+          id: "expire-outbound-staging",
+          prefix: "outbound-staging/",
+          expiration: Duration.days(1),
+          abortIncompleteMultipartUploadAfter: Duration.days(1),
+        },
+      ],
     });
 
     // The "mailbox" — manufactured state (flags, folders, threads) on top of S3.
@@ -249,6 +271,9 @@ export class MailStack extends Stack {
     httpApi.addRoutes({ path: "/messages/{id}/flags", methods: [HttpMethod.PATCH], integration });
     httpApi.addRoutes({ path: "/messages/{id}/move", methods: [HttpMethod.POST], integration });
     httpApi.addRoutes({ path: "/send", methods: [HttpMethod.POST], integration });
+    // Outbound config + large-attachment staging (presigned direct-to-S3 upload).
+    httpApi.addRoutes({ path: "/send-config", methods: [HttpMethod.GET], integration });
+    httpApi.addRoutes({ path: "/attachments/presign", methods: [HttpMethod.POST], integration });
     httpApi.addRoutes({ path: "/drafts", methods: [HttpMethod.POST], integration });
     httpApi.addRoutes({ path: "/drafts/{id}", methods: [HttpMethod.DELETE], integration });
     // Mobile push: register/refresh + unregister an Expo device token.

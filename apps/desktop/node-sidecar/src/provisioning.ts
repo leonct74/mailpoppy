@@ -76,6 +76,9 @@ import {
   normalizeSpamPolicy,
   retentionSettingsKey,
   normalizeRetention,
+  sendSettingsKey,
+  normalizeSendSettings,
+  type SendSettings,
   rate,
   type MailboxStorage,
   type SesAccountStatus,
@@ -1358,6 +1361,52 @@ export async function setSpamPolicy(
     }),
   );
   return { ok: true, policy };
+}
+
+// ---- Send settings (admin: max outgoing attachment size) ----
+
+/** Read the deployment-wide send settings (defaults if unset). */
+export async function getSendSettings(
+  ctx: AwsContext,
+  args: { stackName?: string },
+): Promise<SendSettings> {
+  const { dynamodb } = clients(ctx);
+  const stackName = args.stackName ?? "MailpoppyMailStack";
+  const outputs = await getStackOutputs(ctx, stackName);
+  const settingsTable = await resolveSettingsTableName(ctx, stackName, outputs);
+  if (!settingsTable) return normalizeSendSettings(null);
+  const out = await dynamodb.send(
+    new GetItemCommand({ TableName: settingsTable, Key: { pk: { S: sendSettingsKey() } } }),
+  );
+  const raw = out.Item?.maxAttachmentBytes?.N;
+  return normalizeSendSettings(raw ? { maxAttachmentBytes: Number(raw) } : null);
+}
+
+/**
+ * Write the max attachment size (normalized + clamped to 1–40 MB). Stored as a
+ * plain Number attribute so the access-api Lambda reads it back directly.
+ */
+export async function setSendSettings(
+  ctx: AwsContext,
+  args: { stackName?: string; maxAttachmentBytes: number },
+): Promise<{ ok: true; settings: SendSettings }> {
+  const { dynamodb } = clients(ctx);
+  const stackName = args.stackName ?? "MailpoppyMailStack";
+  const outputs = await getStackOutputs(ctx, stackName);
+  const settingsTable = await resolveSettingsTableName(ctx, stackName, outputs);
+  if (!settingsTable) throw new Error("settings table not found — re-deploy the backend to enable this");
+
+  const settings = normalizeSendSettings({ maxAttachmentBytes: args.maxAttachmentBytes });
+  await dynamodb.send(
+    new PutItemCommand({
+      TableName: settingsTable,
+      Item: {
+        pk: { S: sendSettingsKey() },
+        maxAttachmentBytes: { N: String(settings.maxAttachmentBytes) },
+      },
+    }),
+  );
+  return { ok: true, settings };
 }
 
 // ---- Retention (admin: how long mail is kept, DESIGN §10) ----

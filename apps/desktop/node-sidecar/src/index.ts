@@ -588,6 +588,29 @@ app.post("/policy/retention", async (req, reply) => {
   }
 });
 
+// ---- Send settings (max outgoing attachment size) ----
+
+app.get("/send/settings/:stackName", async (req, reply) => {
+  const stackName = (req.params as { stackName: string }).stackName;
+  try {
+    return await prov.getSendSettings(ctx(), { stackName });
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
+app.post("/send/settings", async (req, reply) => {
+  const b = (req.body ?? {}) as { stackName?: string; maxAttachmentBytes?: number };
+  if (typeof b.maxAttachmentBytes !== "number") {
+    return reply.code(400).send({ ok: false, error: "maxAttachmentBytes is required" });
+  }
+  try {
+    return await prov.setSendSettings(ctx(), { stackName: b.stackName, maxAttachmentBytes: b.maxAttachmentBytes });
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
 // ---- Teardown: remove everything Mailpoppy deployed for a domain ----
 
 // Read-only: every domain this backend was provisioned for (so the teardown

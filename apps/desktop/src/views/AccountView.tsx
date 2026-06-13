@@ -1,6 +1,7 @@
 import { SlidersHorizontal } from "lucide-react";
 import { resolveStackName } from "../lib/deploymentConfig";
 import { SendingAccessView } from "./SendingAccessView";
+import { SendSettingsEditor } from "./SendSettingsEditor";
 import { ResourcesView } from "./ResourcesView";
 import { Card } from "../ui";
 
@@ -36,6 +37,11 @@ export function AccountView({ stackName = resolveStackName() }: { stackName?: st
 
       {/* Sending health lives in its own sidebar view ("Sending health"), per
           domain — not here. */}
+
+      {/* Max outgoing attachment size — deployment-wide (one backend, one limit). */}
+      <Card>
+        <SendSettingsEditor stackName={stackName} />
+      </Card>
 
       {/* AWS resource inventory — read-only (self-loads; handles no-backend itself).
           Teardown is per-domain, in each domain's workspace. */}
