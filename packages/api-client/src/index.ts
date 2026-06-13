@@ -183,6 +183,10 @@ export class MailpoppyClient {
       body: JSON.stringify({ folder }),
     });
   }
+  /** Permanently delete every message in the Trash folder. Irreversible. */
+  emptyTrash(): Promise<{ ok: boolean; deleted: number }> {
+    return this.req(`/trash/empty`, { method: "POST" });
+  }
   send(input: SendInput): Promise<{ messageId: string }> {
     return this.req(`/send`, { method: "POST", body: JSON.stringify(input) });
   }

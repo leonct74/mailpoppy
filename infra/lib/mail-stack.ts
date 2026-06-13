@@ -270,6 +270,8 @@ export class MailStack extends Stack {
     httpApi.addRoutes({ path: "/messages/{id}/attachments/{index}", methods: [HttpMethod.GET], integration });
     httpApi.addRoutes({ path: "/messages/{id}/flags", methods: [HttpMethod.PATCH], integration });
     httpApi.addRoutes({ path: "/messages/{id}/move", methods: [HttpMethod.POST], integration });
+    // Permanently empty the Trash folder (user-driven hard delete).
+    httpApi.addRoutes({ path: "/trash/empty", methods: [HttpMethod.POST], integration });
     httpApi.addRoutes({ path: "/send", methods: [HttpMethod.POST], integration });
     // Outbound config + large-attachment staging (presigned direct-to-S3 upload).
     httpApi.addRoutes({ path: "/send-config", methods: [HttpMethod.GET], integration });

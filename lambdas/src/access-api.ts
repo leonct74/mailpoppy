@@ -332,6 +332,42 @@ async function moveMessage(
   return json(200, toMeta(newItem));
 }
 
+/**
+ * Permanently empty the Trash folder for every mailbox the caller owns. This is
+ * the user-driven counterpart to the janitor's scheduled purge: each trashed
+ * message's raw S3 object and its index row are hard-deleted. Irreversible, and
+ * scoped to "trash" only — nothing in other folders is touched.
+ */
+async function emptyTrash(owned: string[]): Promise<APIGatewayProxyResultV2> {
+  let deleted = 0;
+  for (const address of owned) {
+    let ExclusiveStartKey: Record<string, unknown> | undefined;
+    do {
+      const out = await ddb.send(
+        new QueryCommand({
+          TableName: INDEX_TABLE,
+          KeyConditionExpression: "pk = :pk AND begins_with(sk, :pfx)",
+          ExpressionAttributeValues: { ":pk": mailboxPk(address), ":pfx": folderPrefix("trash") },
+          ProjectionExpression: "pk, sk, s3Key",
+          ExclusiveStartKey,
+        }),
+      );
+      for (const item of out.Items ?? []) {
+        const s3Key = item.s3Key ? String(item.s3Key) : "";
+        if (s3Key) {
+          await s3
+            .send(new DeleteObjectCommand({ Bucket: MAIL_BUCKET, Key: s3Key }))
+            .catch((e) => console.error("s3 delete failed", s3Key, e));
+        }
+        await ddb.send(new DeleteCommand({ TableName: INDEX_TABLE, Key: { pk: item.pk, sk: item.sk } }));
+        deleted += 1;
+      }
+      ExclusiveStartKey = out.LastEvaluatedKey as Record<string, unknown> | undefined;
+    } while (ExclusiveStartKey);
+  }
+  return json(200, { ok: true, deleted });
+}
+
 interface SendAttachmentInput {
   filename: string;
   contentType: string;
@@ -814,6 +850,8 @@ export async function handler(
         if (!b.folder) return json(400, { error: "missing folder" });
         return await moveMessage(id, owned, b.folder);
       }
+      case "POST /trash/empty":
+        return await emptyTrash(owned);
       case "POST /send":
         return await sendMessage(owned, parseBody<SendBody>());
       case "GET /send-config":
