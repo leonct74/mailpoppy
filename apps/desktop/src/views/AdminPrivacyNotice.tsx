@@ -63,11 +63,6 @@ export function AdminPrivacyNotice() {
               data-residency rules that apply to your users (for example, an EU region for EU personal data).
             </li>
             <li>
-              <b className="text-on-surface">Mail belongs to its owner.</b> Each mailbox is opened with the user's own
-              password. Mailpoppy never asks you to read someone's mail, and you shouldn't access it without their
-              authorization.
-            </li>
-            <li>
               <b className="text-on-surface">You decide how long mail is kept.</b> Some rules set a minimum retention,
               others a maximum — Mailpoppy lets you set a policy that fits (by default, mail is kept until you delete it).
             </li>
