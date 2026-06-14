@@ -8,6 +8,7 @@ import { MailboxStorageRow } from "./MailboxStorageRow";
 import { MailFromSetup } from "./MailFromSetup";
 import { RegionPicker } from "./RegionPicker";
 import { AwsOnboarding } from "./AwsOnboarding";
+import { friendlyError } from "../lib/errors";
 import { AdminPrivacyNotice } from "./AdminPrivacyNotice";
 import { Card, Button, Spinner, cn } from "../ui";
 
@@ -161,7 +162,7 @@ export function SetupWizard({
         retryRef.current = window.setTimeout(() => void loadReadiness(attempt + 1), 1200);
       } else {
         setError(
-          `Could not reach the local provisioning helper after several tries. Make sure the app's sidecar is running (it starts automatically with the desktop app). ${String(e)}`,
+          `Could not reach the local provisioning helper after several tries. Make sure the app's sidecar is running (it starts automatically with the desktop app). ${friendlyError(e)}`,
         );
         setChecking(false);
       }
@@ -176,7 +177,7 @@ export function SetupWizard({
   }, []);
 
   function fail(e: unknown, back?: Step) {
-    setError(String(e));
+    setError(friendlyError(e));
     setBusy(false);
     if (back) setStep(back);
   }
@@ -249,7 +250,7 @@ export function SetupWizard({
         }
       } catch (e) {
         if (!cancelled) {
-          setError(String(e));
+          setError(friendlyError(e));
           setStep("preflighted");
         }
         return;
@@ -346,7 +347,7 @@ export function SetupWizard({
       if (/\b404\b/.test(msg) && /No deployed Mailpoppy backend/i.test(msg)) {
         setMbNoBackend(true);
       } else {
-        setMbError(msg);
+        setMbError(friendlyError(e));
       }
     }
   }
@@ -385,7 +386,7 @@ export function SetupWizard({
       }
       await loadMailboxes();
     } catch (e) {
-      setMbError(String(e));
+      setMbError(friendlyError(e));
     } finally {
       setMbBusy(false);
     }

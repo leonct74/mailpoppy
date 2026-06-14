@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { isValidListEntry, type SpamPolicy } from "@mailpoppy/core";
 import { getSpamPolicy as defaultGet, setSpamPolicy as defaultSet } from "../lib/policy";
 import { Button } from "../ui";
+import { friendlyError } from "../lib/errors";
 
 // "Mail rules" editor for the wizard: per-verdict actions (spam / auth-fail /
 // virus → junk/tag/reject) + sender allow/block lists. The inbound-processor
@@ -76,7 +77,7 @@ export function PolicyEditor({ stackName, domain, load, save }: PolicyEditorProp
     try {
       applyPolicy(await loadPolicy(stackName, domain));
     } catch (e) {
-      setErr(String(e));
+      setErr(friendlyError(e));
     } finally {
       setLoading(false);
     }
@@ -99,7 +100,7 @@ export function PolicyEditor({ stackName, domain, load, save }: PolicyEditorProp
       applyPolicy(res.policy); // reflect server-normalized (deduped/lowercased) lists
       setSaved(true);
     } catch (e) {
-      setErr(String(e));
+      setErr(friendlyError(e));
     } finally {
       setSaving(false);
     }

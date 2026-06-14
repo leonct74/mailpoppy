@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { RetentionSettings } from "@mailpoppy/core";
 import { getRetention as defaultGet, setRetention as defaultSet } from "../lib/retention";
 import { Button } from "../ui";
+import { friendlyError } from "../lib/errors";
 
 // "How long mail is kept" editor. AWS never auto-deletes mail, so the safe default
 // is keep-indefinitely (+ auto-purge Trash). A delete-after window is opt-in and
@@ -46,7 +47,7 @@ export function RetentionEditor({ stackName, domain, load, save }: RetentionEdit
       try {
         apply(await loadRetention(stackName, domain));
       } catch (e) {
-        setErr(String(e));
+        setErr(friendlyError(e));
       } finally {
         setLoading(false);
       }
@@ -67,7 +68,7 @@ export function RetentionEditor({ stackName, domain, load, save }: RetentionEdit
       apply(res.retention);
       setSaved(true);
     } catch (e) {
-      setErr(String(e));
+      setErr(friendlyError(e));
     } finally {
       setSaving(false);
     }

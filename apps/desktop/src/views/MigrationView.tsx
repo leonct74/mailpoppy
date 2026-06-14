@@ -9,6 +9,7 @@ import {
 import { listMailboxes, type Mailbox } from "../lib/mailbox";
 import { resolveStackName } from "../lib/deploymentConfig";
 import { Button, Card, Spinner, cn } from "../ui";
+import { friendlyError } from "../lib/errors";
 
 // Phase 4 — "Bring your old mail across." Connects to the user's existing
 // WorkMail / IMAP account (credentials stay on this machine, in the sidecar),
@@ -264,7 +265,7 @@ export function MigrationView({
         setMbNotice(
           /\b404\b/.test(msg) && /No deployed Mailpoppy backend/i.test(msg)
             ? "No backend is deployed yet. Run Setup (deploy a backend, then create a mailbox) before importing mail."
-            : `Couldn't load your mailboxes: ${msg}`,
+            : `Couldn't load your mailboxes: ${friendlyError(e)}`,
         );
       })
       .finally(() => {
@@ -313,7 +314,7 @@ export function MigrationView({
       setSelected(new Set(res.folders.filter((f) => f.messages > 0).map((f) => f.path)));
     } catch (e) {
       setFolders(null);
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     } finally {
       setBusy("");
     }
@@ -332,7 +333,7 @@ export function MigrationView({
       });
       setSummary(res);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     } finally {
       setBusy("");
     }

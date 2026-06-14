@@ -35,6 +35,7 @@ import { buildReply, type ComposeInit, type ReplyMode } from "../lib/reply";
 import { renderMarkdown } from "../lib/compose";
 import { filterMessages } from "../lib/search";
 import { Button, Spinner, cn } from "../ui";
+import { friendlyError } from "../lib/errors";
 
 // Phase 2 mailbox UI: browse folders, read a message (sanitized HTML, remote
 // images blocked by default), toggle read/star, move to trash / restore, and
@@ -128,7 +129,7 @@ export function InboxView({
       const res = await mail.list({ folder: f, limit: 100 });
       setItems(res.items);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     } finally {
       setLoading(false);
     }
@@ -156,7 +157,7 @@ export function InboxView({
     try {
       ({ eml } = await mail.getRaw(m.messageId));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
       return;
     }
     setRaw(eml);
@@ -168,7 +169,7 @@ export function InboxView({
         setItems((prev) => prev.map((x) => (x.messageId === m.messageId ? { ...x, flags: { ...x.flags, unread: false } } : x)));
         setSelected((s) => (s ? { ...s, flags: { ...s.flags, unread: false } } : s));
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(friendlyError(e));
       }
     }
 
@@ -189,7 +190,7 @@ export function InboxView({
       // If nothing could open it (Tauri opener not active yet), show the link.
       if (!opened) setAttachmentLink({ url, filename: _filename });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     }
   }
 
@@ -646,7 +647,7 @@ function ComposeDialog({
       const added = await filesToAttachments(files);
       setAttachments((prev) => [...prev, ...added]);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(friendlyError(e));
     }
   }
 
@@ -668,7 +669,7 @@ function ComposeDialog({
         attachments: attachments.length ? attachments : undefined,
       });
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(friendlyError(e));
       setSending(false);
     }
   }

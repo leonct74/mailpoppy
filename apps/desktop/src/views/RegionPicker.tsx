@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { friendlyError } from "../lib/errors";
 import {
   getRegion as defaultGet,
   setRegion as defaultSet,
@@ -53,7 +54,7 @@ export function RegionPicker({ lockedRegion, load, save }: RegionPickerProps) {
           setRegionState(cfg.region);
         }
       } catch (e) {
-        setErr(String(e));
+        setErr(friendlyError(e));
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -67,7 +68,7 @@ export function RegionPicker({ lockedRegion, load, save }: RegionPickerProps) {
       persistRegion(r.region);
       setRegionState(r.region);
     } catch (e) {
-      setErr(String(e));
+      setErr(friendlyError(e));
     } finally {
       setBusy(false);
     }

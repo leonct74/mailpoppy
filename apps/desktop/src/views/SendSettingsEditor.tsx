@@ -8,6 +8,7 @@ import {
 } from "@mailpoppy/core";
 import { getSendSettings as defaultGet, setSendSettings as defaultSet } from "../lib/sendSettings";
 import { Button } from "../ui";
+import { friendlyError } from "../lib/errors";
 
 // "Max attachment size" editor — deployment-wide. Large files are uploaded
 // straight to S3 (presigned PUT) and assembled into the message server-side, so
@@ -46,7 +47,7 @@ export function SendSettingsEditor({ stackName, load, save }: SendSettingsEditor
         const s = await loadSettings(stackName);
         setMaxMb(String(Math.round(s.maxAttachmentBytes / MB)));
       } catch (e) {
-        setErr(String(e));
+        setErr(friendlyError(e));
       } finally {
         setLoading(false);
       }
@@ -64,7 +65,7 @@ export function SendSettingsEditor({ stackName, load, save }: SendSettingsEditor
       setMaxMb(String(Math.round(res.settings.maxAttachmentBytes / MB)));
       setSaved(true);
     } catch (e) {
-      setErr(String(e));
+      setErr(friendlyError(e));
     } finally {
       setSaving(false);
     }

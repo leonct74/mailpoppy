@@ -12,6 +12,7 @@ import { getDeliverabilityOverview as defaultLoad } from "../lib/deliverability"
 import { resolveStackName } from "../lib/deploymentConfig";
 import { DeliverabilityGuide } from "./DeliverabilityGuide";
 import { Card, Button, Spinner, cn } from "../ui";
+import { friendlyError } from "../lib/errors";
 
 // "Sending health" — the dedicated, per-domain view (DESIGN §13/§18 Phase 5).
 // A non-technical admin can scroll one page and see, for every domain, whether
@@ -162,7 +163,7 @@ export function SendingHealthView({ stackName = resolveStackName(), load = defau
     try {
       setData(await load(stackName));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(friendlyError(e));
     } finally {
       setLoading(false);
     }

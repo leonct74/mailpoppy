@@ -8,7 +8,8 @@ import {
   type Inventory,
 } from "../lib/resources";
 import { resolveStackName } from "../lib/deploymentConfig";
-import { Card, Button, Spinner, cn } from "../ui";
+import { Card, Button, Spinner, cn, ExtLink } from "../ui";
+import { friendlyError } from "../lib/errors";
 
 // "What Mailpoppy did to your account" (DESIGN §14.1). Shows the authoritative
 // CloudFormation inventory of the deployed stack — grouped by service, every
@@ -82,7 +83,7 @@ export function ResourcesView({
     try {
       setInv(await load(stackName));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     } finally {
       setLoading(false);
     }
@@ -179,9 +180,9 @@ export function ResourcesView({
                           <Td className="text-xs text-on-surface-variant">{r.status}</Td>
                           <Td>
                             {url ? (
-                              <a href={url} target="_blank" rel="noreferrer" className={consoleLink}>
+                              <ExtLink href={url} className={consoleLink}>
                                 Open <ExternalLink className="size-3" />
-                              </a>
+                              </ExtLink>
                             ) : (
                               <span className="text-on-surface-variant/50">—</span>
                             )}
@@ -233,9 +234,9 @@ export function ResourcesView({
                       <Td className="text-xs text-on-surface-variant">{e.resourceType}</Td>
                       <Td className="font-mono text-xs">
                         {url ? (
-                          <a href={url} target="_blank" rel="noreferrer" className={consoleLink}>
+                          <ExtLink href={url} className={consoleLink}>
                             {e.name} <ExternalLink className="size-3" />
-                          </a>
+                          </ExtLink>
                         ) : (
                           <span className={deleted ? "text-on-surface-variant/60 line-through" : "text-on-surface"}>{e.name}</span>
                         )}

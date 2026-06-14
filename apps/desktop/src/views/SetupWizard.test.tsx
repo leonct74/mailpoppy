@@ -60,10 +60,10 @@ describe("SetupWizard · Step 0 readiness gate", () => {
 
     expect(await screen.findByText(/No usable AWS credentials/i)).toBeInTheDocument();
     // The guided "connect your AWS account" panel appears — account sign-up help
-    // plus an in-app key-entry form, so a newcomer never needs a terminal.
+    // plus the recommended CLI path (the key-paste form is a downranked disclosure).
     expect(screen.getByText(/Connect your AWS account/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /aws\.amazon\.com\/free/i })).toBeInTheDocument();
-    expect(screen.getByLabelText("Access Key ID")).toBeInTheDocument();
+    expect(screen.getByText(/aws configure --profile mailpoppy/i)).toBeInTheDocument();
     // Domain input is gated until ready.
     expect(screen.getByPlaceholderText("yourdomain.com")).toBeDisabled();
   });

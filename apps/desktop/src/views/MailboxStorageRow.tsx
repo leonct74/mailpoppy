@@ -7,6 +7,7 @@ import {
   type MailboxDeletion,
 } from "../lib/mailbox";
 import { Button, cn } from "../ui";
+import { friendlyError } from "../lib/errors";
 
 // One row in the Mailboxes list: shows a mailbox's storage usage ("X of Y (Z%)")
 // and lets the admin set or clear its storage limit, or permanently delete the
@@ -70,7 +71,7 @@ export function MailboxStorageRow({
       setInfo(i);
       setGb(i.quotaBytes ? String(+(i.quotaBytes / GB).toFixed(2)) : "");
     } catch (e) {
-      setErr(String(e));
+      setErr(friendlyError(e));
     }
   }
   useEffect(() => {
@@ -91,7 +92,7 @@ export function MailboxStorageRow({
       setEditing(false);
       await load();
     } catch (e) {
-      setErr(String(e));
+      setErr(friendlyError(e));
     } finally {
       setBusy(false);
     }
@@ -105,7 +106,7 @@ export function MailboxStorageRow({
       onDeleted?.(email);
       // Parent re-renders the list; no local state to reset on success.
     } catch (e) {
-      setDelErr(String(e));
+      setDelErr(friendlyError(e));
       setDeleting(false);
     }
   }
@@ -119,7 +120,7 @@ export function MailboxStorageRow({
       setPwDone(true);
       setNewPw("");
     } catch (e) {
-      setPwErr(String(e));
+      setPwErr(friendlyError(e));
     } finally {
       setPwBusy(false);
     }

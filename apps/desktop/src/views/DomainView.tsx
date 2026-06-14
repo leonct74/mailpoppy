@@ -26,6 +26,7 @@ import {
 import { getMailFromStatus as defaultGetMailFrom } from "../lib/mailFrom";
 import { getDomainIdentityStatus as defaultGetDomainStatus, type DomainIdentityStatus } from "../lib/provision";
 import { removeDomain as defaultRemoveDomain, type RemoveDomainResult } from "../lib/teardown";
+import { friendlyError } from "../lib/errors";
 import { MailboxStorageRow } from "./MailboxStorageRow";
 import { PolicyEditor } from "./PolicyEditor";
 import { RetentionEditor } from "./RetentionEditor";
@@ -145,7 +146,7 @@ export function DomainView({
         if (cancelled) return;
         if (isNoBackend(e)) setPhase("no-backend");
         else {
-          setErrMsg(String(e));
+          setErrMsg(friendlyError(e));
           setPhase("error");
         }
         return;
@@ -190,7 +191,7 @@ export function DomainView({
       }
       await reload();
     } catch (e) {
-      setMbError(String(e));
+      setMbError(friendlyError(e));
     } finally {
       setMbBusy(false);
     }
@@ -207,7 +208,7 @@ export function DomainView({
       setRemoveResult(res);
       onRemoved?.(domain);
     } catch (e) {
-      setRemoveErr(String(e));
+      setRemoveErr(friendlyError(e));
     } finally {
       setRemoving(false);
     }
@@ -646,7 +647,8 @@ export function DomainView({
 
       <p className="text-xs text-on-surface-variant/70">
         To tear down the <b className="text-on-surface">whole backend</b> (every domain, all mailboxes and the AWS
-        resources), use the <b className="text-on-surface">Account</b> tab instead.
+        resources), remove each domain first — once none remain, a{" "}
+        <b className="text-on-surface">Remove leftover infrastructure</b> option appears on the overview.
       </p>
     </div>
   );

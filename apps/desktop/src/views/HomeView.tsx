@@ -1,8 +1,27 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Globe, Mail, ShieldCheck, Inbox, RefreshCw, Plus, Server, Sparkles, MapPin } from "lucide-react";
+import {
+  Globe,
+  Mail,
+  ShieldCheck,
+  Inbox,
+  RefreshCw,
+  Plus,
+  Server,
+  Sparkles,
+  MapPin,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Trash2,
+} from "lucide-react";
 import type { SesAccountStatus, MailFromState } from "@mailpoppy/core";
 import { resolveStackName, loadDeploymentConfig } from "../lib/deploymentConfig";
-import { listProvisionedDomains as defaultListDomains } from "../lib/teardown";
+import {
+  listProvisionedDomains as defaultListDomains,
+  teardownEverything as defaultTeardown,
+  type TeardownResult,
+} from "../lib/teardown";
+import { friendlyError } from "../lib/errors";
 import { listMailboxes as defaultListMailboxes, type Mailbox } from "../lib/mailbox";
 import { getSesAccount as defaultGetAccount } from "../lib/sesAccount";
 import { getMailFromStatus as defaultGetMailFrom } from "../lib/mailFrom";
@@ -47,6 +66,7 @@ export function HomeView({
   getAccount = defaultGetAccount,
   getDomainStatus = defaultGetDomainStatus,
   getMailFrom = defaultGetMailFrom,
+  teardown = defaultTeardown,
 }: {
   stackName?: string;
   onGoToSetup?: () => void;
@@ -56,11 +76,17 @@ export function HomeView({
   getAccount?: () => Promise<SesAccountStatus>;
   getDomainStatus?: (domain: string) => Promise<DomainIdentityStatus>;
   getMailFrom?: (domain: string) => Promise<MailFromState>;
+  teardown?: (input: { domain?: string; stackName?: string; deleteDeployBucket?: boolean }) => Promise<TeardownResult>;
 }) {
   type Phase = "loading" | "no-backend" | "ready" | "error";
   const [phase, setPhase] = useState<Phase>("loading");
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [domains, setDomains] = useState<string[]>([]);
+  // Positive proof a backend stack actually exists: the mailbox endpoint resolved
+  // the stack's Cognito pool. The teardown-discover endpoint can't tell us (it
+  // returns [] whether the stack is absent or just empty), so we must NOT infer
+  // "backend present" from an empty domain list. Gates the destructive teardown.
+  const [backendDeployed, setBackendDeployed] = useState(false);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [account, setAccount] = useState<SesAccountStatus | null>(null);
   const [region, setRegion] = useState<string | null>(null);
@@ -72,6 +98,7 @@ export function HomeView({
     let cancelled = false;
     setPhase("loading");
     setErrMsg(null);
+    setBackendDeployed(false);
     setDomStatus({});
     setMailFrom({});
     (async () => {
@@ -89,7 +116,7 @@ export function HomeView({
         return;
       }
       if (mbRes.status === "rejected" && domRes.status === "rejected") {
-        setErrMsg(String(mbRes.reason));
+        setErrMsg(friendlyError(mbRes.reason));
         setPhase("error");
         return;
       }
@@ -107,6 +134,9 @@ export function HomeView({
 
       setMailboxes(mbs);
       setDomains(domainList);
+      // Only the mailbox endpoint resolving the stack's pool proves a backend
+      // exists — this gates the "remove leftover infrastructure" teardown.
+      setBackendDeployed(mbRes.status === "fulfilled");
       setAccount(acctRes.status === "fulfilled" ? acctRes.value : null);
       setRegion(
         (mbRes.status === "fulfilled" ? mbRes.value.region : undefined) ?? loadDeploymentConfig()?.region ?? null,
@@ -220,7 +250,8 @@ export function HomeView({
             <code className="font-mono text-on-surface">{region ?? "—"}</code>
           </span>
           <span className="flex items-center gap-1.5 text-on-surface-variant">
-            <ShieldCheck className="size-4" /> Backend <Pill tone="ok">Deployed</Pill>
+            <ShieldCheck className="size-4" /> Backend{" "}
+            {backendDeployed ? <Pill tone="ok">Deployed</Pill> : <Pill tone="muted">unavailable</Pill>}
           </span>
           <span className="flex items-center gap-1.5 text-on-surface-variant">
             <Mail className="size-4" /> Sending{" "}
@@ -250,12 +281,26 @@ export function HomeView({
 
       {/* Per-domain cards. */}
       {domains.length === 0 ? (
-        <Card className="text-center">
-          <Globe className="mx-auto size-6 text-on-surface-variant" />
-          <p className="mt-2 text-sm text-on-surface-variant">
-            No domains yet. Use <b className="text-on-surface">Add domain</b> to set one up.
-          </p>
-        </Card>
+        <div className="flex flex-col gap-4">
+          <Card className="text-center">
+            <Globe className="mx-auto size-6 text-on-surface-variant" />
+            <p className="mt-2 text-sm text-on-surface-variant">
+              No domains yet. Use <b className="text-on-surface">Add domain</b> to set one up.
+            </p>
+          </Card>
+          {/* Backend deployed but zero domains — the one state where a full teardown
+              is safe to offer (no mailboxes or domains left to lose). Gated on a
+              CONFIRMED backend so a new account (no stack) never sees a destructive
+              button, and so the orphaned stack doesn't linger when one does exist. */}
+          {backendDeployed && (
+            <LeftoverInfrastructureCard
+              stackName={stackName}
+              region={region}
+              teardown={teardown}
+              onDone={() => setReloadKey((k) => k + 1)}
+            />
+          )}
+        </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {domains.map((d) => {
@@ -321,6 +366,152 @@ export function HomeView({
               </Card>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Shown only on the overview when a backend stack is deployed but NO domains
+// remain — the single state where tearing down the whole backend is safe (there
+// are no mailboxes or domains left to lose). Deletes the leftover AWS resources
+// the stack created so they don't linger (and bill) in the user's account.
+function LeftoverInfrastructureCard({
+  stackName,
+  region,
+  teardown,
+  onDone,
+}: {
+  stackName: string;
+  region: string | null;
+  teardown: (input: { domain?: string; stackName?: string; deleteDeployBucket?: boolean }) => Promise<TeardownResult>;
+  onDone: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<TeardownResult | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const canRemove = confirm.trim().toUpperCase() === "DELETE" && !busy;
+
+  async function run() {
+    setBusy(true);
+    setErr(null);
+    try {
+      setResult(await teardown({ stackName }));
+    } catch (e) {
+      setErr(friendlyError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-error/20 bg-[#1a0f14]">
+      <button
+        type="button"
+        aria-label="Toggle danger zone"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-4 p-6 text-left"
+      >
+        <div>
+          <div className="mb-1 flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-error">
+            <AlertTriangle className="size-4" />
+            Danger zone
+          </div>
+          <h3 className="text-lg font-semibold text-on-surface">Remove leftover infrastructure</h3>
+          {!open && (
+            <p className="mt-1 text-sm text-on-surface-variant">
+              No domains remain, but the Mailpoppy backend is still deployed in your AWS account. Delete the leftover
+              resources so they don't linger.
+            </p>
+          )}
+        </div>
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-error/20 bg-error/5 px-3 py-1.5 text-sm font-medium text-error">
+          {open ? (
+            <>
+              Hide <ChevronUp className="size-4" />
+            </>
+          ) : (
+            <>
+              Show <ChevronDown className="size-4" />
+            </>
+          )}
+        </span>
+      </button>
+
+      {open && (
+        <div className="border-t border-error/10 p-6 pt-5">
+          <p className="text-sm text-on-surface-variant">
+            You have no domains, but the Mailpoppy backend (stack{" "}
+            <code className="font-mono text-tertiary">{stackName}</code>
+            {region ? (
+              <>
+                {" "}
+                in <code className="font-mono text-tertiary">{region}</code>
+              </>
+            ) : null}
+            ) is still deployed. This permanently deletes the leftover AWS resources: the{" "}
+            <b className="text-on-surface">CloudFormation stack</b>, the{" "}
+            <b className="text-on-surface">mail storage bucket</b>, DynamoDB tables, the{" "}
+            <b className="text-on-surface">Cognito user pool</b> and the deploy bucket.{" "}
+            <b className="text-tertiary">This cannot be undone.</b>
+          </p>
+
+          {result ? (
+            <div className="mt-4 rounded-lg border border-secondary/30 bg-secondary/10 p-4">
+              <strong className="text-secondary">Infrastructure removed.</strong>
+              {result.deleted.length > 0 && (
+                <ul className="mt-1.5 list-disc pl-5 text-xs text-on-surface-variant">
+                  {result.deleted.map((d, i) => (
+                    <li key={i}>{d}</li>
+                  ))}
+                </ul>
+              )}
+              {result.warnings.length > 0 && (
+                <div className="mt-2 text-sm text-amber-300">
+                  <b>Warnings:</b>
+                  <ul className="mt-1 list-disc pl-5">
+                    {result.warnings.map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <Button variant="secondary" className="mt-3" onClick={onDone}>
+                <RefreshCw className="size-4" /> Done
+              </Button>
+            </div>
+          ) : busy ? (
+            <div className="mt-4 flex items-center gap-2 text-sm text-on-surface-variant">
+              <Spinner /> Removing infrastructure… this can take a few minutes.
+            </div>
+          ) : (
+            <div className="mt-4 flex flex-wrap items-end gap-3">
+              <label className="text-sm text-on-surface-variant">
+                <span className="mb-1 block">
+                  Type <code className="font-mono text-tertiary">DELETE</code> to confirm
+                </span>
+                <input
+                  aria-label="Type DELETE to confirm"
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  placeholder="DELETE"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className="w-64 rounded-lg border border-error/30 bg-surface-container-lowest px-3 py-2 font-mono text-sm text-on-surface placeholder:text-outline-variant focus:border-error focus:outline-none focus:ring-2 focus:ring-error/30"
+                />
+              </label>
+              <Button variant="danger" disabled={!canRemove} onClick={() => void run()}>
+                <Trash2 className="size-4" /> Remove infrastructure
+              </Button>
+            </div>
+          )}
+
+          {err && <div className="mt-3 text-sm text-tertiary">Removal failed: {err}</div>}
         </div>
       )}
     </div>

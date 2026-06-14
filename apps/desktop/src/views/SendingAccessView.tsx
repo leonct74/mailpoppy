@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { friendlyError } from "../lib/errors";
 import {
   sendingAccessState,
   validateProductionAccessRequest,
@@ -69,7 +70,7 @@ export function SendingAccessView({ defaultWebsite, load, submit }: SendingAcces
     try {
       setAccount(await loadAccount());
     } catch (e) {
-      setErr(String(e));
+      setErr(friendlyError(e));
     } finally {
       setLoading(false);
     }
@@ -108,7 +109,7 @@ export function SendingAccessView({ defaultWebsite, load, submit }: SendingAcces
       setAccount(await submitRequest(req));
       setConfirming(false);
     } catch (e) {
-      setErr(String(e));
+      setErr(friendlyError(e));
     } finally {
       setSubmitting(false);
     }

@@ -1,21 +1,42 @@
 import { useState } from "react";
-import { KeyRound, ExternalLink, Eye, EyeOff, ShieldCheck, RefreshCw, AlertTriangle } from "lucide-react";
+import {
+  KeyRound,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  ShieldCheck,
+  RefreshCw,
+  AlertTriangle,
+  Terminal,
+  Lock,
+  Copy,
+  Check,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 import { setAwsCredentials as defaultSubmit, type AwsCredentialInput, type Readiness } from "../lib/awsCredentials";
-import { Button, Spinner, cn } from "../ui";
+import { Button, Spinner, cn, ExtLink } from "../ui";
+import { friendlyError } from "../lib/errors";
 
 // Shown on Setup → Step 0 when no AWS credentials resolve. Two jobs:
 //  (a) hand-hold a newcomer who has no AWS account yet (what it is, rough cost,
-//      how to make an account + an IAM user + keys), and
-//  (b) let them paste those keys right here — the sidecar saves them as a local
-//      `[mailpoppy]` profile, so setup never requires a terminal.
-// We can't create the AWS account for them (AWS needs their own email + card),
-// so this is a guided path, not automation. CLI/SSO power users get the same
-// flow via the "Advanced" disclosure.
+//      how to make an account + a *scoped* IAM user + keys), and
+//  (b) connect — two ways, in deliberate trust order:
+//      • RECOMMENDED: `aws configure --profile mailpoppy` (or SSO). The secret
+//        never enters Mailpoppy's UI — it lives in ~/.aws and only the open-source
+//        sidecar reads it, via the SDK credential chain.
+//      • Convenience: paste the keys here. They're saved to ~/.aws/credentials and
+//        never uploaded, but unlike the CLI path they pass through the (closed) app.
+// We can't create the AWS account for them (AWS needs their own email + card), so
+// this is a guided path, not automation.
 
 const AWS_SIGNUP = "https://aws.amazon.com/free/";
 const IAM_CONSOLE = "https://console.aws.amazon.com/iam/home#/users";
 const POLICY_FILE =
   "https://github.com/leonct74/mailpoppy/blob/main/infra/policies/mailpoppy-provisioning-policy.json";
+const AWS_CLI_INSTALL = "https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html";
+
+const CONFIGURE_CMD = "aws configure --profile mailpoppy";
 
 const inputCls =
   "w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 font-mono text-sm text-on-surface focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50";
@@ -25,9 +46,9 @@ const noAutoCap = { autoCapitalize: "off", autoCorrect: "off", spellCheck: false
 export interface AwsOnboardingProps {
   /** Apply the readiness returned after saving keys (so the wizard updates). */
   onResult: (r: Readiness) => void;
-  /** Re-run the environment check (for the Advanced CLI/SSO path). */
+  /** Re-run the environment check (for the recommended CLI/SSO path). */
   onRecheck: () => void;
-  /** Whether the AWS CLI was detected — tailors the Advanced hint. */
+  /** Whether the AWS CLI was detected — tailors the recommended path's hint. */
   cliInstalled?: boolean;
   /** Injectable for tests. */
   submit?: (input: AwsCredentialInput) => Promise<Readiness>;
@@ -51,11 +72,22 @@ export function AwsOnboarding({ onResult, onRecheck, cliInstalled, submit = defa
   const [secretAccessKey, setSecretAccessKey] = useState("");
   const [sessionToken, setSessionToken] = useState("");
   const [showSecret, setShowSecret] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showPaste, setShowPaste] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const canSubmit = accessKeyId.trim().length > 0 && secretAccessKey.trim().length > 0 && !busy;
+
+  function copyCmd() {
+    navigator.clipboard?.writeText(CONFIGURE_CMD).then(
+      () => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      },
+      () => {},
+    );
+  }
 
   async function onConnect() {
     setBusy(true);
@@ -76,7 +108,7 @@ export function AwsOnboarding({ onResult, onRecheck, cliInstalled, submit = defa
       }
       onResult(r);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     } finally {
       setBusy(false);
     }
@@ -89,128 +121,189 @@ export function AwsOnboarding({ onResult, onRecheck, cliInstalled, submit = defa
       </h3>
       <p className="mt-1 text-sm text-on-surface-variant">
         Mailpoppy runs entirely in <b className="text-on-surface">your own</b> AWS account, so your mail stays your
-        property. You only need to do this once. New to AWS? Follow the three steps — it takes a few minutes.
+        property. You only need to do this once.
       </p>
 
-      {/* New-to-AWS guidance */}
+      {/* Least-privilege guidance — bounds what Mailpoppy can ever do, regardless of how you connect */}
+      <div className="mt-4 flex items-start gap-2 rounded-lg border border-secondary/20 bg-secondary/5 p-3 text-sm text-on-surface-variant">
+        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-secondary" />
+        <span>
+          <b className="text-on-surface">Use a dedicated, least-privilege key — never your account root.</b> Create an
+          IAM user scoped to the{" "}
+          <ExtLink className={linkCls} href={POLICY_FILE}>
+            Mailpoppy provisioning policy <ExternalLink className="size-3" />
+          </ExtLink>
+          . That caps what Mailpoppy can ever do in your account, and you can revoke it any time.
+        </span>
+      </div>
+
+      {/* New-to-AWS guidance (applies to either connect method) */}
       <ol className="mt-4 space-y-3">
         <Step n={1} title="Create a free AWS account (if you don't have one).">
-          <a className={linkCls} href={AWS_SIGNUP} target="_blank" rel="noreferrer">
+          <ExtLink className={linkCls} href={AWS_SIGNUP}>
             aws.amazon.com/free <ExternalLink className="size-3" />
-          </a>
+          </ExtLink>
           . It asks for an email and a card for verification, but there's a 12-month free tier — and Mailpoppy's own
-          usage (storage + sending) is typically just cents per month. <b className="text-on-surface">You pay AWS
-          directly; never us.</b>
+          usage is typically just cents per month. <b className="text-on-surface">You pay AWS directly; never us.</b>
         </Step>
-        <Step n={2} title="Create an access key.">
+        <Step n={2} title="Create an IAM user and an access key.">
           In the{" "}
-          <a className={linkCls} href={IAM_CONSOLE} target="_blank" rel="noreferrer">
+          <ExtLink className={linkCls} href={IAM_CONSOLE}>
             AWS console → IAM → Users <ExternalLink className="size-3" />
-          </a>
-          , add a user, give it permissions (easiest: <b className="text-on-surface">AdministratorAccess</b>; recommended
-          tighter option: the{" "}
-          <a className={linkCls} href={POLICY_FILE} target="_blank" rel="noreferrer">
-            Mailpoppy provisioning policy <ExternalLink className="size-3" />
-          </a>
-          ), then create an access key and copy the two values.
-        </Step>
-        <Step n={3} title="Paste the two values below and connect.">
-          That's it — no terminal needed.
+          </ExtLink>
+          , add a user, attach the{" "}
+          <ExtLink className={linkCls} href={POLICY_FILE}>
+            Mailpoppy provisioning policy
+          </ExtLink>{" "}
+          (recommended) or <b className="text-on-surface">AdministratorAccess</b> (broader), then create an access key
+          and copy the two values.
         </Step>
       </ol>
 
-      {/* Key entry */}
-      <div className="mt-5 flex flex-col gap-3">
-        <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
-          Access Key ID
-          <input
-            value={accessKeyId}
-            onChange={(e) => setAccessKeyId(e.target.value.trim())}
-            placeholder="AKIA…"
-            className={inputCls}
-            disabled={busy}
-            {...noAutoCap}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
-          Secret Access Key
-          <div className="relative">
-            <input
-              value={secretAccessKey}
-              onChange={(e) => setSecretAccessKey(e.target.value.trim())}
-              type={showSecret ? "text" : "password"}
-              placeholder="••••••••••••••••••••••••••••••••"
-              className={cn(inputCls, "pr-10")}
-              disabled={busy}
-              {...noAutoCap}
-            />
-            <button
-              type="button"
-              onClick={() => setShowSecret((s) => !s)}
-              aria-label={showSecret ? "Hide secret" : "Show secret"}
-              className="absolute inset-y-0 right-2 flex items-center text-on-surface-variant hover:text-on-surface"
-            >
-              {showSecret ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-            </button>
-          </div>
-        </label>
+      {/* ── RECOMMENDED: connect via the AWS CLI / SSO (Mailpoppy never sees the secret) ── */}
+      <div className="mt-5 rounded-xl border border-primary/30 bg-primary-container/10 p-4">
+        <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-primary/15 px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-primary uppercase">
+          <ShieldCheck className="size-3" /> Recommended
+        </div>
+        <h4 className="flex items-center gap-2 text-sm font-semibold text-on-surface">
+          <Terminal className="size-4 text-primary" /> Connect with the AWS CLI
+        </h4>
+        <p className="mt-1 flex items-start gap-1.5 text-sm text-on-surface-variant">
+          <Lock className="mt-0.5 size-3.5 shrink-0 text-secondary" />
+          <span>
+            Your secret key <b className="text-on-surface">never enters Mailpoppy&apos;s window</b>. It stays in your
+            local <code className="font-mono">~/.aws</code> config and is read only by the open-source sidecar — exactly
+            how the AWS CLI itself works.
+          </span>
+        </p>
 
-        {/* Temporary credentials (optional) */}
-        <button
-          type="button"
-          onClick={() => setShowAdvanced((s) => !s)}
-          className="self-start text-xs text-on-surface-variant underline-offset-2 hover:underline"
-        >
-          {showAdvanced ? "Hide" : "Using temporary credentials?"}
-        </button>
-        {showAdvanced && (
-          <>
-            <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
-              Session token <span className="text-xs text-on-surface-variant/70">(only for temporary STS keys)</span>
-              <input
-                value={sessionToken}
-                onChange={(e) => setSessionToken(e.target.value.trim())}
-                placeholder="optional"
-                className={inputCls}
-                disabled={busy}
-                {...noAutoCap}
-              />
-            </label>
-            <div className="rounded-lg border border-outline-variant/20 bg-surface-container-lowest p-3 text-xs text-on-surface-variant">
-              <b className="text-on-surface">Prefer the command line / SSO?</b> Mailpoppy also reads your existing AWS
-              profiles in <code className="font-mono">~/.aws</code>. Set one up with{" "}
-              <code className="font-mono">aws configure</code>
-              {cliInstalled ? "" : " (after installing the AWS CLI)"} or <code className="font-mono">aws sso login</code>,
-              then{" "}
-              <button onClick={onRecheck} className="text-primary underline-offset-2 hover:underline">
-                re-check
-              </button>
-              .
-            </div>
-          </>
-        )}
-
-        {error && (
-          <p className="flex items-start gap-1.5 text-sm text-tertiary">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0" /> {error}
+        {cliInstalled === false && (
+          <p className="mt-3 text-sm text-on-surface-variant">
+            First, install the{" "}
+            <ExtLink className={linkCls} href={AWS_CLI_INSTALL}>
+              AWS CLI <ExternalLink className="size-3" />
+            </ExtLink>
+            . Then:
           </p>
         )}
 
-        <div className="flex items-center gap-3">
-          <Button onClick={() => void onConnect()} disabled={!canSubmit}>
-            {busy ? <Spinner /> : <KeyRound className="size-4" />} Connect
-          </Button>
-          <Button variant="secondary" size="sm" onClick={onRecheck} disabled={busy}>
-            <RefreshCw className="size-3.5" /> Re-check
-          </Button>
+        <div className="mt-3 flex items-center gap-2">
+          <code className="flex-1 rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 font-mono text-sm text-on-surface">
+            {CONFIGURE_CMD}
+          </code>
+          <button
+            type="button"
+            onClick={copyCmd}
+            aria-label="Copy command"
+            className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-outline-variant/30 text-on-surface-variant hover:text-on-surface"
+          >
+            {copied ? <Check className="size-4 text-secondary" /> : <Copy className="size-4" />}
+          </button>
         </div>
+        <p className="mt-2 text-sm text-on-surface-variant">
+          Paste your two keys at the prompts (Mailpoppy auto-detects the <code className="font-mono">mailpoppy</code>{" "}
+          profile), then:
+        </p>
 
-        <p className="flex items-start gap-1.5 text-xs text-on-surface-variant">
-          <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-secondary" />
-          Saved only on this computer, in the standard AWS location (<code className="font-mono">~/.aws/credentials</code>,
-          owner-only permissions) — exactly where the AWS CLI keeps them. Never uploaded or sent to Mailpoppy.
+        <Button className="mt-3" onClick={onRecheck} disabled={busy}>
+          <RefreshCw className="size-3.5" /> Check connection
+        </Button>
+
+        <p className="mt-3 text-xs text-on-surface-variant/80">
+          Using AWS SSO? Run <code className="font-mono">aws sso login</code> and launch Mailpoppy with{" "}
+          <code className="font-mono">AWS_PROFILE</code> set to your profile.
         </p>
       </div>
+
+      {/* ── Convenience: paste keys directly (downranked, honest about the trade-off) ── */}
+      <button
+        type="button"
+        onClick={() => setShowPaste((s) => !s)}
+        className="mt-4 flex items-center gap-1 text-sm text-on-surface-variant underline-offset-2 hover:underline"
+      >
+        {showPaste ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+        Or paste keys directly (no terminal)
+      </button>
+
+      {showPaste && (
+        <div className="mt-3 flex flex-col gap-3">
+          <p className="flex items-start gap-1.5 rounded-lg border border-outline-variant/20 bg-surface-container-lowest p-3 text-xs text-on-surface-variant">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-tertiary" />
+            <span>
+              Convenient, but the keys you paste <b className="text-on-surface">pass through Mailpoppy</b> before being
+              saved to <code className="font-mono">~/.aws/credentials</code> on this computer. They&apos;re never
+              uploaded to us — but if you&apos;d rather Mailpoppy never touch your secret, use the CLI option above.
+            </span>
+          </p>
+
+          <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
+            Access Key ID
+            <input
+              value={accessKeyId}
+              onChange={(e) => setAccessKeyId(e.target.value.trim())}
+              placeholder="AKIA…"
+              className={inputCls}
+              disabled={busy}
+              {...noAutoCap}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
+            Secret Access Key
+            <div className="relative">
+              <input
+                value={secretAccessKey}
+                onChange={(e) => setSecretAccessKey(e.target.value.trim())}
+                type={showSecret ? "text" : "password"}
+                placeholder="••••••••••••••••••••••••••••••••"
+                className={cn(inputCls, "pr-10")}
+                disabled={busy}
+                {...noAutoCap}
+              />
+              <button
+                type="button"
+                onClick={() => setShowSecret((s) => !s)}
+                aria-label={showSecret ? "Hide secret" : "Show secret"}
+                className="absolute inset-y-0 right-2 flex items-center text-on-surface-variant hover:text-on-surface"
+              >
+                {showSecret ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </button>
+            </div>
+          </label>
+          <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
+            Session token <span className="text-xs text-on-surface-variant/70">(only for temporary STS keys)</span>
+            <input
+              value={sessionToken}
+              onChange={(e) => setSessionToken(e.target.value.trim())}
+              placeholder="optional"
+              className={inputCls}
+              disabled={busy}
+              {...noAutoCap}
+            />
+          </label>
+
+          {error && (
+            <p className="flex items-start gap-1.5 text-sm text-tertiary">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" /> {error}
+            </p>
+          )}
+
+          <div className="flex items-center gap-3">
+            <Button onClick={() => void onConnect()} disabled={!canSubmit}>
+              {busy ? <Spinner /> : <KeyRound className="size-4" />} Connect
+            </Button>
+            <Button variant="secondary" size="sm" onClick={onRecheck} disabled={busy}>
+              <RefreshCw className="size-3.5" /> Re-check
+            </Button>
+          </div>
+
+          <p className="flex items-start gap-1.5 text-xs text-on-surface-variant">
+            <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-secondary" />
+            Saved only on this computer, in the standard AWS location (
+            <code className="font-mono">~/.aws/credentials</code>, owner-only permissions) — exactly where the AWS CLI
+            keeps them. Never uploaded or sent to Mailpoppy.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

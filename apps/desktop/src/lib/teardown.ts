@@ -12,8 +12,15 @@ export interface TeardownResult {
   warnings: string[];
 }
 
+/**
+ * Tear down the WHOLE backend: the CloudFormation stack + its RETAINed data (mail
+ * bucket, DynamoDB tables, Cognito pool) + the deploy bucket + every provisioned
+ * domain's SES identity and DNS. `domain` is optional — when removing leftover
+ * infrastructure after all domains are already gone, omit it and the sidecar
+ * discovers + cleans any stragglers itself.
+ */
 export function teardownEverything(input: {
-  domain: string;
+  domain?: string;
   stackName?: string;
   deleteDeployBucket?: boolean;
 }): Promise<TeardownResult> {

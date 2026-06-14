@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { friendlyError } from "../lib/errors";
 import {
   mailFromAlignment,
   defaultMailFromDomain,
@@ -83,7 +84,7 @@ export function MailFromSetup({ domain, region = "eu-west-1", load, setup, onSta
       setState(s);
       onStateChange?.(s);
     } catch (e) {
-      setErr(String(e));
+      setErr(friendlyError(e));
     } finally {
       setLoading(false);
     }
@@ -102,7 +103,7 @@ export function MailFromSetup({ domain, region = "eu-west-1", load, setup, onSta
       onStateChange?.(res.state);
       setConfirming(false);
     } catch (e) {
-      setErr(String(e));
+      setErr(friendlyError(e));
     } finally {
       setBusy(false);
     }

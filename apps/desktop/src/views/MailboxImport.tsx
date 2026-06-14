@@ -11,6 +11,7 @@ import {
 } from "../lib/mailbox";
 import { runMigration as defaultRunMigration, type RunInput, type MigrateSummary } from "../lib/migration";
 import { Button, Spinner, cn } from "../ui";
+import { friendlyError } from "../lib/errors";
 
 // Bulk-create mailboxes (and optionally migrate their old mail) from a chosen
 // spreadsheet. Parsing + validation happen in the sidecar (ExcelJS → @mailpoppy/core);
@@ -83,7 +84,7 @@ export function MailboxImport({
       for (const r of plan.rows) init[r.row] = r.errors.length ? { kind: "skipped" } : { kind: "pending" };
       setStatuses(init);
     } catch (e) {
-      setParseError(String(e));
+      setParseError(friendlyError(e));
     } finally {
       setParsing(false);
     }
@@ -100,7 +101,7 @@ export function MailboxImport({
       const { filename, dir } = await saveTemplate(domain);
       setTemplateSaved({ filename, dir });
     } catch (e) {
-      setParseError(String(e));
+      setParseError(friendlyError(e));
     } finally {
       setSavingTemplate(false);
     }
@@ -122,7 +123,7 @@ export function MailboxImport({
         // treat that as "already there" and still attempt the optional migration.
         if (/exist/i.test(msg)) existed = true;
         else {
-          setStatuses((s) => ({ ...s, [r.row]: { kind: "failed", message: msg } }));
+          setStatuses((s) => ({ ...s, [r.row]: { kind: "failed", message: friendlyError(e) } }));
           continue;
         }
       }
@@ -134,7 +135,7 @@ export function MailboxImport({
         } catch (e) {
           // The mailbox exists; only the import failed — surface that without
           // calling the whole row a failure.
-          setStatuses((s) => ({ ...s, [r.row]: { kind: "ok", existed, migrateError: String(e) } }));
+          setStatuses((s) => ({ ...s, [r.row]: { kind: "ok", existed, migrateError: friendlyError(e) } }));
         }
       } else {
         setStatuses((s) => ({ ...s, [r.row]: { kind: "ok", existed } }));

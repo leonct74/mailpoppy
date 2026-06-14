@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Authenticator } from "../lib/auth";
 import { Card, Button, Spinner } from "../ui";
+import { friendlyError } from "../lib/errors";
 
 // Mailbox sign-in (Cognito). On success the parent gets a getToken() it hands to
 // the live MailClient. Admin-created users are prompted to set a password first.
@@ -45,7 +46,7 @@ export function LoginView({
         onSignedIn();
       }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(friendlyError(e));
     } finally {
       setBusy(false);
     }
