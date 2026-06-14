@@ -160,14 +160,21 @@ export function AwsOnboarding({ onResult, onRecheck, cliInstalled, submit = defa
         </Step>
       </ol>
 
-      {/* ── RECOMMENDED: connect via the AWS CLI / SSO (Mailpoppy never sees the secret) ── */}
-      <div className="mt-5 rounded-xl border border-primary/30 bg-primary-container/10 p-4">
-        <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-primary/15 px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-primary uppercase">
-          <ShieldCheck className="size-3" /> Recommended
+      {/* ── Step 3 — connect, using the access key from step 2. The CLI keeps the secret
+          out of Mailpoppy's window; the paste form below is the no-terminal alternative. ── */}
+      <div className="mt-4 rounded-xl border border-primary/30 bg-primary-container/10 p-4">
+        <div className="flex items-center gap-2">
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary-container/20 font-mono text-[11px] font-semibold text-primary">
+            3
+          </span>
+          <h4 className="flex items-center gap-2 text-sm font-semibold text-on-surface">
+            <Terminal className="size-4 text-primary" /> Connect with the AWS CLI
+          </h4>
         </div>
-        <h4 className="flex items-center gap-2 text-sm font-semibold text-on-surface">
-          <Terminal className="size-4 text-primary" /> Connect with the AWS CLI
-        </h4>
+        <p className="mt-1.5 text-sm text-on-surface-variant">
+          This is <b className="text-on-surface">step 3</b> — do it once you&apos;ve created the access key in step 2
+          (you&apos;ll paste that key at the prompt below).
+        </p>
         <p className="mt-1 flex items-start gap-1.5 text-sm text-on-surface-variant">
           <Lock className="mt-0.5 size-3.5 shrink-0 text-secondary" />
           <span>
@@ -222,7 +229,7 @@ export function AwsOnboarding({ onResult, onRecheck, cliInstalled, submit = defa
         className="mt-4 flex items-center gap-1 text-sm text-on-surface-variant underline-offset-2 hover:underline"
       >
         {showPaste ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-        Or paste keys directly (no terminal)
+        Or, instead of the CLI, paste your keys here (no terminal)
       </button>
 
       {showPaste && (

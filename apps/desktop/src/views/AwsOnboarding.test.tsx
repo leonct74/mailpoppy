@@ -14,7 +14,7 @@ const readiness = (p: Partial<Readiness["credentials"]> = {}): Readiness => ({
 
 /** Open the downranked "paste keys directly" disclosure. */
 function openPaste() {
-  fireEvent.click(screen.getByRole("button", { name: /paste keys directly/i }));
+  fireEvent.click(screen.getByRole("button", { name: /paste your keys here/i }));
 }
 
 describe("AwsOnboarding", () => {
@@ -29,9 +29,11 @@ describe("AwsOnboarding", () => {
     expect(screen.getByText(/never your account root/i)).toBeInTheDocument();
   });
 
-  it("leads with the CLI path and tells the user their secret never enters the app", () => {
+  it("frames the CLI connect as step 3 (not a shortcut) and protects the secret", () => {
     render(<AwsOnboarding onResult={vi.fn()} onRecheck={vi.fn()} />);
-    expect(screen.getByText("Recommended")).toBeInTheDocument();
+    // No "Recommended" badge — it misread as a way to skip steps 1–2.
+    expect(screen.queryByText("Recommended")).not.toBeInTheDocument();
+    expect(screen.getByText(/step 3/i)).toBeInTheDocument();
     expect(screen.getByText(/aws configure --profile mailpoppy/i)).toBeInTheDocument();
     expect(screen.getByText(/never enters/i)).toBeInTheDocument();
   });
