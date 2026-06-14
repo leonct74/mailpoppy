@@ -149,7 +149,9 @@ export async function testImap(src: ImapSource): Promise<{ ok: true; folders: Im
 
 export async function migrate(ctx: AwsContext, opts: MigrateOptions): Promise<MigrateSummary> {
   const { source, target } = opts;
-  const credentials = ctx.profile ? fromIni({ profile: ctx.profile }) : undefined;
+  // ignoreCache: re-read ~/.aws/credentials fresh — the profile may have been
+  // written this session (see provisioning.clients for the full rationale).
+  const credentials = ctx.profile ? fromIni({ profile: ctx.profile, ignoreCache: true }) : undefined;
   const s3 = new S3Client({ region: ctx.region, credentials });
   const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: ctx.region, credentials }), {
     marshallOptions: { removeUndefinedValues: true },

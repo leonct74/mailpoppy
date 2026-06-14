@@ -122,7 +122,14 @@ export interface AwsContext {
 }
 
 function clients(ctx: AwsContext) {
-  const credentials = ctx.profile ? fromIni({ profile: ctx.profile }) : undefined;
+  // The sidecar is long-lived and the credentials file legitimately changes
+  // underneath it during onboarding: the in-app "paste keys" path writes a
+  // [mailpoppy] profile, and so does `aws configure --profile mailpoppy`. The SDK
+  // memoises ~/.aws/credentials per path for the whole process, so a profile
+  // written *after* the first read would resolve against a stale parse — surfacing
+  // as "Could not resolve credentials using profile: [mailpoppy]" right after the
+  // user pastes valid keys. `ignoreCache` forces a fresh read on every call.
+  const credentials = ctx.profile ? fromIni({ profile: ctx.profile, ignoreCache: true }) : undefined;
   const base = { region: ctx.region, credentials };
   return {
     sts: new STSClient(base),
