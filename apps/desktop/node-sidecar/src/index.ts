@@ -108,10 +108,13 @@ app.setErrorHandler((err, _req, reply) => {
 let currentRegion = process.env.AWS_REGION ?? "eu-west-1";
 
 // The active credential profile. An explicit AWS_PROFILE (power users) always
-// wins; otherwise, if the in-app key entry has previously written a [mailpoppy]
-// profile, we resolve from it — so pasted keys persist across restarts without a
-// terminal. undefined → the SDK's default provider chain (env / default / SSO).
-let currentProfile: string | undefined = process.env.AWS_PROFILE ?? (mailpoppyProfileExists() ? MAILPOPPY_PROFILE : undefined);
+// wins; otherwise, if a [mailpoppy] profile exists in ~/.aws/credentials (written
+// either by the in-app key entry or by `aws configure --profile mailpoppy`), we
+// resolve from it. undefined → the SDK's default provider chain (env/default/SSO).
+function resolveProfile(): string | undefined {
+  return process.env.AWS_PROFILE ?? (mailpoppyProfileExists() ? MAILPOPPY_PROFILE : undefined);
+}
+let currentProfile: string | undefined = resolveProfile();
 
 const ctx = (): prov.AwsContext => ({
   region: currentRegion,
@@ -136,7 +139,13 @@ app.post("/config/region", async (req, reply) => {
 
 // Step 0: is this environment able to provision at all? (credentials + per-service
 // permission probes + optional CLI detection). Run before anything mutating.
-app.get("/aws/readiness", async () => prov.checkReadiness(ctx()));
+// Re-detect the profile first, so a `mailpoppy` profile created via the CLI *after*
+// the sidecar started (the recommended onboarding path) is picked up on "Check
+// connection" without restarting — but never downgrade a profile already in use.
+app.get("/aws/readiness", async () => {
+  if (!currentProfile) currentProfile = resolveProfile();
+  return prov.checkReadiness(ctx());
+});
 
 // In-app credential entry (onboarding for users with no CLI/profile set up).
 // Persists the pasted keys as a `[mailpoppy]` profile in ~/.aws/credentials
@@ -627,14 +636,16 @@ app.get("/teardown/domains/:stackName", async (req, reply) => {
 
 // Mutating + DESTRUCTIVE: deletes the stack, its RETAINed data (mail bucket,
 // DynamoDB tables, Cognito pool), the deploy bucket, the SES identity and the
-// DNS records. The UI requires the user to type the domain to confirm. This is a
-// long-running request (it waits for CloudFormation DeleteStack to finish).
+// DNS records. `domain` is OPTIONAL: when removing leftover infrastructure after
+// every domain has already been deleted there's no domain to name — teardownAll
+// still discovers + cleans any stragglers (Cognito users / active rule set /
+// ledger) and tears down the stack. The UI confirms before calling this. This is
+// a long-running request (it waits for CloudFormation DeleteStack to finish).
 app.post("/teardown", async (req, reply) => {
   const b = (req.body ?? {}) as { domain?: string; stackName?: string; deleteDeployBucket?: boolean };
-  if (!b.domain) return reply.code(400).send({ ok: false, error: "domain is required" });
   try {
     return await prov.teardownAll(ctx(), {
-      domain: b.domain,
+      domain: b.domain ?? "",
       stackName: b.stackName,
       deleteDeployBucket: b.deleteDeployBucket,
     });
