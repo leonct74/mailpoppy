@@ -9,6 +9,7 @@ import { SendingHealthView } from "./views/SendingHealthView";
 import { MigrationView } from "./views/MigrationView";
 import { ConnectView } from "./views/ConnectView";
 import { LoginView } from "./views/LoginView";
+import { CapabilityLights } from "./views/CapabilityLights";
 import { CognitoAuth } from "./lib/auth";
 import { makeMailClient } from "./lib/mailClient";
 import { cn, Logo } from "./ui";
@@ -195,15 +196,21 @@ export function App() {
           })}
         </nav>
 
-        <div className="m-3 rounded-lg border border-outline-variant/10 bg-surface-container-lowest/60 p-4">
-          <div
-            className="flex items-start gap-2.5 text-xs leading-relaxed text-on-surface-variant"
-            title={CREDENTIALS_TOOLTIP}
-          >
-            <ShieldCheck className="mt-0.5 size-4 shrink-0 text-secondary" />
-            <span>
-              Your AWS credentials never leave this computer — read locally (like the AWS CLI), never uploaded or stored.
-            </span>
+        {/* Pinned to the bottom of the sidebar so it's visible on every screen:
+            live "permissions lights" for the active AWS identity, plus the
+            credentials-stay-local reassurance. */}
+        <div className="flex flex-col gap-3 px-3 pb-3 pt-2">
+          <CapabilityLights />
+          <div className="rounded-lg border border-outline-variant/10 bg-surface-container-lowest/60 p-4">
+            <div
+              className="flex items-start gap-2.5 text-xs leading-relaxed text-on-surface-variant"
+              title={CREDENTIALS_TOOLTIP}
+            >
+              <ShieldCheck className="mt-0.5 size-4 shrink-0 text-secondary" />
+              <span>
+                Your AWS credentials never leave this computer — read locally (like the AWS CLI), never uploaded or stored.
+              </span>
+            </div>
           </div>
         </div>
       </aside>

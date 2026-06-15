@@ -28,6 +28,12 @@
       "Resource": "*"
     },
     {
+      "Sid": "CapabilityCheck",
+      "Effect": "Allow",
+      "Action": ["iam:SimulatePrincipalPolicy"],
+      "Resource": "*"
+    },
+    {
       "Sid": "IamRolesForStack",
       "Effect": "Allow",
       "Action": [
@@ -50,12 +56,22 @@
       "Sid": "IamPassRoleToStackServices",
       "Effect": "Allow",
       "Action": ["iam:PassRole"],
-      "Resource": "arn:aws:iam::*:role/MailpoppyMailStack-*",
-      "Condition": {
-        "StringEquals": {
-          "iam:PassedToService": ["lambda.amazonaws.com", "cognito-idp.amazonaws.com", "events.amazonaws.com"]
-        }
-      }
+      "Resource": "arn:aws:iam::*:role/MailpoppyMailStack-*"
+    },
+    {
+      "Sid": "GuardDutyMalwareProtection",
+      "Effect": "Allow",
+      "Action": [
+        "guardduty:CreateMalwareProtectionPlan",
+        "guardduty:GetMalwareProtectionPlan",
+        "guardduty:UpdateMalwareProtectionPlan",
+        "guardduty:DeleteMalwareProtectionPlan",
+        "guardduty:ListMalwareProtectionPlans",
+        "guardduty:TagResource",
+        "guardduty:UntagResource",
+        "guardduty:ListTagsForResource"
+      ],
+      "Resource": "*"
     },
     {
       "Sid": "Lambda",
@@ -116,7 +132,15 @@
     {
       "Sid": "ApiGatewayV2",
       "Effect": "Allow",
-      "Action": ["apigateway:POST", "apigateway:GET", "apigateway:PATCH", "apigateway:PUT", "apigateway:DELETE"],
+      "Action": [
+        "apigateway:POST",
+        "apigateway:GET",
+        "apigateway:PATCH",
+        "apigateway:PUT",
+        "apigateway:DELETE",
+        "apigateway:TagResource",
+        "apigateway:UntagResource"
+      ],
       "Resource": ["arn:aws:apigateway:*::/apis", "arn:aws:apigateway:*::/apis/*"]
     },
     {
@@ -183,6 +207,8 @@
         "s3:PutBucketTagging",
         "s3:PutLifecycleConfiguration",
         "s3:GetLifecycleConfiguration",
+        "s3:PutBucketCORS",
+        "s3:GetBucketCORS",
         "s3:ListBucket"
       ],
       "Resource": "arn:aws:s3:::mailpoppy*"

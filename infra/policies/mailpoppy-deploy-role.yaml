@@ -61,6 +61,10 @@ Resources:
                 Effect: Allow
                 Action: [cloudformation:ValidateTemplate, cloudformation:GetTemplateSummary]
                 Resource: "*"
+              - Sid: CapabilityCheck
+                Effect: Allow
+                Action: [iam:SimulatePrincipalPolicy]
+                Resource: "*"
               - Sid: IamRolesForStack
                 Effect: Allow
                 Action:
@@ -77,16 +81,26 @@ Resources:
                   - iam:ListRolePolicies
                   - iam:ListAttachedRolePolicies
                 Resource: arn:aws:iam::*:role/MailpoppyMailStack-*
+              # Scoped by resource to this stack's own roles (Lambda exec, Cognito SMS,
+              # GuardDuty scan). No iam:PassedToService condition: some services
+              # (e.g. Cognito CreateUserPool) don't populate that key, so a condition
+              # there silently denies the pass and the stack rolls back.
               - Sid: IamPassRoleToStackServices
                 Effect: Allow
                 Action: [iam:PassRole]
                 Resource: arn:aws:iam::*:role/MailpoppyMailStack-*
-                Condition:
-                  StringEquals:
-                    iam:PassedToService:
-                      - lambda.amazonaws.com
-                      - cognito-idp.amazonaws.com
-                      - events.amazonaws.com
+              - Sid: GuardDutyMalwareProtection
+                Effect: Allow
+                Action:
+                  - guardduty:CreateMalwareProtectionPlan
+                  - guardduty:GetMalwareProtectionPlan
+                  - guardduty:UpdateMalwareProtectionPlan
+                  - guardduty:DeleteMalwareProtectionPlan
+                  - guardduty:ListMalwareProtectionPlans
+                  - guardduty:TagResource
+                  - guardduty:UntagResource
+                  - guardduty:ListTagsForResource
+                Resource: "*"
               - Sid: Lambda
                 Effect: Allow
                 Action:
@@ -136,7 +150,14 @@ Resources:
                 Resource: "*"
               - Sid: ApiGatewayV2
                 Effect: Allow
-                Action: [apigateway:POST, apigateway:GET, apigateway:PATCH, apigateway:PUT, apigateway:DELETE]
+                Action:
+                  - apigateway:POST
+                  - apigateway:GET
+                  - apigateway:PATCH
+                  - apigateway:PUT
+                  - apigateway:DELETE
+                  - apigateway:TagResource
+                  - apigateway:UntagResource
                 Resource:
                   - arn:aws:apigateway:*::/apis
                   - arn:aws:apigateway:*::/apis/*
@@ -194,6 +215,8 @@ Resources:
                   - s3:PutBucketTagging
                   - s3:PutLifecycleConfiguration
                   - s3:GetLifecycleConfiguration
+                  - s3:PutBucketCORS
+                  - s3:GetBucketCORS
                   - s3:ListBucket
                 Resource: arn:aws:s3:::mailpoppy*
               - Sid: S3MailpoppyObjects
@@ -241,6 +264,10 @@ Resources:
             Condition:
               StringEquals:
                 iam:PassedToService: cloudformation.amazonaws.com
+          - Sid: CapabilityCheck
+            Effect: Allow
+            Action: [iam:SimulatePrincipalPolicy]
+            Resource: "*"
 
 Outputs:
   DeploymentRoleArn:

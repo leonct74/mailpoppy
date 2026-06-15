@@ -103,6 +103,7 @@ import {
   CreateStackCommand,
   UpdateStackCommand,
   DeleteStackCommand,
+  waitUntilStackDeleteComplete,
   type Capability,
 } from "@aws-sdk/client-cloudformation";
 import { templateJson, lambdaZipBase64, lambdaCodeKey } from "./generated/backend-bundle";
@@ -456,6 +457,12 @@ export async function deployBackend(
   // delete it first, then create fresh.
   if (status === "ROLLBACK_COMPLETE" || status === "REVIEW_IN_PROGRESS") {
     await cloudformation.send(new DeleteStackCommand({ StackName: stackName }));
+    // Deletion is async: CreateStack with the same name fails ("...already exists,
+    // but previously had failed...") until the old stack is fully gone. Wait for
+    // the delete to complete before recreating. Retained resources (RemovalPolicy
+    // RETAIN) are DELETE_SKIPPED, so the stack still reaches DELETE_COMPLETE; the
+    // waiter also treats a "does not exist" as done.
+    await waitUntilStackDeleteComplete({ client: cloudformation, maxWaitTime: 300 }, { StackName: stackName });
     status = null;
     operation = "RECREATE";
     await cloudformation.send(
@@ -498,6 +505,9 @@ export interface DeployStatus {
   failed: boolean;
   reason?: string;
   outputs?: Record<string, string>;
+  /** The stack's unique ARN. Lets the client tell a *new* stack from a leftover
+   *  one with the same name (a prior failed deploy being deleted + recreated). */
+  stackId?: string;
 }
 
 /**
@@ -534,7 +544,7 @@ export async function getDeployStatus(ctx: AwsContext, stackName: string): Promi
     }
   }
 
-  return { status, complete, failed, reason: stack?.StackStatusReason, outputs };
+  return { status, complete, failed, reason: stack?.StackStatusReason, outputs, stackId: stack?.StackId };
 }
 
 // ---- Mailboxes (Cognito users in the deployed backend's user pool) ----

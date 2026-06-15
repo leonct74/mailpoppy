@@ -9,6 +9,7 @@ import * as migration from "./migration";
 import * as mailboxImport from "./mailboxImport";
 import { readLedger } from "./ledger";
 import { writeMailpoppyProfile, mailpoppyProfileExists, MAILPOPPY_PROFILE } from "./awsProfile";
+import { checkCapabilities } from "./capabilities";
 import { SES_INBOUND_REGIONS } from "@mailpoppy/core";
 
 // 25 MiB body limit (Fastify defaults to 1 MiB): the bulk-mailbox importer POSTs
@@ -145,6 +146,13 @@ app.post("/config/region", async (req, reply) => {
 app.get("/aws/readiness", async () => {
   if (!currentProfile) currentProfile = resolveProfile();
   return prov.checkReadiness(ctx());
+});
+
+// Live "permissions lights": which capability tiers (operate / deploy) the active
+// identity actually has, via iam:SimulatePrincipalPolicy (read-only, no side effects).
+app.get("/aws/capabilities", async () => {
+  if (!currentProfile) currentProfile = resolveProfile();
+  return checkCapabilities(ctx());
 });
 
 // In-app credential entry (onboarding for users with no CLI/profile set up).

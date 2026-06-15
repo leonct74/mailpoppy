@@ -18,6 +18,7 @@ Sending-health reads. The table below is kept **exactly** in step with the AWS S
 | Service | Actions | Why |
 |---|---|---|
 | STS | `GetCallerIdentity` | Readiness: confirm credentials resolve |
+| IAM (`Resource: *`) | `SimulatePrincipalPolicy` | **Read-only** capability check — powers the app's "AWS permissions" lights (which tiers this identity actually has). Evaluates policy; changes nothing |
 | Route53 (`Resource: *`) | `ListHostedZonesByName`, `ListResourceRecordSets`, `ChangeResourceRecordSets` | Publish (and on teardown remove) MX / SPF / DKIM / DMARC records |
 | SES (`Resource: *`) | `CreateEmailIdentity`, `GetEmailIdentity`, `ListEmailIdentities`, `DeleteEmailIdentity`, `GetAccount`, `GetSendStatistics`, `PutAccountDetails`, `PutEmailIdentityMailFromAttributes`, `SendEmail`, `CreateReceiptRuleSet`, `CreateReceiptRule`, `DescribeActiveReceiptRuleSet`, `SetActiveReceiptRuleSet` | Verify the domain, route inbound → S3, send test mail, sandbox-exit (`PutAccountDetails`), custom MAIL FROM (`PutEmailIdentityMailFromAttributes`), and read account sending/bounce stats for the Sending-health view |
 | S3 readiness (`Resource: *`) | `ListAllMyBuckets` | Readiness probe |
@@ -62,10 +63,16 @@ Lambda execution roles, the Cognito SMS role, the custom-resource role). That se
   policy for the admin.
 
 It covers exactly what `MailpoppyMailStack` creates (verified against a real deploy): **CloudFormation**,
-**IAM** role lifecycle + `PassRole`, **Lambda**, **DynamoDB**, **Cognito**, **API Gateway (v2)**,
-**SNS**, **EventBridge**, **SES** (receipt rules + identity), **S3**, **CloudWatch Logs**.
+**IAM** role lifecycle + `PassRole`, **Lambda**, **DynamoDB**, **Cognito**, **API Gateway (v2)**
+(incl. `TagResource` for the auto-tagged stage), **SNS**, **EventBridge**, **SES** (receipt rules +
+identity), **S3** (incl. `PutBucketCORS` for the presigned-upload bucket), **GuardDuty** (the optional
+Malware Protection plan, on by default), **CloudWatch Logs**.
 Everything is scoped to **`MailpoppyMailStack-*`** / **`mailpoppy*`** resources where AWS supports
-resource-level permissions; `PassRole` is constrained with an `iam:PassedToService` condition.
+resource-level permissions. `PassRole` is constrained by **resource** to this stack's own roles
+(`role/MailpoppyMailStack-*` — the Lambda exec roles, the Cognito SMS role, the GuardDuty scan role);
+it deliberately carries **no** `iam:PassedToService` condition, because some services (notably Cognito
+`CreateUserPool`) don't populate that condition key, so a condition there silently denies the pass and
+the whole stack rolls back.
 Validated: `cloudformation validate-template` (CAPABILITY_NAMED_IAM) + `accessanalyzer
 validate-policy` → **no findings**.
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { KeyRound, ShieldCheck, Rocket, Globe, RefreshCw, Mail, Sparkles, ArrowLeft } from "lucide-react";
+import { KeyRound, ShieldCheck, Rocket, Globe, RefreshCw, Mail, Sparkles, ArrowLeft, Lock } from "lucide-react";
 import { sidecar } from "../lib/sidecar";
 import { createMailbox, listMailboxes, type Mailbox, type BackendInfo } from "../lib/mailbox";
 import { deployBackend, deployStatus, type DeployStatus } from "../lib/deploy";
@@ -10,6 +10,8 @@ import { RegionPicker } from "./RegionPicker";
 import { AwsOnboarding } from "./AwsOnboarding";
 import { friendlyError } from "../lib/errors";
 import { AdminPrivacyNotice } from "./AdminPrivacyNotice";
+import { SetupProgress } from "./SetupProgress";
+import { deriveResume, setupPhases, type SetupStep } from "../lib/setupProgress";
 import { Card, Button, Spinner, cn } from "../ui";
 
 // Phase 1 setup wizard.
@@ -38,17 +40,21 @@ interface IdentityStatus {
   dkim: string;
 }
 
-type Step =
-  | "start"
-  | "preflighted"
-  | "deploying"
-  | "deployed"
-  | "provisioning"
-  | "verifying"
-  | "verified"
-  | "sending"
-  | "sent";
+// The wizard's step machine is shared with the (pure, tested) progress model so
+// the two never drift — see ../lib/setupProgress.
+type Step = SetupStep;
 const SERVICES = ["route53", "ses", "sesv2", "s3"] as const;
+
+/** Remember the typed-but-not-yet-submitted domain so a remount/HMR/restart
+ *  doesn't lose it before there's anything in AWS to resume from. */
+const DOMAIN_DRAFT_KEY = "mailpoppy.setup.domainDraft";
+function readDomainDraft(): string {
+  try {
+    return localStorage.getItem(DOMAIN_DRAFT_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
 
 const noAutoCap = { autoCapitalize: "off", autoCorrect: "off", spellCheck: false } as const;
 
@@ -114,10 +120,17 @@ export function SetupWizard({
   // The backend stack is deployed once (with the first domain). For every
   // subsequent domain — and for any re-run — it already exists, so the deploy
   // step is skipped and we go straight from preflight to provisioning DNS/SES.
-  const backendDeployed = !!loadDeploymentConfig();
+  // localStorage hint (can be stale: a torn-down stack may leave it behind, or a
+  // fresh install may lack it). `liveDeployed` is the authoritative truth from a
+  // live listMailboxes during reconcile; prefer it once known.
+  const localConfigDeployed = !!loadDeploymentConfig();
+  const [liveDeployed, setLiveDeployed] = useState<boolean | null>(null);
+  const [reconciling, setReconciling] = useState(true);
+  const [leftover, setLeftover] = useState(false);
+  const backendDeployed = liveDeployed ?? localConfigDeployed;
 
   // Steps 1–3
-  const [domain, setDomain] = useState(presetDomain ?? "");
+  const [domain, setDomain] = useState(presetDomain ?? readDomainDraft());
   const [recipient, setRecipient] = useState("");
   const [step, setStep] = useState<Step>("start");
   const [preflight, setPreflight] = useState<Preflight | null>(null);
@@ -136,6 +149,10 @@ export function SetupWizard({
   const [deploy, setDeploy] = useState<DeployStatus | null>(null);
   const [enableMalware, setEnableMalware] = useState(true); // recommended → default on
   const deployPollRef = useRef<number | null>(null);
+  // For distinguishing this deploy from a leftover stack of the same name that a
+  // prior failed attempt left behind (which is being deleted + recreated).
+  const priorStackIdRef = useRef<string | null>(null);
+  const deployOpRef = useRef<string | null>(null);
 
   // Mailboxes. The backend's stack name is resolved (one backend per install),
   // not typed — there's no editable stack-name field anymore.
@@ -211,7 +228,14 @@ export function SetupWizard({
     setBusy(true);
     setStep("deploying");
     try {
-      await deployBackend({ domain, enableMalwareProtection: enableMalware });
+      // Note the pre-existing stack (a prior failed attempt leaves a
+      // ROLLBACK_COMPLETE stack of the same name) so the poll can tell that
+      // leftover apart from the stack we're about to create, and not mistake the
+      // old failure for this deploy's outcome.
+      const before = await deployStatus(DEFAULT_STACK_NAME).catch(() => null);
+      priorStackIdRef.current = before?.stackId ?? null;
+      const started = await deployBackend({ domain, enableMalwareProtection: enableMalware });
+      deployOpRef.current = started.operation;
     } catch (e) {
       fail(e, "preflighted");
       return;
@@ -221,15 +245,35 @@ export function SetupWizard({
   }
 
   // Poll the deploy until the stack settles; on success persist the client config.
+  // Resilience matters here: a single bad read must NOT strand the user on a false
+  // error that "fixes itself" on restart. Two guards:
+  //   • a failed status for the *leftover* prior stack (same name, same id, while
+  //     it's being deleted + recreated) is ignored — that's not this deploy.
+  //   • transient read errors are retried a few times before being surfaced.
   useEffect(() => {
     if (step !== "deploying") return;
     let cancelled = false;
+    let errors = 0;
+    let staleWaits = 0;
     async function poll() {
       try {
         const s = await deployStatus("MailpoppyMailStack");
         if (cancelled) return;
+        errors = 0;
         setDeploy(s);
         if (s.failed) {
+          // Is this the pre-existing stack we're replacing, not the new deploy?
+          // (Only on a create/recreate, and only while we still see the SAME
+          // stack id we saw before starting.) If so, the recreate just hasn't
+          // surfaced yet — keep waiting instead of reporting a phantom failure.
+          const op = deployOpRef.current;
+          const isLeftover =
+            (op === "CREATE" || op === "RECREATE") && !!s.stackId && s.stackId === priorStackIdRef.current;
+          if (isLeftover && staleWaits < 30) {
+            staleWaits += 1;
+            deployPollRef.current = window.setTimeout(poll, 4000);
+            return;
+          }
           setError(`Backend deploy failed (${s.status})${s.reason ? `: ${s.reason}` : ""}.`);
           setStep("preflighted");
           return;
@@ -249,10 +293,16 @@ export function SetupWizard({
           return;
         }
       } catch (e) {
-        if (!cancelled) {
+        if (cancelled) return;
+        // A one-off read failure (sidecar momentarily busy, network blip) must not
+        // dead-end a deploy that's still running — retry a few times first.
+        errors += 1;
+        if (errors >= 4) {
           setError(friendlyError(e));
           setStep("preflighted");
+          return;
         }
+        deployPollRef.current = window.setTimeout(poll, 4000);
         return;
       }
       deployPollRef.current = window.setTimeout(poll, 5000);
@@ -328,15 +378,27 @@ export function SetupWizard({
   }
 
   const ready = readiness?.ready === true;
+  // A mailbox is a Cognito user in the deployed backend, scoped to this domain,
+  // so it can only be created once the backend exists AND the domain has verified.
+  // Until then the Mailboxes section is shown as a locked upcoming step (no form),
+  // rather than a dead disabled form that reads as a broken dead-end.
+  const canAddMailbox = !mbNoBackend && ["verified", "sending", "sent"].includes(step);
+
+  // The always-visible progress map (right rail). Driven by live truth so it
+  // survives remounts/restarts and never hides a completed step.
+  const phases = setupPhases({ ready, step, backendDeployed, mailboxCount: mailboxes?.length ?? 0 });
 
   // ---- Mailboxes ----
-  async function loadMailboxes() {
+  async function loadMailboxes(): Promise<{ deployed: boolean; backend: BackendInfo | null; mailboxes: Mailbox[] }> {
     setMbError(null);
     setMbNoBackend(false);
     try {
       const res = await listMailboxes(stackName);
+      const backend = { region: res.region, userPoolId: res.userPoolId, clientId: res.clientId, apiBaseUrl: res.apiBaseUrl };
       setMailboxes(res.mailboxes);
-      setMbBackend({ region: res.region, userPoolId: res.userPoolId, clientId: res.clientId, apiBaseUrl: res.apiBaseUrl });
+      setMbBackend(backend);
+      setLiveDeployed(true);
+      return { deployed: true, backend, mailboxes: res.mailboxes };
     } catch (e) {
       setMailboxes(null);
       setMbBackend(null);
@@ -346,16 +408,88 @@ export function SetupWizard({
       // instead of an alarming red banner.
       if (/\b404\b/.test(msg) && /No deployed Mailpoppy backend/i.test(msg)) {
         setMbNoBackend(true);
+        setLiveDeployed(false);
       } else {
         setMbError(friendlyError(e));
       }
+      return { deployed: false, backend: null, mailboxes: [] };
     }
   }
-  // Auto-load the mailbox list once the environment is ready.
+  // On ready, reconcile from REAL AWS state so the wizard resumes exactly where
+  // the user left off — even after closing and reopening the app — instead of a
+  // blank form that pretends nothing was done.
   useEffect(() => {
-    if (ready) void loadMailboxes();
+    if (ready) void reconcile();
+    else setReconciling(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, stackName]);
+
+  // Persist the typed-but-not-submitted domain so a remount/HMR/restart doesn't
+  // lose it before there's anything in AWS to resume from. (A re-run is pinned.)
+  useEffect(() => {
+    if (presetDomain) return;
+    try {
+      if (domain) localStorage.setItem(DOMAIN_DRAFT_KEY, domain);
+      else localStorage.removeItem(DOMAIN_DRAFT_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, [domain, presetDomain]);
+
+  // Resume from reality: query the live backend, its domains, and the candidate
+  // domain's verification status, then drop the user at the right step. Only
+  // advances from "start", so it never overrides a flow the user is mid-way through.
+  async function reconcile() {
+    setReconciling(true);
+    try {
+      const { deployed, backend } = await loadMailboxes();
+
+      let domains: string[] = [];
+      try {
+        const d = await sidecar<{ ok: boolean; domains: string[] }>(`/teardown/domains/${encodeURIComponent(stackName)}`);
+        domains = d.domains ?? [];
+      } catch {
+        /* discovery is best-effort */
+      }
+
+      const candidate = presetDomain || domains[0] || "";
+      let dkim: string | undefined;
+      let verifiedForSending: boolean | undefined;
+      if (candidate) {
+        try {
+          const s = await sidecar<IdentityStatus>(`/provision/${encodeURIComponent(candidate)}/status`);
+          dkim = s.dkim;
+          verifiedForSending = s.verifiedForSending;
+        } catch {
+          /* status is best-effort */
+        }
+      }
+
+      const r = deriveResume({ backendDeployed: deployed, domains, dkim, verifiedForSending, presetDomain });
+      setLeftover(r.leftover);
+      if (r.domain) setDomain(r.domain);
+
+      // Reconstruct just enough so the resumed step's panels render — the data
+      // those panels read normally comes from in-session API calls.
+      if (deployed && backend) {
+        setDeploy({
+          status: "CREATE_COMPLETE",
+          complete: true,
+          failed: false,
+          outputs: {
+            ApiBaseUrl: backend.apiBaseUrl,
+            UserPoolId: backend.userPoolId,
+            UserPoolClientId: backend.clientId,
+            DeployRegion: backend.region,
+          },
+        });
+      }
+
+      setStep((cur) => (cur === "start" ? r.step : cur));
+    } finally {
+      setReconciling(false);
+    }
+  }
 
   // After an in-session deploy finishes, the backend stack now exists. The
   // effect above already ran (and 404'd) before the stack was created, so
@@ -540,6 +674,12 @@ export function SetupWizard({
       {/* ---- Steps 1–4 (gated on readiness) ---- */}
       <StepCard step="Steps 1–4" title="Set up a domain">
         {!ready && <p className="mb-3 text-sm text-on-surface-variant">Complete Step 0 first.</p>}
+        {ready && leftover && (
+          <Warn className="mb-3">
+            We found leftover mail DNS for <b>{domain}</b> from an earlier setup, but no backend is deployed. Continue below
+            to deploy it — the existing records are reused, so you won&apos;t get duplicates.
+          </Warn>
+        )}
 
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
@@ -597,8 +737,8 @@ export function SetupWizard({
 
         {step === "deploying" && (
           <div className="mt-4 flex items-center gap-2 text-sm text-on-surface-variant">
-            <Spinner /> Deploying the backend stack… <C>{deploy?.status ?? "starting"}</C>{" "}
-            <span className="text-on-surface-variant/60">(CloudFormation — this usually takes 1–3 minutes)</span>
+            <Spinner /> Setting up your backend… <C>{deploy?.status ?? "starting"}</C>{" "}
+            <span className="text-on-surface-variant/60">(this usually takes 1–3 minutes — you can keep this window open)</span>
           </div>
         )}
 
@@ -624,8 +764,13 @@ export function SetupWizard({
         )}
 
         {step === "verifying" && (
-          <div className="mt-4 flex items-center gap-2 text-sm text-on-surface-variant">
-            <Spinner /> Verifying DKIM… <C>{status?.dkim ?? "pending"}</C> (polling every 4s).
+          <div className="mt-4 flex items-start gap-2 text-sm text-on-surface-variant">
+            <Spinner className="mt-0.5 shrink-0" />
+            <span>
+              Verifying your domain (DKIM) — this usually takes <b className="text-on-surface">a few minutes</b>, occasionally
+              up to an hour while your DNS changes spread across the internet. Mailpoppy re-checks every few seconds, so you can
+              leave this open and come back. <span className="text-on-surface-variant/60">Status: {status?.dkim ?? "pending"}.</span>
+            </span>
           </div>
         )}
 
@@ -696,61 +841,89 @@ export function SetupWizard({
             backend stack must be deployed first.
           </p>
 
-          {mbNoBackend ? (
-            <Warn className="mt-3">
-              No backend deployed yet. Set up a domain above and run the <b>Deploy backend</b> step to create it — then come
-              back here to add mailboxes.
-            </Warn>
-          ) : !["verified", "sending", "sent"].includes(step) ? (
-            <Warn className="mt-3">
-              Finish this domain's <b>SES + DNS setup</b> above — it must verify before you can add mailboxes. A mailbox on an
-              unverified domain can't send or receive mail yet.
-            </Warn>
-          ) : null}
-
-          <div className="mt-4 flex flex-wrap items-end gap-3">
-            <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
-              Email address
-              <input
-                aria-label="Mailbox email"
-                value={mbEmail}
-                onChange={(e) => setMbEmail(e.target.value.trim().toLowerCase())}
-                placeholder="you@yourdomain.com"
-                className={cn(inputCls, "w-64")}
-                {...noAutoCap}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
-              Password
-              <input
-                aria-label="Mailbox password"
-                type="password"
-                value={mbPassword}
-                onChange={(e) => setMbPassword(e.target.value)}
-                className={cn(inputCls, "w-64")}
-              />
-            </label>
-            <Button
-              onClick={() => void createMb()}
-              disabled={mbBusy || mbNoBackend || !["verified", "sending", "sent"].includes(step) || !mbEmail || !mbPassword}
-            >
-              {mbBusy ? <Spinner className="border-white/40 border-t-white" /> : null}
-              {mbBusy ? "Creating…" : "Create mailbox"}
-            </Button>
-          </div>
-          <p className="mt-1.5 text-xs text-on-surface-variant/70">
-            Password must meet the pool policy (min 8 chars, with upper &amp; lower case, a number and a symbol).
-          </p>
-
-          {mbCreated && (
-            <div className="mt-3 rounded-lg border border-secondary/30 bg-secondary/10 p-4 text-sm text-on-surface">
-              ✅ Mailbox <b>{mbCreated}</b> created. The <b>Inbox</b> tab is now connected to this backend — go there and sign
-              in as <C>{mbCreated}</C>.
+          {!canAddMailbox ? (
+            // Locked upcoming step — no form to interact with yet, so it can't read
+            // as a broken dead-end. Unlocks into the real form once the prerequisite
+            // above is met. The message names the exact next action.
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-dashed border-outline-variant/30 bg-surface-container-lowest/40 p-3 text-sm text-on-surface-variant">
+              {step === "deploying" || step === "provisioning" || step === "verifying" ? (
+                <Spinner className="mt-0.5 shrink-0" />
+              ) : (
+                <Lock className="mt-0.5 size-4 shrink-0 text-on-surface-variant/60" />
+              )}
+              <span>
+                {step === "deploying" ? (
+                  <>
+                    Setting up your backend now — this usually takes <b className="text-on-surface">1–3 minutes</b>. Your first
+                    mailbox unlocks here automatically when it&apos;s ready; you can keep this window open.
+                  </>
+                ) : step === "provisioning" ? (
+                  <>Publishing your domain&apos;s DNS records — just a moment…</>
+                ) : step === "verifying" ? (
+                  <>
+                    Verifying your domain — usually <b className="text-on-surface">a few minutes</b>, occasionally up to an hour
+                    while DNS updates worldwide. Mailpoppy checks automatically; you can leave this open and come back.
+                  </>
+                ) : mbNoBackend ? (
+                  <>
+                    Your turn: set up your backend in <b className="text-on-surface">Steps 1–4</b> above — your mailboxes live
+                    there. When you start the deploy it runs for about <b className="text-on-surface">1–3 minutes</b> with live
+                    progress shown right here, and this unlocks the moment it finishes.
+                  </>
+                ) : (
+                  <>
+                    Finish this domain&apos;s <b className="text-on-surface">SES + DNS setup</b> above (verification takes a few
+                    minutes). A mailbox on an unverified domain can&apos;t send or receive mail yet.
+                  </>
+                )}
+              </span>
             </div>
-          )}
-          {mbError && <div className="mt-3 rounded-lg border border-tertiary/30 bg-tertiary-container/10 p-4 text-sm text-tertiary">{mbError}</div>}
+          ) : (
+            <>
+              <div className="mt-4 flex flex-wrap items-end gap-3">
+                <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
+                  Email address
+                  <input
+                    aria-label="Mailbox email"
+                    value={mbEmail}
+                    onChange={(e) => setMbEmail(e.target.value.trim().toLowerCase())}
+                    placeholder="you@yourdomain.com"
+                    className={cn(inputCls, "w-64")}
+                    {...noAutoCap}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
+                  Password
+                  <input
+                    aria-label="Mailbox password"
+                    type="password"
+                    value={mbPassword}
+                    onChange={(e) => setMbPassword(e.target.value)}
+                    className={cn(inputCls, "w-64")}
+                  />
+                </label>
+                <Button onClick={() => void createMb()} disabled={mbBusy || !mbEmail || !mbPassword}>
+                  {mbBusy ? <Spinner className="border-white/40 border-t-white" /> : null}
+                  {mbBusy ? "Creating…" : "Create mailbox"}
+                </Button>
+              </div>
+              <p className="mt-1.5 text-xs text-on-surface-variant/70">
+                Password must meet the pool policy (min 8 chars, with upper &amp; lower case, a number and a symbol).
+              </p>
 
-          {mailboxes && (
+              {mbCreated && (
+                <div className="mt-3 rounded-lg border border-secondary/30 bg-secondary/10 p-4 text-sm text-on-surface">
+                  ✅ Mailbox <b>{mbCreated}</b> created. The <b>Inbox</b> tab is now connected to this backend — go there and
+                  sign in as <C>{mbCreated}</C>.
+                </div>
+              )}
+              {mbError && (
+                <div className="mt-3 rounded-lg border border-tertiary/30 bg-tertiary-container/10 p-4 text-sm text-tertiary">{mbError}</div>
+              )}
+            </>
+          )}
+
+          {mailboxes && mailboxes.length > 0 && (
             <div className="mt-4 text-sm">
               <div className="flex items-center justify-between">
                 <strong className="text-on-surface">Existing mailboxes ({mailboxes.length})</strong>
@@ -760,21 +933,17 @@ export function SetupWizard({
                   </span>
                 )}
               </div>
-              {mailboxes.length === 0 ? (
-                <p className="mt-2 text-sm text-on-surface-variant">No mailboxes yet.</p>
-              ) : (
-                <ul className="mt-2 flex flex-col gap-2">
-                  {mailboxes.map((m) => (
-                    <MailboxStorageRow
-                      key={m.email}
-                      email={m.email}
-                      status={m.status}
-                      stackName={stackName}
-                      onDeleted={() => void loadMailboxes()}
-                    />
-                  ))}
-                </ul>
-              )}
+              <ul className="mt-2 flex flex-col gap-2">
+                {mailboxes.map((m) => (
+                  <MailboxStorageRow
+                    key={m.email}
+                    email={m.email}
+                    status={m.status}
+                    stackName={stackName}
+                    onDeleted={() => void loadMailboxes()}
+                  />
+                ))}
+              </ul>
             </div>
           )}
         </Card>
@@ -785,9 +954,11 @@ export function SetupWizard({
               first-domain onboarding. */}
         </div>
 
-        {/* Right column — guidance ("running this the right way"). */}
+        {/* Right column — the always-visible progress map + guidance. (The live
+            AWS-permissions lights live permanently in the app sidebar.) */}
         <aside className="lg:col-span-1">
-          <div className="lg:sticky lg:top-0">
+          <div className="flex flex-col gap-4 lg:sticky lg:top-0">
+            <SetupProgress phases={phases} reconciling={reconciling} />
             <AdminPrivacyNotice />
           </div>
         </aside>

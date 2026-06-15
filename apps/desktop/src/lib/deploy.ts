@@ -17,6 +17,9 @@ export interface DeployStatus {
   failed: boolean;
   reason?: string;
   outputs?: Record<string, string>;
+  /** The stack's ARN — lets the wizard distinguish a freshly-created stack from a
+   *  leftover one with the same name (a prior failed deploy being replaced). */
+  stackId?: string;
 }
 
 export function deployBackend(input: {

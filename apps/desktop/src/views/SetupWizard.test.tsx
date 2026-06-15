@@ -61,7 +61,8 @@ describe("SetupWizard · Step 0 readiness gate", () => {
     expect(await screen.findByText(/No usable AWS credentials/i)).toBeInTheDocument();
     // The guided "connect your AWS account" panel appears — account sign-up help
     // plus the recommended CLI path (the key-paste form is a downranked disclosure).
-    expect(screen.getByText(/Connect your AWS account/i)).toBeInTheDocument();
+    // (the progress map also lists "Connect your AWS account" — target the panel heading)
+    expect(screen.getByRole("heading", { name: /Connect your AWS account/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /aws\.amazon\.com\/free/i })).toBeInTheDocument();
     expect(screen.getByText(/aws configure --profile mailpoppy/i)).toBeInTheDocument();
     // Domain input is gated until ready.
@@ -107,11 +108,20 @@ describe("SetupWizard · Step 0 readiness gate", () => {
 
 describe("SetupWizard · Mailboxes", () => {
   it("blocks mailbox creation until the domain's SES + DNS verify, then creates + saves config", async () => {
+    // Realistic: no backend exists until the user deploys one (so resume-from-reality
+    // sees a true fresh start, and "Deploy backend" is the offered action).
+    let deployed = false;
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;
-      if (path.startsWith("/mailbox/list")) return { ...BACKEND, mailboxes: [] };
+      if (path.startsWith("/mailbox/list")) {
+        if (!deployed) throw new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
+        return { ...BACKEND, mailboxes: [] };
+      }
       if (path.startsWith("/aws/preflight")) return { accountId: "123456789012", zoneId: "Z123", region: "eu-west-1" };
-      if (path === "/deploy/backend") return { ok: true, stackName: "MailpoppyMailStack", operation: "CREATE", bucket: "b", region: "eu-west-1" };
+      if (path === "/deploy/backend") {
+        deployed = true;
+        return { ok: true, stackName: "MailpoppyMailStack", operation: "CREATE", bucket: "b", region: "eu-west-1" };
+      }
       // Provision status (DKIM verified). Checked before the generic deploy /status.
       if (path.includes("/provision/") && path.endsWith("/status")) return { dkim: "SUCCESS", verifiedForSending: true };
       if (path.endsWith("/status")) {
@@ -138,17 +148,21 @@ describe("SetupWizard · Mailboxes", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Yes, continue/i }));
     await screen.findByText(/Backend deployed/i);
 
-    // Backend exists but the domain isn't verified → creation is BLOCKED.
-    fireEvent.change(await screen.findByLabelText("Mailbox email"), { target: { value: "You@YourDomain.com" } });
-    fireEvent.change(screen.getByLabelText("Mailbox password"), { target: { value: "Mailpoppy-Test-1!" } });
-    expect(screen.getByText(/must verify before you can add mailboxes/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create mailbox" })).toBeDisabled();
+    // Backend exists but the domain isn't verified → Mailboxes is a locked
+    // upcoming step: no form fields and no Create button, so it can't read as a
+    // broken dead-end.
+    expect(await screen.findByText(/can't send or receive mail yet/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Mailbox email")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create mailbox" })).not.toBeInTheDocument();
 
-    // Provision + verify the domain → creation UNBLOCKS.
+    // Provision + verify the domain → the form UNLOCKS.
     fireEvent.click(screen.getByRole("button", { name: /Set up domain mail/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Yes, continue/i }));
     await screen.findByText(/DKIM verified/i);
 
+    // The real form is now present — fill it and create.
+    fireEvent.change(await screen.findByLabelText("Mailbox email"), { target: { value: "You@YourDomain.com" } });
+    fireEvent.change(screen.getByLabelText("Mailbox password"), { target: { value: "Mailpoppy-Test-1!" } });
     const createBtn = screen.getByRole("button", { name: "Create mailbox" });
     expect(createBtn).not.toBeDisabled();
     fireEvent.click(createBtn);
@@ -164,11 +178,18 @@ describe("SetupWizard · Mailboxes", () => {
   });
 
   it("deploys the backend in-app (CloudFormation) and saves the client config", async () => {
+    let deployed = false;
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;
-      if (path.startsWith("/mailbox/list")) return { ...BACKEND, mailboxes: [] };
+      if (path.startsWith("/mailbox/list")) {
+        if (!deployed) throw new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
+        return { ...BACKEND, mailboxes: [] };
+      }
       if (path.startsWith("/aws/preflight")) return { accountId: "123456789012", zoneId: "Z123", region: "eu-west-1" };
-      if (path === "/deploy/backend") return { ok: true, stackName: "MailpoppyMailStack", operation: "CREATE", bucket: "b", region: "eu-west-1" };
+      if (path === "/deploy/backend") {
+        deployed = true;
+        return { ok: true, stackName: "MailpoppyMailStack", operation: "CREATE", bucket: "b", region: "eu-west-1" };
+      }
       if (path.endsWith("/status")) {
         return {
           status: "CREATE_COMPLETE",
@@ -204,7 +225,7 @@ describe("SetupWizard · Mailboxes", () => {
   it("confirms deploy via an in-app dialog, and cancelling does not deploy", async () => {
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;
-      if (path.startsWith("/mailbox/list")) return { ...BACKEND, mailboxes: [] };
+      if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
       if (path.startsWith("/aws/preflight")) return { accountId: "123456789012", zoneId: "Z123", region: "eu-west-1" };
       if (path === "/deploy/backend") throw new Error("deploy must not be called after cancel");
       throw new Error(`unexpected sidecar path ${path}`);
@@ -268,9 +289,51 @@ describe("SetupWizard · Mailboxes", () => {
     await screen.findByText(/Environment ready/i);
 
     // Friendly deploy hint, not the raw sidecar error.
-    expect(await screen.findByText(/No backend deployed yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/your mailboxes live\s+there/i)).toBeInTheDocument();
     expect(screen.queryByText(/sidecar 404/i)).not.toBeInTheDocument();
-    // Create is gated until the backend exists.
-    expect(screen.getByRole("button", { name: "Create mailbox" })).toBeDisabled();
+    // Locked upcoming step: no dead form — the Create button isn't rendered at all
+    // until the backend exists and the domain verifies.
+    expect(screen.queryByRole("button", { name: "Create mailbox" })).not.toBeInTheDocument();
+  });
+});
+
+describe("SetupWizard · resume from reality", () => {
+  it("resumes a deployed + verified domain after a restart — no progress lost", async () => {
+    mockSidecar.mockImplementation(async (path: string) => {
+      if (path === "/aws/readiness") return READY;
+      if (path.startsWith("/mailbox/list")) return { ...BACKEND, mailboxes: [] };
+      if (path.startsWith("/teardown/domains")) return { ok: true, domains: ["resumed.com"] };
+      if (path.includes("/provision/") && path.endsWith("/status")) return { dkim: "SUCCESS", verifiedForSending: true };
+      // Unmocked paths (region config, MAIL FROM status) throw — those components
+      // tolerate sidecar failures, and reconcile swallows best-effort lookups.
+      throw new Error(`unexpected sidecar path ${path}`);
+    });
+
+    render(<SetupWizard />);
+
+    // The domain is restored from AWS, not a blank field…
+    await waitFor(() =>
+      expect((screen.getByPlaceholderText("yourdomain.com") as HTMLInputElement).value).toBe("resumed.com"),
+    );
+    // …the persistent progress map is always present…
+    expect(screen.getByText(/Your setup progress/i)).toBeInTheDocument();
+    // …the domain reads as verified in the map…
+    expect(await screen.findByText(/ready to send and receive/i)).toBeInTheDocument();
+    // …and the mailbox form is unlocked because we resumed past verification.
+    expect(screen.getByLabelText("Mailbox email")).toBeInTheDocument();
+  });
+
+  it("surfaces leftover DNS when a domain exists but no backend is deployed", async () => {
+    mockSidecar.mockImplementation(async (path: string) => {
+      if (path === "/aws/readiness") return READY;
+      if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
+      if (path.startsWith("/teardown/domains")) return { ok: true, domains: ["leftover.com"] };
+      throw new Error(`unexpected sidecar path ${path}`);
+    });
+
+    render(<SetupWizard />);
+
+    expect(await screen.findByText(/leftover mail DNS/i)).toBeInTheDocument();
+    expect((screen.getByPlaceholderText("yourdomain.com") as HTMLInputElement).value).toBe("leftover.com");
   });
 });

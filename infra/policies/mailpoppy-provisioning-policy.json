@@ -8,6 +8,12 @@
       "Resource": "*"
     },
     {
+      "Sid": "CapabilityCheck",
+      "Effect": "Allow",
+      "Action": ["iam:SimulatePrincipalPolicy"],
+      "Resource": "*"
+    },
+    {
       "Sid": "Route53",
       "Effect": "Allow",
       "Action": [
