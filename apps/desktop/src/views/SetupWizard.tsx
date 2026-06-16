@@ -916,9 +916,42 @@ export function SetupWizard({
               </p>
 
               {mbCreated && (
-                <div className="mt-3 rounded-lg border border-secondary/30 bg-secondary/10 p-4 text-sm text-on-surface">
-                  ✅ Mailbox <b>{mbCreated}</b> created. The <b>Inbox</b> tab is now connected to this backend — go there and
-                  sign in as <C>{mbCreated}</C>.
+                <div className="mt-4 rounded-xl border border-secondary/40 bg-secondary/10 p-5">
+                  <h3 className="flex items-center gap-2 text-base font-semibold text-on-surface">
+                    <Sparkles className="size-5 text-secondary" /> You&apos;re live — <C>{mbCreated}</C> is ready!
+                  </h3>
+                  <p className="mt-1.5 text-sm text-on-surface-variant">
+                    Your email backend is running in your own AWS account and your first mailbox is set up. Nicely done.
+                    Here&apos;s what to do next:
+                  </p>
+                  <ol className="mt-3 flex flex-col gap-2.5 text-sm text-on-surface-variant">
+                    <li className="flex gap-2.5">
+                      <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-secondary/20 font-mono text-[11px] font-semibold text-secondary">
+                        1
+                      </span>
+                      <span>
+                        Open the <b className="text-on-surface">Inbox</b> tab and sign in as <C>{mbCreated}</C>.
+                      </span>
+                    </li>
+                    <li className="flex gap-2.5">
+                      <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-secondary/20 font-mono text-[11px] font-semibold text-secondary">
+                        2
+                      </span>
+                      <span>
+                        Send yourself a test email to confirm it works end-to-end. Heads-up: a brand-new domain can land in
+                        spam for the first week or two while its sending reputation builds — that&apos;s normal and improves
+                        on its own.
+                      </span>
+                    </li>
+                    <li className="flex gap-2.5">
+                      <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-secondary/20 font-mono text-[11px] font-semibold text-secondary">
+                        3
+                      </span>
+                      <span>
+                        Read and reply on the go with the <b className="text-on-surface">MailPoppy mobile app</b>.
+                      </span>
+                    </li>
+                  </ol>
                 </div>
               )}
               {mbError && (

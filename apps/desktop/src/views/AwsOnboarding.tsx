@@ -234,14 +234,24 @@ export function AwsOnboarding({ onResult, onRecheck, cliInstalled, submit = defa
         </p>
       </div>
 
-      {/* ── Convenience: paste keys directly (downranked, honest about the trade-off) ── */}
+      {/* ── No-terminal alternative: paste keys directly. Kept secondary to the CLI
+          (which keeps the secret out of the app), but a clearly visible button so a
+          non-CLI user doesn't miss it. ── */}
       <button
         type="button"
         onClick={() => setShowPaste((s) => !s)}
-        className="mt-4 flex items-center gap-1 text-sm text-on-surface-variant underline-offset-2 hover:underline"
+        aria-expanded={showPaste}
+        className="mt-4 flex w-full items-center justify-between gap-2 rounded-xl border border-outline-variant/30 bg-surface-container-lowest px-4 py-3 text-sm font-medium text-on-surface transition-colors hover:border-primary/40 hover:bg-surface-container-low"
       >
-        {showPaste ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-        Or, instead of the CLI, paste your keys here (no terminal)
+        <span className="flex items-center gap-2">
+          <KeyRound className="size-4 text-on-surface-variant" />
+          No terminal? Paste your keys here instead
+        </span>
+        {showPaste ? (
+          <ChevronDown className="size-4 text-on-surface-variant" />
+        ) : (
+          <ChevronRight className="size-4 text-on-surface-variant" />
+        )}
       </button>
 
       {showPaste && (
