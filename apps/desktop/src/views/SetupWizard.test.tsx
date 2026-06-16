@@ -69,6 +69,36 @@ describe("SetupWizard · Step 0 readiness gate", () => {
     expect(screen.getByPlaceholderText("yourdomain.com")).toBeDisabled();
   });
 
+  it("never claims the backend is live from a stale local config when AWS can't confirm it", async () => {
+    // Reproduces the torn-down case: everything (incl. the IAM user) was removed,
+    // but a deployment config lingers in localStorage. Credentials no longer
+    // resolve (not ready), so listMailboxes can't run and live state is unknown.
+    // The progress panel must NOT fall back to the stale flag and claim live.
+    saveDeploymentConfig({
+      apiBaseUrl: "https://old.example.com",
+      userPoolId: "eu-west-1_old",
+      clientId: "old",
+      region: "eu-west-1",
+      stackName: "MailpoppyMailStack",
+    });
+    route({
+      readiness: {
+        cli: { installed: true, version: "aws-cli/2.x" },
+        credentials: { ok: false, error: "Unable to locate credentials" },
+        permissions: { route53: "error", ses: "error", sesv2: "error", s3: "error" },
+        ready: false,
+      },
+    });
+
+    render(<SetupWizard />);
+    await screen.findByText(/No usable AWS credentials/i);
+
+    // The panel must not show the backend as live...
+    expect(screen.queryByText(/Your backend is live/i)).not.toBeInTheDocument();
+    // ...the "Create your backend" phase is still shown as to-do.
+    expect(screen.getByText(/A one-time setup/i)).toBeInTheDocument();
+  });
+
   it("flags a denied service and points at the identity to fix", async () => {
     route({
       readiness: {

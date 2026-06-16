@@ -34,6 +34,8 @@ const AWS_SIGNUP = "https://aws.amazon.com/free/";
 const IAM_CONSOLE = "https://console.aws.amazon.com/iam/home#/users";
 const POLICY_FILE =
   "https://github.com/leonct74/mailpoppy/blob/main/infra/policies/mailpoppy-provisioning-policy.json";
+const DEPLOY_POLICY_FILE =
+  "https://github.com/leonct74/mailpoppy/blob/main/infra/policies/mailpoppy-deploy-policy.json";
 const AWS_CLI_INSTALL = "https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html";
 
 const CONFIGURE_CMD = "aws configure --profile mailpoppy";
@@ -129,11 +131,16 @@ export function AwsOnboarding({ onResult, onRecheck, cliInstalled, submit = defa
         <ShieldCheck className="mt-0.5 size-4 shrink-0 text-secondary" />
         <span>
           <b className="text-on-surface">Use a dedicated, least-privilege key — never your account root.</b> Create an
-          IAM user scoped to the{" "}
+          IAM user scoped to Mailpoppy&apos;s two policies — the{" "}
           <ExtLink className={linkCls} href={POLICY_FILE}>
-            Mailpoppy provisioning policy <ExternalLink className="size-3" />
-          </ExtLink>
-          . That caps what Mailpoppy can ever do in your account, and you can revoke it any time.
+            provisioning policy <ExternalLink className="size-3" />
+          </ExtLink>{" "}
+          (day-to-day operation) and the{" "}
+          <ExtLink className={linkCls} href={DEPLOY_POLICY_FILE}>
+            deploy policy <ExternalLink className="size-3" />
+          </ExtLink>{" "}
+          (one-time backend creation). Together they cap what Mailpoppy can ever do in your account, and you can revoke
+          them any time.
         </span>
       </div>
 
@@ -143,19 +150,24 @@ export function AwsOnboarding({ onResult, onRecheck, cliInstalled, submit = defa
           <ExtLink className={linkCls} href={AWS_SIGNUP}>
             aws.amazon.com/free <ExternalLink className="size-3" />
           </ExtLink>
-          . It asks for an email and a card for verification, but there's a 12-month free tier — and Mailpoppy's own
-          usage is typically just cents per month. <b className="text-on-surface">You pay AWS directly; never us.</b>
+          . It asks for an email and a card for verification, but there's a 12-month free tier — and the email
+          infrastructure it creates typically costs just cents per month (often nothing, within the free tier), billed by
+          AWS. <b className="text-on-surface">You pay AWS directly; never us.</b>
         </Step>
         <Step n={2} title="Create an IAM user and an access key.">
           In the{" "}
           <ExtLink className={linkCls} href={IAM_CONSOLE}>
             AWS console → IAM → Users <ExternalLink className="size-3" />
           </ExtLink>
-          , add a user, attach the{" "}
+          , add a user, attach both Mailpoppy policies —{" "}
           <ExtLink className={linkCls} href={POLICY_FILE}>
-            Mailpoppy provisioning policy
+            provisioning
           </ExtLink>{" "}
-          (recommended) or <b className="text-on-surface">AdministratorAccess</b> (broader), then create an access key
+          and{" "}
+          <ExtLink className={linkCls} href={DEPLOY_POLICY_FILE}>
+            deploy
+          </ExtLink>{" "}
+          (recommended) or <b className="text-on-surface">AdministratorAccess</b> (broader) — then create an access key
           and copy the two values.
         </Step>
       </ol>

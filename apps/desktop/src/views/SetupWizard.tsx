@@ -384,9 +384,13 @@ export function SetupWizard({
   // rather than a dead disabled form that reads as a broken dead-end.
   const canAddMailbox = !mbNoBackend && ["verified", "sending", "sent"].includes(step);
 
-  // The always-visible progress map (right rail). Driven by live truth so it
-  // survives remounts/restarts and never hides a completed step.
-  const phases = setupPhases({ ready, step, backendDeployed, mailboxCount: mailboxes?.length ?? 0 });
+  // The always-visible progress map (right rail). The "backend is live" claim
+  // MUST come from live truth (a confirmed listMailboxes), never the localStorage
+  // hint — otherwise a torn-down backend whose credentials are gone (so
+  // listMailboxes can't even run, leaving liveDeployed === null) would still show
+  // "your backend is live" from a stale flag. An in-session post-deploy step is
+  // covered separately inside setupPhases via the step value.
+  const phases = setupPhases({ ready, step, backendDeployed: liveDeployed === true, mailboxCount: mailboxes?.length ?? 0 });
 
   // ---- Mailboxes ----
   async function loadMailboxes(): Promise<{ deployed: boolean; backend: BackendInfo | null; mailboxes: Mailbox[] }> {

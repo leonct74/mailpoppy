@@ -15,7 +15,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { SesAccountStatus, MailFromState } from "@mailpoppy/core";
-import { resolveStackName, loadDeploymentConfig } from "../lib/deploymentConfig";
+import { resolveStackName, loadDeploymentConfig, clearDeploymentConfig } from "../lib/deploymentConfig";
 import {
   listProvisionedDomains as defaultListDomains,
   teardownEverything as defaultTeardown,
@@ -399,7 +399,11 @@ function LeftoverInfrastructureCard({
     setBusy(true);
     setErr(null);
     try {
-      setResult(await teardown({ stackName }));
+      const r = await teardown({ stackName });
+      // The backend is gone — drop the local "deployed" hint so the setup wizard
+      // doesn't resume into a phantom "your backend is live" state next time.
+      clearDeploymentConfig();
+      setResult(r);
     } catch (e) {
       setErr(friendlyError(e));
     } finally {

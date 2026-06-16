@@ -29,6 +29,24 @@ describe("AwsOnboarding", () => {
     expect(screen.getByText(/never your account root/i)).toBeInTheDocument();
   });
 
+  it("links BOTH the provisioning and deploy policies (deploy is required for the one-time backend creation)", () => {
+    render(<AwsOnboarding onResult={vi.fn()} onRecheck={vi.fn()} />);
+    const hrefs = screen
+      .getAllByRole("link")
+      .map((a) => a.getAttribute("href"))
+      .filter((h): h is string => !!h);
+    expect(hrefs.some((h) => h.endsWith("/mailpoppy-provisioning-policy.json"))).toBe(true);
+    expect(hrefs.some((h) => h.endsWith("/mailpoppy-deploy-policy.json"))).toBe(true);
+  });
+
+  it("does not imply the user pays Mailpoppy for AWS usage", () => {
+    render(<AwsOnboarding onResult={vi.fn()} onRecheck={vi.fn()} />);
+    // Cost is billed by AWS, not us — wording must not read as paying Mailpoppy.
+    expect(screen.queryByText(/Mailpoppy's own\s+usage/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/billed by\s+AWS/i)).toBeInTheDocument();
+    expect(screen.getByText(/You pay AWS directly; never us\./i)).toBeInTheDocument();
+  });
+
   it("frames the CLI connect as step 3 (not a shortcut) and protects the secret", () => {
     render(<AwsOnboarding onResult={vi.fn()} onRecheck={vi.fn()} />);
     // No "Recommended" badge — it misread as a way to skip steps 1–2.
