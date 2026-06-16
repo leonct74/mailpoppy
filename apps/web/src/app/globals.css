@@ -1,0 +1,160 @@
+@import "tailwindcss";
+
+/*
+ * "Crimson Navy Professional" — the shared design system, ported from the mobile
+ * client (src/theme.ts). Deep navy surfaces with vibrant crimson accents and
+ * Hanken Grotesk type; depth comes from tonal layering, not heavy shadows. These
+ * names mirror the mobile `colors` object 1:1 so the two clients stay in lockstep.
+ */
+:root {
+  /* Surfaces (darkest → lightest tonal layers) */
+  --color-bg: #051424; /* app background / shell */
+  --color-bg-elevated: #0d1c2d; /* subtle raised sections */
+  --color-surface: #1a232e; /* cards, list items */
+  --color-surface-high: #1c2b3c; /* inputs, search bar */
+  --color-surface-container: #122131; /* nav, login form surface */
+  --color-surface-variant: #273647; /* pressed / hover fills */
+  --color-hairline: rgba(255, 255, 255, 0.06); /* hairline rim-light borders */
+
+  /* Crimson brand */
+  --color-primary: #ff5637; /* crimson — buttons, active, wordmark */
+  --color-primary-bright: #ff4b2b; /* gradient start / ambient glow */
+  --color-primary-deep: #ba1c00; /* gradient end */
+  --color-primary-text: #ffffff; /* text/icons on crimson */
+
+  /* Text */
+  --color-text: #d4e4fa; /* primary text (on-surface) */
+  --color-heading: #ffdad3; /* warm headings */
+  --color-muted: #e5bdb6; /* secondary text/icons (rose) */
+  --color-dim: #94a3b8; /* most-muted slate */
+
+  --color-danger: #ffb4ab; /* destructive (distinct from crimson primary) */
+  --color-unread: #ff5637; /* unread indicator */
+}
+
+/* Expose the palette as Tailwind utilities (bg-surface, text-muted, border-hairline, …). */
+@theme inline {
+  --color-bg: var(--color-bg);
+  --color-bg-elevated: var(--color-bg-elevated);
+  --color-surface: var(--color-surface);
+  --color-surface-high: var(--color-surface-high);
+  --color-surface-container: var(--color-surface-container);
+  --color-surface-variant: var(--color-surface-variant);
+  --color-hairline: var(--color-hairline);
+  --color-primary: var(--color-primary);
+  --color-primary-bright: var(--color-primary-bright);
+  --color-primary-deep: var(--color-primary-deep);
+  --color-primary-text: var(--color-primary-text);
+  --color-text: var(--color-text);
+  --color-heading: var(--color-heading);
+  --color-muted: var(--color-muted);
+  --color-dim: var(--color-dim);
+  --color-danger: var(--color-danger);
+  --color-unread: var(--color-unread);
+  --font-sans: var(--font-hanken), ui-sans-serif, system-ui, sans-serif;
+}
+
+html {
+  color-scheme: dark;
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-hanken), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Crimson-tinted scrollbars so the dark chrome stays consistent. */
+* {
+  scrollbar-color: var(--color-surface-variant) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-surface-variant);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #34465a;
+  background-clip: padding-box;
+}
+
+/*
+ * Rich-text compose editor (TipTap), now on a dark surface.
+ *
+ * Tailwind's Preflight reset strips block elements down to nothing
+ * (ul/ol get `list-style: none; margin: 0; padding: 0`). Without this,
+ * lists/quotes look like plain text inside the composer even though the
+ * emitted HTML is correct — so the recipient sees a formatted list while
+ * the author does not. These (unlayered) rules sit above Tailwind's
+ * `@layer base` and restore the default rendering, so the composer mirrors
+ * what the recipient's mail client will show.
+ */
+.mp-compose :where(ul, ol) {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+.mp-compose ul {
+  list-style: disc;
+}
+.mp-compose ol {
+  list-style: decimal;
+}
+.mp-compose li {
+  margin: 0.15em 0;
+}
+.mp-compose li > p {
+  /* StarterKit wraps each list item's content in a <p>; kill its margin
+     so list items don't get double-spaced. */
+  margin: 0;
+}
+.mp-compose p {
+  margin: 0.5em 0;
+}
+.mp-compose blockquote {
+  margin: 0.5em 0;
+  padding-left: 1ex;
+  border-left: 3px solid var(--color-surface-variant);
+  color: var(--color-muted);
+}
+.mp-compose a {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+.mp-compose h1 {
+  font-size: 1.5em;
+  font-weight: 700;
+  margin: 0.6em 0;
+}
+.mp-compose h2 {
+  font-size: 1.3em;
+  font-weight: 700;
+  margin: 0.6em 0;
+}
+.mp-compose h3 {
+  font-size: 1.15em;
+  font-weight: 700;
+  margin: 0.6em 0;
+}
+.mp-compose strong {
+  font-weight: 700;
+}
+.mp-compose em {
+  font-style: italic;
+}
+.mp-compose .ProseMirror:focus {
+  outline: none;
+}
+/* Placeholder shown when the editor is empty (StarterKit emits an empty <p>). */
+.mp-compose .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--color-dim);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}

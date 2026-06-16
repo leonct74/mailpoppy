@@ -20,3 +20,11 @@ infra/cdk.out/
 .claude/
 # Google Stitch design references (kept local, not part of the app build)
 apps/desktop/stitch/
+# web (Next.js) build output
+.next/
+# mobile (Expo) build/cache + generated native projects
+.expo/
+web-build/
+.metro-health-check*
+apps/mobile/android/
+apps/mobile/ios/
