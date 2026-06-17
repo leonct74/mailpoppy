@@ -56,7 +56,7 @@ export function SettingsScreen({ navigation }: Props) {
 
         <View style={styles.footer}>
           <Ionicons name="cloud-outline" size={14} color={colors.textMuted} />
-          <Text style={styles.footerText}>MailPoppy · Powered by AWS</Text>
+          <Text style={styles.footerText}>MailPoppy · on your own AWS account</Text>
         </View>
       </View>
 

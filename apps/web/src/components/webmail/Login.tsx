@@ -306,7 +306,7 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
 
         <div className="text-muted mt-7 flex items-center justify-center gap-1.5 text-xs font-medium">
           <CloudIcon size={14} />
-          Powered by AWS
+          Runs on your own AWS account
           <span aria-hidden>·</span>
           <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-heading font-semibold hover:underline">
             Privacy Policy

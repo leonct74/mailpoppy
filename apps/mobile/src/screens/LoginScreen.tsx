@@ -253,7 +253,7 @@ export function LoginScreen() {
 
           <View style={styles.footer}>
             <Ionicons name="cloud-outline" size={14} color={colors.textMuted} />
-            <Text style={styles.footerText}>Powered by AWS</Text>
+            <Text style={styles.footerText}>Runs on your own AWS account</Text>
             <Text style={styles.footerDot}>·</Text>
             <TouchableOpacity onPress={() => setPolicyOpen(true)} hitSlop={8}>
               <Text style={styles.footerLink}>Privacy Policy</Text>
