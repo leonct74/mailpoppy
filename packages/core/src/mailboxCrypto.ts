@@ -194,37 +194,70 @@ export function rewrapPrivateKey(
   return out;
 }
 
-// ── Per-message seal / open ──────────────────────────────────────────────────
+// ── Multi-recipient envelope ─────────────────────────────────────────────────
+// One CONTENT KEY (CK) per message. The (large) ciphertext is produced ONCE and
+// stored once; only the small CK is sealed separately to each recipient's public
+// key. This is what the inbound Lambda needs: a single message addressed to
+// several local mailboxes is encrypted a single time, and CK is wrapped per
+// recipient. (Single-recipient seal/open below are just the 1-recipient case.)
 
-/** Encrypt a string (body, subject, …) to a recipient's PUBLIC key. The sender needs
- *  no key of their own — this is what the inbound Lambda uses with the recipient's pub. */
-export function sealString(s: Sodium, recipientPublicKeyB64: string, plaintext: string): SealedPayload {
-  const pub = unb64(s, recipientPublicKeyB64);
-  const ck = s.randombytes_buf(s.crypto_secretbox_KEYBYTES);
-  const ciphertext = b64(s, secretboxSeal(s, ck, s.from_string(plaintext)));
-  const wrappedKey = b64(s, s.crypto_box_seal(ck, pub));
-  return { ciphertext, wrappedKey };
+/** A fresh random content key for one message. */
+export function generateContentKey(s: Sodium): Uint8Array {
+  return s.randombytes_buf(s.crypto_secretbox_KEYBYTES);
 }
 
-/** Encrypt raw bytes (attachments) to a recipient's public key. */
+/** Encrypt bytes under a content key → base64 (nonce ‖ ciphertext). Store once. */
+export function encryptWithContentKey(s: Sodium, contentKey: Uint8Array, plaintext: Uint8Array): string {
+  return b64(s, secretboxSeal(s, contentKey, plaintext));
+}
+
+/** Inverse of {@link encryptWithContentKey}. Throws if the key is wrong or tampered. */
+export function decryptWithContentKey(s: Sodium, contentKey: Uint8Array, ciphertextB64: string): Uint8Array {
+  return secretboxOpen(s, contentKey, unb64(s, ciphertextB64));
+}
+
+/** Seal a content key to a recipient's PUBLIC key → base64 (anonymous sealed box;
+ *  the sender needs no key of its own). Store one wrap per recipient. */
+export function wrapContentKey(s: Sodium, recipientPublicKeyB64: string, contentKey: Uint8Array): string {
+  return b64(s, s.crypto_box_seal(contentKey, unb64(s, recipientPublicKeyB64)));
+}
+
+/** Recover a content key from this recipient's wrap, using their keypair. Throws if
+ *  the wrap wasn't sealed to this public key or was tampered. */
+export function unwrapContentKey(
+  s: Sodium,
+  publicKeyB64: string,
+  privateKey: Uint8Array,
+  wrappedKeyB64: string,
+): Uint8Array {
+  return s.crypto_box_seal_open(unb64(s, wrappedKeyB64), unb64(s, publicKeyB64), privateKey);
+}
+
+// ── Single-recipient seal / open (envelope with one wrap) ─────────────────────
+
+/** Encrypt raw bytes to ONE recipient's public key. */
 export function sealBytes(s: Sodium, recipientPublicKeyB64: string, plaintext: Uint8Array): SealedPayload {
-  const pub = unb64(s, recipientPublicKeyB64);
-  const ck = s.randombytes_buf(s.crypto_secretbox_KEYBYTES);
-  const ciphertext = b64(s, secretboxSeal(s, ck, plaintext));
-  const wrappedKey = b64(s, s.crypto_box_seal(ck, pub));
-  return { ciphertext, wrappedKey };
+  const ck = generateContentKey(s);
+  return {
+    ciphertext: encryptWithContentKey(s, ck, plaintext),
+    wrappedKey: wrapContentKey(s, recipientPublicKeyB64, ck),
+  };
+}
+
+/** Encrypt a string (body, subject, …) to ONE recipient's public key. */
+export function sealString(s: Sodium, recipientPublicKeyB64: string, plaintext: string): SealedPayload {
+  return sealBytes(s, recipientPublicKeyB64, s.from_string(plaintext));
+}
+
+/** Open a {@link SealedPayload} back to raw bytes. Throws if the data was tampered. */
+export function openBytes(s: Sodium, publicKeyB64: string, privateKey: Uint8Array, payload: SealedPayload): Uint8Array {
+  const ck = unwrapContentKey(s, publicKeyB64, privateKey, payload.wrappedKey);
+  return decryptWithContentKey(s, ck, payload.ciphertext);
 }
 
 /** Open a {@link SealedPayload} back to a string, using the recipient's keypair. */
 export function openString(s: Sodium, publicKeyB64: string, privateKey: Uint8Array, payload: SealedPayload): string {
   return s.to_string(openBytes(s, publicKeyB64, privateKey, payload));
-}
-
-/** Open a {@link SealedPayload} back to raw bytes. Throws if the data was tampered. */
-export function openBytes(s: Sodium, publicKeyB64: string, privateKey: Uint8Array, payload: SealedPayload): Uint8Array {
-  const pub = unb64(s, publicKeyB64);
-  const ck = s.crypto_box_seal_open(unb64(s, payload.wrappedKey), pub, privateKey);
-  return secretboxOpen(s, ck, unb64(s, payload.ciphertext));
 }
 
 // ── Encoding helpers (for showing/storing the recovery key) ──────────────────

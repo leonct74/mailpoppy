@@ -17,6 +17,11 @@ import {
   bytesToB64,
   mailboxKeysKey,
   isMailboxKeyRecord,
+  generateContentKey,
+  encryptWithContentKey,
+  decryptWithContentKey,
+  wrapContentKey,
+  unwrapContentKey,
 } from "./mailboxCrypto";
 
 // One ready libsodium instance, injected into every binding-agnostic helper.
@@ -115,6 +120,47 @@ describe("mailboxCrypto: per-message seal/open", () => {
   function b64ToBytesLocal(str: string): Uint8Array {
     return _sodium.from_base64(str, _sodium.base64_variants.ORIGINAL);
   }
+});
+
+describe("mailboxCrypto: multi-recipient envelope", () => {
+  it("encrypts once and lets every wrapped recipient decrypt the SAME ciphertext", () => {
+    // A message to two local mailboxes: one content key, one ciphertext, two wraps.
+    const a = createMailboxKeyRecord(s, "alice");
+    const b = createMailboxKeyRecord(s, "bob");
+    const ck = generateContentKey(s);
+    const ciphertext = encryptWithContentKey(s, ck, s.from_string("the shared message body"));
+    const wrapA = wrapContentKey(s, a.record.publicKey, ck);
+    const wrapB = wrapContentKey(s, b.record.publicKey, ck);
+
+    const ckA = unwrapContentKey(s, a.record.publicKey, a.privateKey, wrapA);
+    const ckB = unwrapContentKey(s, b.record.publicKey, b.privateKey, wrapB);
+    expect(s.to_string(decryptWithContentKey(s, ckA, ciphertext))).toBe("the shared message body");
+    expect(s.to_string(decryptWithContentKey(s, ckB, ciphertext))).toBe("the shared message body");
+  });
+
+  it("a recipient cannot open another recipient's wrap", () => {
+    const a = createMailboxKeyRecord(s, "alice");
+    const b = createMailboxKeyRecord(s, "bob");
+    const ck = generateContentKey(s);
+    const wrapA = wrapContentKey(s, a.record.publicKey, ck);
+    // Bob's keypair can't open the wrap that was sealed to Alice.
+    expect(() => unwrapContentKey(s, b.record.publicKey, b.privateKey, wrapA)).toThrow();
+  });
+
+  it("rejects a tampered ciphertext under the right content key", () => {
+    const ck = generateContentKey(s);
+    const ct = encryptWithContentKey(s, ck, s.from_string("do not modify"));
+    const raw = _sodium.from_base64(ct, _sodium.base64_variants.ORIGINAL);
+    raw[raw.length - 1] ^= 0x01;
+    const tampered = _sodium.to_base64(raw, _sodium.base64_variants.ORIGINAL);
+    expect(() => decryptWithContentKey(s, ck, tampered)).toThrow();
+  });
+
+  it("single-recipient sealString is just the one-wrap case (still round-trips)", () => {
+    const { record, privateKey } = createMailboxKeyRecord(s, PASSWORD);
+    const payload = sealString(s, record.publicKey, "one recipient");
+    expect(openString(s, record.publicKey, privateKey, payload)).toBe("one recipient");
+  });
 });
 
 describe("mailboxCrypto: KDF determinism", () => {
