@@ -148,6 +148,7 @@ export function SetupWizard({
   // Backend deploy (CloudFormation)
   const [deploy, setDeploy] = useState<DeployStatus | null>(null);
   const [enableMalware, setEnableMalware] = useState(true); // recommended → default on
+  const [encryptAtRest, setEncryptAtRest] = useState(false); // opt-in during rollout (clients must be able to decrypt)
   const deployPollRef = useRef<number | null>(null);
   // For distinguishing this deploy from a leftover stack of the same name that a
   // prior failed attempt left behind (which is being deleted + recreated).
@@ -234,7 +235,7 @@ export function SetupWizard({
       // old failure for this deploy's outcome.
       const before = await deployStatus(DEFAULT_STACK_NAME).catch(() => null);
       priorStackIdRef.current = before?.stackId ?? null;
-      const started = await deployBackend({ domain, enableMalwareProtection: enableMalware });
+      const started = await deployBackend({ domain, enableMalwareProtection: enableMalware, enableEncryption: encryptAtRest });
       deployOpRef.current = started.operation;
     } catch (e) {
       fail(e, "preflighted");
@@ -719,6 +720,14 @@ export function SetupWizard({
                     <b className="text-on-surface">Scan attachments for malware</b> <span className="text-secondary">(recommended)</span> —
                     adds AWS GuardDuty Malware Protection on your mail storage; infected files are blocked from download. Small
                     AWS usage cost (a personal mailbox is usually within the free tier).
+                  </span>
+                </label>
+                <label className="mb-3 flex max-w-lg items-start gap-2 text-sm text-on-surface-variant">
+                  <input type="checkbox" checked={encryptAtRest} onChange={(e) => setEncryptAtRest(e.target.checked)} className="mt-1 size-4 accent-primary" />
+                  <span>
+                    <b className="text-on-surface">Encrypt mailboxes at rest</b> — body + attachments are sealed with each
+                    user&apos;s password, so even you (the AWS admin) can&apos;t read them. Enable only once everyone reads mail
+                    in an up-to-date Mailpoppy app — older apps can&apos;t open encrypted mail. Subject &amp; sender stay visible.
                   </span>
                 </label>
                 <Button onClick={onDeploy} disabled={busy}>

@@ -26,6 +26,7 @@ export function deployBackend(input: {
   domain: string;
   stackName?: string;
   enableMalwareProtection?: boolean;
+  enableEncryption?: boolean;
 }): Promise<DeployStarted> {
   return sidecar("/deploy/backend", {
     method: "POST",

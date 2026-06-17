@@ -467,13 +467,19 @@ app.post("/mailbox/import/template", async (req, reply) => {
 // Mutating: upload the embedded template + Lambda code and Create/UpdateStack.
 // The UI confirms first. Returns immediately; poll the status route.
 app.post("/deploy/backend", async (req, reply) => {
-  const b = (req.body ?? {}) as { domain?: string; stackName?: string; enableMalwareProtection?: boolean };
+  const b = (req.body ?? {}) as {
+    domain?: string;
+    stackName?: string;
+    enableMalwareProtection?: boolean;
+    enableEncryption?: boolean;
+  };
   if (!b.domain) return reply.code(400).send({ ok: false, error: "domain is required" });
   try {
     return await prov.deployBackend(ctx(), {
       domain: b.domain,
       stackName: b.stackName,
       enableMalwareProtection: b.enableMalwareProtection,
+      enableEncryption: b.enableEncryption,
     });
   } catch (err) {
     return reply.code(502).send({ ok: false, error: (err as Error).message });

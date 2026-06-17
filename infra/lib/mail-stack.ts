@@ -72,6 +72,16 @@ export class MailStack extends Stack {
     const malwareEnabled = new CfnCondition(this, "MalwareProtectionEnabled", {
       expression: Fn.conditionEquals(enableMalware.valueAsString, "true"),
     });
+    // Mailbox encryption at rest (docs/mailbox-encryption-design.md). Off by
+    // default: when on, the inbound-processor seals each activated mailbox's body
+    // + attachments so the admin can't read them. Flip to "true" only once every
+    // client can decrypt (the design's Phase 5 "flip on" step).
+    const enableEncryption = new CfnParameter(this, "EncryptionEnabled", {
+      type: "String",
+      allowedValues: ["true", "false"],
+      default: "false",
+      description: "Encrypt mailbox body + attachments at rest so even the AWS admin can't read them.",
+    });
     const lambdaCode = lambda.Code.fromBucket(
       s3.Bucket.fromBucketName(this, "LambdaCodeBucketRef", codeBucketParam.valueAsString),
       codeKeyParam.valueAsString,
@@ -174,6 +184,7 @@ export class MailStack extends Stack {
       INBOUND_PREFIX: "inbound/",
       HOSTED_DOMAINS: mailDomain.valueAsString,
       USER_POOL_ID: userPool.userPoolId, // resolve real mailboxes → reject unknown recipients
+      ENCRYPTION_ENABLED: enableEncryption.valueAsString, // seal body+attachments when "true"
     });
     mailBucket.grantReadWrite(inboundProcessor); // read the raw .eml + write/delete attachments + raw
     indexTable.grantReadWriteData(inboundProcessor); // write rows + read for quota usage
