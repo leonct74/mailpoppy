@@ -29,7 +29,7 @@ export const FAQS: { q: string; a: string }[] = [
   },
   {
     q: "What does it cost?",
-    a: "Because everything runs in your own AWS account, you pay AWS directly for what you use — typically a few dollars a month for an entire domain, with no per-mailbox subscription. MailPoppy's own pricing is coming soon.",
+    a: "Because everything runs in your own AWS account, you pay AWS directly for what you use — with no per-mailbox subscription from MailPoppy. AWS has a generous free tier, and for a small volume of email (without large attachments), the cost could be zero to a few cents per month. MailPoppy's own pricing is coming soon.",
   },
   {
     q: "Can I use my own domain?",
