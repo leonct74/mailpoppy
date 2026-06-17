@@ -1,5 +1,5 @@
 // Thin client for the local provisioning sidecar (desktop-admin-only).
-const SIDECAR = "http://127.0.0.1:8787";
+export const SIDECAR = "http://127.0.0.1:8787";
 
 // Low-level connectivity failures that bubble up from the AWS SDK inside the
 // sidecar when this machine is offline or its DNS is unavailable. We translate

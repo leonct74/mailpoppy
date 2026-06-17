@@ -4,6 +4,7 @@
  * credential chain (AWS_PROFILE / SSO). Never bundled into the mobile app.
  */
 import Fastify from "fastify";
+import { randomUUID } from "node:crypto";
 import * as prov from "./provisioning";
 import * as migration from "./migration";
 import * as mailboxImport from "./mailboxImport";
@@ -123,6 +124,54 @@ const ctx = (): prov.AwsContext => ({
 });
 
 app.get("/health", async () => ({ ok: true }));
+
+// One-shot local file handoff. The Tauri webview (WKWebView) can't trigger a
+// blob/`<a download>` save, so for *encrypted* attachments — whose plaintext is
+// decrypted in the webview and never exists on S3 to hand to the OS opener — the
+// client POSTs the decrypted bytes here, gets a single-use token, and opens the
+// matching GET URL through the system browser (which downloads it cleanly via
+// Content-Disposition). Held in memory only, on loopback, evicted on first fetch
+// or after a short TTL — the plaintext never touches disk in the sidecar.
+type PendingDownload = { filename: string; contentType: string; buf: Buffer; timer: NodeJS.Timeout };
+const pendingDownloads = new Map<string, PendingDownload>();
+const LOCAL_DOWNLOAD_TTL_MS = 60_000;
+
+app.post("/local-download", async (req, reply) => {
+  const { filename, contentType, dataB64 } = (req.body ?? {}) as {
+    filename?: string;
+    contentType?: string;
+    dataB64?: string;
+  };
+  if (typeof dataB64 !== "string" || !dataB64) {
+    return reply.code(400).send({ error: "dataB64 is required" });
+  }
+  const token = randomUUID();
+  const timer = setTimeout(() => pendingDownloads.delete(token), LOCAL_DOWNLOAD_TTL_MS);
+  if (typeof timer.unref === "function") timer.unref(); // don't keep the process alive on this timer
+  pendingDownloads.set(token, {
+    filename: filename || "attachment",
+    contentType: contentType || "application/octet-stream",
+    buf: Buffer.from(dataB64, "base64"),
+    timer,
+  });
+  return reply.send({ token });
+});
+
+app.get("/local-download/:token", async (req, reply) => {
+  const { token } = req.params as { token: string };
+  const item = pendingDownloads.get(token);
+  if (!item) return reply.code(404).send("Download expired or already used.");
+  clearTimeout(item.timer);
+  pendingDownloads.delete(token); // single-use
+  // Quote-escape the filename for the Content-Disposition header (and provide an
+  // ASCII-safe fallback alongside the UTF-8 form for non-Latin names).
+  const safe = item.filename.replace(/["\\\r\n]/g, "_");
+  return reply
+    .header("content-type", item.contentType)
+    .header("content-disposition", `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(item.filename)}`)
+    .header("content-length", String(item.buf.length))
+    .send(item.buf);
+});
 
 // The active region + the regions where SES inbound is supported (the choices).
 app.get("/config/region", async () => ({ region: currentRegion, available: SES_INBOUND_REGIONS }));

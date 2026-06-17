@@ -23,12 +23,15 @@ import {
   Copy,
   ImageOff,
   ShieldQuestion,
+  RefreshCw,
+  Lock,
 } from "lucide-react";
 import type { MessageMeta, Folder } from "@mailpoppy/core";
 import { formatBytes, usagePercent, usageLevel } from "@mailpoppy/core";
 import { makeMailClient, type MailClient, type SendAttachment, type MailboxUsage } from "../lib/mailClient";
 import { filesToAttachments } from "../lib/attachments";
 import { openExternal } from "../lib/openExternal";
+import { downloadBytesViaSidecar } from "../lib/localDownload";
 import { decryptEml, decryptAttachmentBytes } from "../lib/mailboxKeys";
 import { SecurityInfo } from "./SecurityInfo";
 import { parseBody, sanitizeHtml, type ParsedBody } from "../lib/mailBody";
@@ -43,20 +46,6 @@ import { friendlyError } from "../lib/errors";
 // compose → send. Talks to a MailClient (the shared api-client against a
 // deployed backend, or the demo client offline) — so this view is identical
 // for desktop and, later, mobile.
-
-/** Save raw bytes to a file from the webview (used for decrypted attachments,
- *  whose plaintext never exists on S3 to hand to the OS opener). */
-function saveBytes(filename: string, contentType: string, bytes: Uint8Array) {
-  const blob = new Blob([bytes as BlobPart], { type: contentType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
-}
 
 const FOLDERS: Folder[] = ["inbox", "sent", "drafts", "trash", "junk"];
 const FOLDER_LABEL: Record<string, string> = {
@@ -137,16 +126,21 @@ export function InboxView({
     setComposeInit(buildReply(selected, mode, { self: selected.mailbox, quotedBody: parsed?.text ?? selected.snippet }));
   }
 
-  async function refresh(f: Folder = folder) {
-    setLoading(true);
-    setError(null);
+  // `background` refreshes (polling / window-focus) stay silent: no spinner, and
+  // a transient failure never replaces a working list with an error banner.
+  async function refresh(f: Folder = folder, opts: { background?: boolean } = {}) {
+    if (!opts.background) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const res = await mail.list({ folder: f, limit: 100 });
       setItems(res.items);
+      if (opts.background) setError(null); // a good poll clears a stale transient error
     } catch (e) {
-      setError(friendlyError(e));
+      if (!opts.background) setError(friendlyError(e));
     } finally {
-      setLoading(false);
+      if (!opts.background) setLoading(false);
     }
   }
 
@@ -157,6 +151,26 @@ export function InboxView({
     setParsed(null);
     setQuery("");
     void refresh(folder);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folder, mail]);
+
+  // Keep the open folder live: poll on an interval and whenever the window
+  // regains focus, so newly-arrived mail appears without switching folders.
+  // Background refreshes are silent and only replace the list — the message
+  // you're currently reading is left untouched.
+  useEffect(() => {
+    const poll = () => {
+      if (typeof document !== "undefined" && document.hidden) return; // skip a hidden window
+      void refresh(folder, { background: true });
+    };
+    const id = window.setInterval(poll, 30_000);
+    window.addEventListener("focus", poll);
+    document.addEventListener("visibilitychange", poll);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("focus", poll);
+      document.removeEventListener("visibilitychange", poll);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folder, mail]);
 
@@ -205,11 +219,20 @@ export function InboxView({
       const { url } = await mail.getAttachmentUrl(messageId, index);
       if (selected?.encrypted) {
         // The S3 object is ciphertext — a presigned URL can't be opened directly.
-        // Fetch it, decrypt with the cached mailbox key, and save the plaintext.
+        // Fetch it, decrypt with the cached mailbox key, then hand the plaintext
+        // bytes to the sidecar so the OS browser can save them (WKWebView can't
+        // trigger a blob download).
         const att = selected.attachments?.[index];
         const ciphertext = await (await fetch(url)).text();
         const bytes = await decryptAttachmentBytes(selected, ciphertext);
-        saveBytes(_filename, att?.contentType ?? "application/octet-stream", bytes);
+        const { url: localUrl, opened } = await downloadBytesViaSidecar(
+          _filename,
+          att?.contentType ?? "application/octet-stream",
+          bytes,
+        );
+        // If nothing could open it (Tauri opener not active yet), surface the
+        // loopback link so the user can open it manually (valid ~60s, single-use).
+        if (!opened) setAttachmentLink({ url: localUrl, filename: _filename });
         return;
       }
       // Plaintext: hand the presigned URL to the OS (window.open is a no-op in the webview).
@@ -353,15 +376,27 @@ export function InboxView({
         {/* Pane 2 — message list */}
         <div className="flex w-80 shrink-0 flex-col border-r border-outline-variant/20 bg-surface-container-low">
           <div className="border-b border-outline-variant/10 p-3">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-on-surface-variant" />
-              <input
-                aria-label="Search messages"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={`Search ${FOLDER_LABEL[folder] ?? folder}…`}
-                className="w-full rounded-lg border border-outline-variant/20 bg-surface-container-lowest py-1.5 pl-8 pr-3 text-sm text-on-surface placeholder:text-on-surface-variant/60 focus:border-primary/50 focus:outline-none"
-              />
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-on-surface-variant" />
+                <input
+                  aria-label="Search messages"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={`Search ${FOLDER_LABEL[folder] ?? folder}…`}
+                  className="w-full rounded-lg border border-outline-variant/20 bg-surface-container-lowest py-1.5 pl-8 pr-3 text-sm text-on-surface placeholder:text-on-surface-variant/60 focus:border-primary/50 focus:outline-none"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => void refresh(folder)}
+                disabled={loading}
+                aria-label="Refresh"
+                title="Check for new mail"
+                className="shrink-0 rounded-lg border border-outline-variant/20 bg-surface-container-lowest p-2 text-on-surface-variant hover:text-on-surface disabled:opacity-50"
+              >
+                <RefreshCw className={cn("size-4", loading && "animate-spin")} />
+              </button>
             </div>
           </div>
           <div className="flex-1 divide-y divide-outline-variant/10 overflow-y-auto">
@@ -400,6 +435,11 @@ export function InboxView({
                     </span>
                   </div>
                   <div className={cn("mb-1 flex items-center gap-1 truncate text-sm", unread ? "font-semibold text-on-surface" : "text-on-surface")}>
+                    {m.encrypted && (
+                      <Lock className="size-3.5 shrink-0 text-secondary" aria-label="Encrypted at rest">
+                        <title>Encrypted at rest</title>
+                      </Lock>
+                    )}
                     {m.hasAttachments && <Paperclip className="size-3.5 shrink-0 text-on-surface-variant" />}
                     {m.subject}
                   </div>
@@ -430,6 +470,15 @@ export function InboxView({
               <div className="text-xs text-on-surface-variant/80">
                 To {selected.to.map((t) => t.address).join(", ")} · {shortDate(selected.date)}
               </div>
+
+              {selected.encrypted && (
+                <div
+                  title="Body and attachments are stored encrypted in S3 with this mailbox's key. Even the AWS account admin can't read them — they're decrypted here, on your device."
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-secondary/30 bg-secondary/10 px-2.5 py-1 text-xs font-medium text-secondary"
+                >
+                  <Lock className="size-3.5" /> Encrypted at rest
+                </div>
+              )}
 
               {selected.verdicts && (
                 <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs text-on-surface-variant">
