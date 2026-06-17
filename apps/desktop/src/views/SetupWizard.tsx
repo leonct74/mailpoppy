@@ -149,7 +149,7 @@ export function SetupWizard({
   // Backend deploy (CloudFormation)
   const [deploy, setDeploy] = useState<DeployStatus | null>(null);
   const [enableMalware, setEnableMalware] = useState(true); // recommended → default on
-  const [encryptAtRest, setEncryptAtRest] = useState(false); // opt-in during rollout (clients must be able to decrypt)
+  const [encryptAtRest, setEncryptAtRest] = useState(true); // security-on-by-default; admin can opt out (clients must be able to decrypt)
   const deployPollRef = useRef<number | null>(null);
   // For distinguishing this deploy from a leftover stack of the same name that a
   // prior failed attempt left behind (which is being deleted + recreated).
@@ -734,9 +734,10 @@ export function SetupWizard({
                 <label className="mb-3 flex max-w-lg items-start gap-2 text-sm text-on-surface-variant">
                   <input type="checkbox" checked={encryptAtRest} onChange={(e) => setEncryptAtRest(e.target.checked)} className="mt-1 size-4 accent-primary" />
                   <span>
-                    <b className="text-on-surface">Encrypt mailboxes at rest</b> — body + attachments are sealed with each
-                    user&apos;s password, so even you (the AWS admin) can&apos;t read them. Enable only once everyone reads mail
-                    in an up-to-date Mailpoppy app — older apps can&apos;t open encrypted mail. Subject &amp; sender stay visible.
+                    <b className="text-on-surface">Encrypt mailboxes at rest</b> <span className="text-secondary">(recommended)</span> —
+                    body + attachments are sealed with each user&apos;s password, so even you (the AWS admin) can&apos;t read them.
+                    Turn this off only if some people will read mail in an older Mailpoppy app — older apps can&apos;t open
+                    encrypted mail. Subject &amp; sender stay visible.
                   </span>
                 </label>
                 <Button onClick={onDeploy} disabled={busy}>

@@ -163,7 +163,13 @@ Rolling our own primitives is the most common way to ship broken crypto — out 
   visible." The `subjectEnc` path is kept reversible so a future multi-user/employer tier can flip
   subject encryption on per-deployment. (Once encrypted, the server can never produce cleartext
   again — so cleartext-now is the more reversible default.)
-- **Rollout switch**: the inbound Lambda gates sealing on an `ENCRYPTION_ENABLED` env flag (default
-  OFF). Phase 4 ships inert; the flag is flipped to `true` only in Phase 5, once all three clients
-  can decrypt. libsodium + Argon2id confirmed available across Node/web/desktop (sumo) and React
-  Native bindings.
+- **Rollout switch**: the inbound Lambda gates sealing on an `ENCRYPTION_ENABLED` env flag, fed by
+  the `EncryptionEnabled` CfnParameter. The **CfnParameter default stays `false`** (a raw-CloudFormation
+  deploy with the param omitted ships inert / backward-compatible). The **desktop setup wizard, the
+  only product deploy path, now defaults the "Encrypt mailboxes at rest" toggle ON** — security-on-by-
+  default per the admin's call (2026-06-17); the wizard always passes an explicit value so a new
+  deploy gets encryption unless the admin opts out. **Client-readiness caveat: desktop + web read
+  paths decrypt today; the mobile app has no native libsodium module yet, so an encrypted deploy locks
+  mobile readers out until the RN libsodium module + EAS rebuild ship.** The toggle copy warns "turn
+  off only if some people will read mail in an older Mailpoppy app." libsodium + Argon2id confirmed
+  available across Node/web/desktop (sumo) and React Native bindings.
