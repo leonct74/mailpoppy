@@ -3,6 +3,7 @@ import { KeyRound, ShieldCheck, Rocket, Globe, RefreshCw, Mail, Sparkles, ArrowL
 import { sidecar } from "../lib/sidecar";
 import { createMailbox, listMailboxes, type Mailbox, type BackendInfo } from "../lib/mailbox";
 import { deployBackend, deployStatus, type DeployStatus } from "../lib/deploy";
+import { validateTestRecipient } from "../lib/deliverability";
 import { saveDeploymentConfig, loadDeploymentConfig, resolveStackName, DEFAULT_STACK_NAME } from "../lib/deploymentConfig";
 import { MailboxStorageRow } from "./MailboxStorageRow";
 import { MailFromSetup } from "./MailFromSetup";
@@ -362,12 +363,20 @@ export function SetupWizard({
 
   async function sendTest() {
     setError(null);
+    // The deliverability test must go to an EXTERNAL inbox (does our mail reach the
+    // outside world?). Block a malformed address or one on the domain being set up.
+    const validationError = validateTestRecipient(recipient, domain);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    const to = recipient.trim().toLowerCase();
     setBusy(true);
     setStep("sending");
     try {
       const r = await sidecar<{ ok: boolean; messageId: string }>(
         `/provision/${encodeURIComponent(domain)}/test`,
-        { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to: recipient }) },
+        { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to }) },
       );
       setMessageId(r.messageId);
       setStep("sent");
@@ -803,13 +812,13 @@ export function SetupWizard({
                   value={recipient}
                   onChange={(e) => setRecipient(e.target.value.trim().toLowerCase())}
                   placeholder="you@gmail.com"
-                  disabled={step !== "verified"}
+                  disabled={busy}
                   className={cn(inputCls, "w-64")}
                   {...noAutoCap}
                 />
               </label>
-              <Button onClick={sendTest} disabled={busy || step !== "verified" || !recipient}>
-                <Mail className="size-4" /> 4. Send deliverability test
+              <Button onClick={sendTest} disabled={busy || !recipient}>
+                <Mail className="size-4" /> {step === "sent" ? "Send another test" : "4. Send deliverability test"}
               </Button>
             </div>
           </div>
