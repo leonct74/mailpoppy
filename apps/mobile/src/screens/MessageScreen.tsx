@@ -16,6 +16,7 @@ import { mail } from "../mailClient";
 import { parseEml, type ParsedEmail } from "../eml";
 import { saveOrShareAttachment, saveOrShareEncryptedAttachment } from "../attachments";
 import { decryptEml } from "../mailboxKeys";
+import { MessageBody } from "../components/MessageBody";
 import { folderLabel } from "../folders";
 import { colors, fonts } from "../theme";
 
@@ -188,9 +189,7 @@ export function MessageScreen({ route, navigation }: Props) {
               </View>
             </View>
 
-            <Text style={styles.body} selectable>
-              {email.text || "(no text content)"}
-            </Text>
+            <MessageBody html={email.html} text={email.text} />
 
             {email.attachments.length > 0 && (
               <View style={styles.attachments}>
