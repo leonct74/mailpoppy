@@ -29,6 +29,7 @@ import { formatBytes, usagePercent, usageLevel } from "@mailpoppy/core";
 import { makeMailClient, type MailClient, type SendAttachment, type MailboxUsage } from "../lib/mailClient";
 import { filesToAttachments } from "../lib/attachments";
 import { openExternal } from "../lib/openExternal";
+import { decryptEml, decryptAttachmentBytes } from "../lib/mailboxKeys";
 import { SecurityInfo } from "./SecurityInfo";
 import { parseBody, sanitizeHtml, type ParsedBody } from "../lib/mailBody";
 import { buildReply, type ComposeInit, type ReplyMode } from "../lib/reply";
@@ -42,6 +43,20 @@ import { friendlyError } from "../lib/errors";
 // compose → send. Talks to a MailClient (the shared api-client against a
 // deployed backend, or the demo client offline) — so this view is identical
 // for desktop and, later, mobile.
+
+/** Save raw bytes to a file from the webview (used for decrypted attachments,
+ *  whose plaintext never exists on S3 to hand to the OS opener). */
+function saveBytes(filename: string, contentType: string, bytes: Uint8Array) {
+  const blob = new Blob([bytes as BlobPart], { type: contentType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
 
 const FOLDERS: Folder[] = ["inbox", "sent", "drafts", "trash", "junk"];
 const FOLDER_LABEL: Record<string, string> = {
@@ -156,6 +171,9 @@ export function InboxView({
     let eml: string;
     try {
       ({ eml } = await mail.getRaw(m.messageId));
+      // Encrypted mail comes back as ciphertext — decrypt with the cached mailbox
+      // key before parsing/displaying (a no-op for mail stored in clear).
+      eml = await decryptEml(m, eml);
     } catch (e) {
       setError(friendlyError(e));
       return;
@@ -185,7 +203,16 @@ export function InboxView({
     setAttachmentLink(null);
     try {
       const { url } = await mail.getAttachmentUrl(messageId, index);
-      // Hand the presigned URL to the OS (window.open is a no-op in the webview).
+      if (selected?.encrypted) {
+        // The S3 object is ciphertext — a presigned URL can't be opened directly.
+        // Fetch it, decrypt with the cached mailbox key, and save the plaintext.
+        const att = selected.attachments?.[index];
+        const ciphertext = await (await fetch(url)).text();
+        const bytes = await decryptAttachmentBytes(selected, ciphertext);
+        saveBytes(_filename, att?.contentType ?? "application/octet-stream", bytes);
+        return;
+      }
+      // Plaintext: hand the presigned URL to the OS (window.open is a no-op in the webview).
       const opened = await openExternal(url);
       // If nothing could open it (Tauri opener not active yet), show the link.
       if (!opened) setAttachmentLink({ url, filename: _filename });

@@ -8,10 +8,18 @@
 import _sodium from "libsodium-wrappers-sumo";
 import {
   establishMailboxKeys,
+  unwrapContentKey,
+  decryptWithContentKey,
   type Sodium,
   type MailboxKeyStore,
   type MailboxKeySession,
 } from "@mailpoppy/core";
+
+/** The encryption fields the read path needs off a message (subset of MessageMeta). */
+export interface EncryptedRef {
+  encrypted?: boolean;
+  encWrappedKey?: string;
+}
 
 // libsodium initialises asynchronously; reuse the one ready instance.
 let sodiumReady: Promise<Sodium> | null = null;
@@ -58,4 +66,31 @@ export async function establishMailboxKeysForLogin(
   const r = await establishMailboxKeys(s, store, password);
   session = { publicKey: r.publicKey, privateKey: r.privateKey };
   return { created: r.created, rekeyed: r.rekeyed, recoveryKey: r.recoveryKey };
+}
+
+// ── Read path: decrypt what the inbound Lambda sealed ────────────────────────
+
+/** Recover the per-message content key from a message's wrap, using the cached
+ *  private key. Throws a user-facing error if the mailbox is locked (signed out). */
+async function contentKeyForMessage(s: Sodium, meta: EncryptedRef): Promise<Uint8Array> {
+  if (!session) throw new Error("Your mailbox is locked — sign in again to read this message.");
+  return unwrapContentKey(s, session.publicKey, session.privateKey, meta.encWrappedKey!);
+}
+
+/** Decrypt an encrypted .eml back to its plaintext MIME source; a no-op for mail
+ *  stored in clear (received before activation, or with encryption off). */
+export async function decryptEml(meta: EncryptedRef, eml: string): Promise<string> {
+  if (!meta.encrypted || !meta.encWrappedKey) return eml;
+  const s = await getSodium();
+  const ck = await contentKeyForMessage(s, meta);
+  return s.to_string(decryptWithContentKey(s, ck, eml));
+}
+
+/** Decrypt an encrypted attachment body (the base64 ciphertext the client fetched
+ *  from S3) back to raw bytes. For unencrypted messages, callers use the presigned
+ *  URL directly and never reach this. */
+export async function decryptAttachmentBytes(meta: EncryptedRef, ciphertextB64: string): Promise<Uint8Array> {
+  const s = await getSodium();
+  const ck = await contentKeyForMessage(s, meta);
+  return decryptWithContentKey(s, ck, ciphertextB64);
 }
