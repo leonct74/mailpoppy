@@ -347,7 +347,7 @@ function NoExpertise() {
     {
       icon: RocketIcon,
       title: "Never used AWS? Perfect.",
-      body: "You don't need a cloud background, an AWS account, or any technical experience. If you've never set up infrastructure in your life, MailPoppy is built exactly for you.",
+      body: "You don't need cloud experience or technical skills. MailPoppy is built for people who've never touched AWS before.",
     },
     {
       icon: WandIcon,
@@ -357,7 +357,7 @@ function NoExpertise() {
     {
       icon: ClockIcon,
       title: "Ready in about 5 minutes",
-      body: "Open the app, follow the on-screen instructions, and you'll have a complete, professional email setup for your domain in roughly five minutes.",
+      body: "Open the app, follow the steps, and in five minutes you have a complete, professional email setup for your domain.",
     },
     {
       icon: ShieldIcon,
@@ -465,7 +465,7 @@ function Differentiators() {
     {
       icon: CoinsIcon,
       title: "Pay AWS, not a per-seat tax",
-      body: "Spin up unlimited mailboxes in seconds. You pay AWS's usage rates — typically a few dollars a month for a whole domain — instead of a monthly bill that grows with every hire.",
+      body: "Spin up unlimited mailboxes in seconds. You pay AWS for actual usage — no monthly per-seat bill that grows with every hire.",
     },
     {
       icon: BoltIcon,
