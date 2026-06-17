@@ -3,6 +3,7 @@
 // the ONLY thing that talks to the deployment's access API (API Gateway). The mail
 // path NEVER uses AWS credentials — only a Cognito JWT.
 import type { MessageMeta, Folder, MessageFlags } from "./types";
+import type { MailboxKeyRecord } from "./mailboxCrypto";
 
 export interface MailpoppyClientConfig {
   apiBaseUrl: string;
@@ -115,5 +116,13 @@ export class MailpoppyClient {
   }
   getUsage(): Promise<MailboxUsage> {
     return this.req(`/usage`);
+  }
+  /** The signed-in mailbox's key record, or `record: null` to generate one this login. */
+  getMailboxKeys(): Promise<{ record: MailboxKeyRecord | null }> {
+    return this.req(`/mailbox-keys`);
+  }
+  /** Store the mailbox key record (first-login keygen, re-key, or password change). */
+  putMailboxKeys(record: MailboxKeyRecord): Promise<{ ok: true }> {
+    return this.req(`/mailbox-keys`, { method: "PUT", body: JSON.stringify(record) });
   }
 }

@@ -9,6 +9,8 @@ import {
 } from "@/lib/auth";
 import { resolveConfig } from "@/lib/config";
 import { PRIVACY_VERSION } from "@/lib/legal";
+import { mail } from "@/lib/mailClient";
+import { establishMailboxKeysForLogin } from "@/lib/mailpoppy/mailboxKeys";
 import { Logo } from "./Logo";
 import {
   MailIcon,
@@ -49,10 +51,29 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
   const [notice, setNotice] = useState<string | null>(null);
   // Privacy Policy: must be accepted before the first sign-in (remembered after).
   const [accepted, setAccepted] = useState(false);
+  // Set once a keypair is freshly generated: show the recovery key once before
+  // entering the inbox. `rekeyed` means it followed an admin password reset.
+  const [recovery, setRecovery] = useState<{ key: string; rekeyed: boolean } | null>(null);
 
   useEffect(() => {
     setAccepted(readAccepted());
   }, []);
+
+  // Establish the mailbox encryption keypair (generate/unwrap/re-key) with the
+  // password just used, then either show the recovery key or enter the inbox.
+  // Non-fatal: a deployment without the keys endpoint still signs in.
+  async function establishThenFinish(pw: string) {
+    try {
+      const r = await establishMailboxKeysForLogin(mail, pw);
+      if (r.created && r.recoveryKey) {
+        setRecovery({ key: r.recoveryKey, rekeyed: r.rekeyed });
+        return;
+      }
+    } catch {
+      /* encryption is non-blocking during rollout */
+    }
+    onSignedIn();
+  }
 
   function toggleAccepted() {
     setAccepted((prev) => {
@@ -75,7 +96,7 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
     try {
       if (mode === "newpw") {
         await completeNewPassword(newPassword);
-        onSignedIn();
+        await establishThenFinish(newPassword);
       } else if (mode === "forgot") {
         const addr = email.trim().toLowerCase();
         await resolveConfig(addr); // point at the right backend before emailing a code
@@ -96,7 +117,7 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
         await resolveConfig(addr); // resolve this domain's backend, then sign in against it
         const res = await signIn(addr, password);
         if (res.status === "new-password-required") go("newpw");
-        else onSignedIn();
+        else await establishThenFinish(password);
       }
     } catch (err) {
       setError(friendly(err));
@@ -117,6 +138,10 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
         : mode === "reset"
           ? "Reset password"
           : "Sign in";
+
+  if (recovery) {
+    return <RecoveryKeyPanel recoveryKey={recovery.key} rekeyed={recovery.rekeyed} onContinue={onSignedIn} />;
+  }
 
   return (
     <div className="bg-bg relative flex min-h-screen items-center justify-center overflow-hidden px-4">
@@ -334,6 +359,92 @@ function LinkButton({
     >
       {label}
     </button>
+  );
+}
+
+/** Shown once, after a mailbox keypair is created (first login, or a re-key after
+ *  an admin password reset). The recovery key is the user's ONLY way back into
+ *  their encrypted mail if they forget their password — no one, not even the
+ *  admin, can recover it. So "Continue" is gated on an explicit acknowledgement. */
+function RecoveryKeyPanel({
+  recoveryKey,
+  rekeyed,
+  onContinue,
+}: {
+  recoveryKey: string;
+  rekeyed: boolean;
+  onContinue: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(recoveryKey);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard blocked — the user can still select the text */
+    }
+  }
+
+  return (
+    <div className="bg-bg flex min-h-screen items-center justify-center px-4">
+      <div className="w-full max-w-sm">
+        <div className="flex flex-col items-center">
+          <Logo size="lg" className="mb-6" />
+          <h1 className="text-heading flex items-center gap-2 text-2xl font-bold">
+            <KeyIcon size={22} /> Save your recovery key
+          </h1>
+        </div>
+
+        <div className="bg-surface-container border-hairline mt-6 rounded-2xl border p-6">
+          {rekeyed && (
+            <p className="bg-surface-high text-text mb-4 rounded-xl px-4 py-3 text-sm leading-relaxed">
+              Your password was reset, so a new encryption key was created. Mail received before the reset can no
+              longer be opened — this is by design.
+            </p>
+          )}
+          <p className="text-muted text-sm leading-relaxed">
+            Your mailbox is encrypted with your password — not even the admin can read it. If you ever forget your
+            password, this recovery key is the <strong className="text-heading">only</strong> way to get your mail
+            back. Store it somewhere safe (a password manager is ideal). It is shown only once.
+          </p>
+
+          <div className="bg-surface-high mt-4 flex items-center gap-2 rounded-xl px-3.5 py-3">
+            <code aria-label="Recovery key" className="text-text min-w-0 flex-1 font-mono text-xs break-all">
+              {recoveryKey}
+            </code>
+            <button
+              type="button"
+              onClick={() => void copy()}
+              className="text-heading shrink-0 text-xs font-semibold hover:underline"
+            >
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+
+          <label className="text-muted mt-4 flex cursor-pointer items-start gap-2.5 text-[13px] leading-relaxed">
+            <input
+              type="checkbox"
+              checked={acknowledged}
+              onChange={(e) => setAcknowledged(e.target.checked)}
+              className="accent-primary mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
+            />
+            <span>I&apos;ve saved my recovery key somewhere safe.</span>
+          </label>
+
+          <button
+            type="button"
+            onClick={onContinue}
+            disabled={!acknowledged}
+            className="bg-primary text-primary-text mt-5 flex w-full items-center justify-center rounded-xl py-3 text-sm font-bold tracking-wide transition-opacity hover:opacity-90 disabled:opacity-60"
+          >
+            Continue to mailbox
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

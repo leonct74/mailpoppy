@@ -49,4 +49,10 @@ export interface MessageMeta {
   verdicts?: AuthVerdicts;
   s3Key: string;
   sizeBytes: number;
+  /** Mailbox encryption: when true, the body (.eml at s3Key) + attachments are
+   *  sealed; encWrappedKey is the per-message content key sealed to THIS mailbox's
+   *  pubkey. The client decrypts with its private key. Subject/metadata stay clear;
+   *  snippet is blank. See mailboxCrypto.ts + docs/mailbox-encryption-design.md. */
+  encrypted?: boolean;
+  encWrappedKey?: string;
 }

@@ -28,7 +28,12 @@ export function Mailbox({ email, onSignOut }: { email: string | null; onSignOut:
   const [emptying, setEmptying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<{ messageId: string; subject: string } | null>(null);
+  const [selected, setSelected] = useState<{
+    messageId: string;
+    subject: string;
+    encrypted?: boolean;
+    encWrappedKey?: string;
+  } | null>(null);
   const [composing, setComposing] = useState<ComposeInit | null>(null);
 
   const load = useCallback(
@@ -84,7 +89,7 @@ export function Mailbox({ email, onSignOut }: { email: string | null; onSignOut:
   // reader. The draft's content is pulled from its stored .eml and parsed.
   async function openItem(m: MessageMeta) {
     if (folder !== "drafts") {
-      setSelected({ messageId: m.messageId, subject: m.subject });
+      setSelected({ messageId: m.messageId, subject: m.subject, encrypted: m.encrypted, encWrappedKey: m.encWrappedKey });
       return;
     }
     try {
@@ -138,6 +143,8 @@ export function Mailbox({ email, onSignOut }: { email: string | null; onSignOut:
           messageId={selected.messageId}
           folder={folder}
           subject={selected.subject}
+          encrypted={selected.encrypted}
+          encWrappedKey={selected.encWrappedKey}
           onBack={() => {
             setSelected(null);
             void load(folder, "fresh");

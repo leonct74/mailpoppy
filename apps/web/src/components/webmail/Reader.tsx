@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ComponentType } from "react";
 import DOMPurify from "dompurify";
 import { mail } from "@/lib/mailClient";
 import { parseEml, bareAddress, type ParsedEmail } from "@/lib/eml";
+import { decryptEml, decryptAttachmentBytes } from "@/lib/mailpoppy/mailboxKeys";
 import type { Folder } from "@/lib/mailpoppy/types";
 import type { ComposeInit } from "./Composer";
 import {
@@ -20,6 +21,8 @@ export function Reader({
   messageId,
   folder,
   subject,
+  encrypted,
+  encWrappedKey,
   onBack,
   onCompose,
   onMoved,
@@ -27,6 +30,9 @@ export function Reader({
   messageId: string;
   folder: Folder;
   subject: string;
+  /** Mailbox-encryption fields from the message row — drive client-side decryption. */
+  encrypted?: boolean;
+  encWrappedKey?: string;
   onBack: () => void;
   onCompose: (init: ComposeInit) => void;
   onMoved: () => void;
@@ -42,7 +48,10 @@ export function Reader({
     void (async () => {
       try {
         const { eml } = await mail.getRaw(messageId);
-        const parsed = await parseEml(eml);
+        // Encrypted mail comes back as ciphertext — decrypt with the cached
+        // mailbox key before parsing (a no-op for mail stored in clear).
+        const plain = await decryptEml({ encrypted, encWrappedKey }, eml);
+        const parsed = await parseEml(plain);
         if (alive) setEmail(parsed);
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : String(e));
@@ -51,7 +60,7 @@ export function Reader({
     return () => {
       alive = false;
     };
-  }, [messageId]);
+  }, [messageId, encrypted, encWrappedKey]);
 
   // Sanitize on the client only (DOMPurify needs a DOM). Images are dropped until
   // the user opts in, so remote tracking pixels don't fire automatically. The body
@@ -105,6 +114,15 @@ export function Reader({
   async function openAttachment(index: number) {
     try {
       const { url } = await mail.getAttachmentUrl(messageId, index);
+      if (encrypted) {
+        // The S3 object is ciphertext — fetch, decrypt with the mailbox key, and
+        // save the plaintext (a presigned URL points at ciphertext).
+        const att = email?.attachments[index];
+        const ciphertext = await (await fetch(url)).text();
+        const bytes = await decryptAttachmentBytes({ encrypted, encWrappedKey }, ciphertext);
+        saveBytes(att?.filename ?? "attachment", att?.mimeType ?? "application/octet-stream", bytes);
+        return;
+      }
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (e) {
       alert(e instanceof Error ? e.message : String(e));
@@ -278,4 +296,18 @@ function escapeHtml(s: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/** Save raw bytes to a file (used for decrypted attachments, whose plaintext
+ *  never exists on S3 to open via a presigned URL). */
+function saveBytes(filename: string, contentType: string, bytes: Uint8Array) {
+  const blob = new Blob([bytes as BlobPart], { type: contentType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
