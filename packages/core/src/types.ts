@@ -74,8 +74,20 @@ export interface MessageMeta {
   hasAttachments: boolean;
   attachments?: AttachmentMeta[];
   verdicts?: AuthVerdicts;
-  s3Key: string; // raw .eml location in S3
+  s3Key: string; // raw .eml location in S3 (CIPHERTEXT when `encrypted`)
   sizeBytes: number;
+  /**
+   * Mailbox encryption (docs/mailbox-encryption-design.md). When true, the body
+   * (the .eml at `s3Key`) and every attachment object are sealed with a per-
+   * message content key; `encWrappedKey` is that content key sealed to THIS
+   * recipient's public key (base64). The client recovers the content key with its
+   * private key and decrypts. `subject` and routing metadata stay cleartext (the
+   * inbound Lambda needs them); `snippet` is blank for encrypted messages because
+   * it is body text. Absent/false ⇒ stored in clear (e.g. received before the
+   * mailbox was activated — see §10 mail-before-activation).
+   */
+  encrypted?: boolean;
+  encWrappedKey?: string; // base64 — content key sealed to this recipient's pubkey
 }
 
 // ---- Admin-configurable policy (DESIGN §10): per-deployment default + per-domain override ----

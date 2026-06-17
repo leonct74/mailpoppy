@@ -37,7 +37,20 @@ import {
   removeDeviceTokens,
   pruneDeviceTokens,
   type DeviceRegistry,
+  mailboxKeysKey,
+  isMailboxKeyRecord,
+  generateContentKey,
+  encryptWithContentKey,
+  wrapContentKey,
+  type Sodium,
 } from "@mailpoppy/core";
+import _sodium from "libsodium-wrappers-sumo";
+
+// Mailbox encryption (docs/mailbox-encryption-design.md). When a recipient is
+// activated (has a public key), seal the body + attachments to it before storing
+// so the at-rest copy is unreadable without the user's password. One libsodium
+// instance, ready once per cold start.
+const sodiumReady: Promise<Sodium> = _sodium.ready.then(() => _sodium as unknown as Sodium);
 
 /**
  * Triggered by an SES receipt rule (Lambda action) AFTER the S3 action has
@@ -61,6 +74,13 @@ const SETTINGS_TABLE = process.env.SETTINGS_TABLE ?? "";
 const MAIL_BUCKET = process.env.MAIL_BUCKET ?? "";
 const USER_POOL_ID = process.env.USER_POOL_ID ?? "";
 const INBOUND_PREFIX = process.env.INBOUND_PREFIX ?? "inbound/";
+/**
+ * Master switch for at-rest mailbox encryption. OFF by default so this code is
+ * inert until every client can DECRYPT (Phase 5) — flipping it on before then
+ * would store ciphertext that current clients render as garbage. Set to "true"
+ * on the inbound Lambda's environment to enable (the design's "flip on" step).
+ */
+const ENCRYPTION_ENABLED = (process.env.ENCRYPTION_ENABLED ?? "").toLowerCase() === "true";
 /**
  * Fallback allowlist of hosted domains, used ONLY when the live Cognito mailbox
  * lookup fails (so we don't drop mail on a transient blip). In normal operation
@@ -114,6 +134,26 @@ async function loadSpamPolicyScoped(scope: string): Promise<SpamPolicy | null> {
     const json = out.Item?.json;
     if (typeof json !== "string") return null;
     return normalizeSpamPolicy(JSON.parse(json) as Partial<SpamPolicy>);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The recipient mailbox's public key (base64), or null when the mailbox isn't
+ * activated yet (no keypair until the user first logs in) or the lookup fails.
+ * Null ⇒ store this message in clear (accepted pre-activation window, §10);
+ * non-null ⇒ seal the body + attachments to it. Fail-safe: a read error never
+ * blocks delivery, it just falls back to storing plaintext.
+ */
+async function loadMailboxPubKey(address: string): Promise<string | null> {
+  if (!SETTINGS_TABLE) return null;
+  try {
+    const out = await ddb.send(new GetCommand({ TableName: SETTINGS_TABLE, Key: { pk: mailboxKeysKey(address) } }));
+    const raw = out.Item?.json;
+    if (typeof raw !== "string") return null;
+    const parsed = JSON.parse(raw);
+    return isMailboxKeyRecord(parsed) ? parsed.publicKey : null;
   } catch {
     return null;
   }
@@ -413,6 +453,7 @@ async function notifyNewMail(
 }
 
 export async function handler(event: SESEvent): Promise<void> {
+  const sodium = await sodiumReady; // ready once per cold start, before any sealing
   // Per-domain spam/auth policy, resolved on demand with a fallback chain:
   //   policy#<recipientDomain> → policy#default → built-in safe default.
   // Cached per invocation so each domain's doc is read at most once.
@@ -516,8 +557,26 @@ export async function handler(event: SESEvent): Promise<void> {
       continue;
     }
 
+    // ── Mailbox encryption decision (docs/mailbox-encryption-design.md) ──────
+    // Seal the body + attachments at rest IFF every local recipient is activated
+    // (has a public key). One content key per message; the shared ciphertext is
+    // written once and the content key is wrapped per recipient below. If ANY
+    // recipient isn't activated yet, the whole message is stored in clear so that
+    // recipient can still read it after first login (the bounded pre-activation
+    // window, §10) — the rare mixed-recipient message degrades to plaintext-at-rest.
+    const pubByRecipient = new Map<string, string>();
+    if (ENCRYPTION_ENABLED) {
+      for (const r of known) {
+        const pub = await loadMailboxPubKey(r);
+        if (pub) pubByRecipient.set(r, pub);
+      }
+    }
+    const contentKey =
+      ENCRYPTION_ENABLED && known.every((r) => pubByRecipient.has(r)) ? generateContentKey(sodium) : null;
+
     // Extract each attachment to its own S3 object so the client can download it
-    // on demand (one copy per message, shared across recipients).
+    // on demand (one copy per message, shared across recipients). Sealed under the
+    // message content key when the mailbox is activated.
     const attachments: AttachmentMeta[] = [];
     const parsedAttachments = parsed.attachments ?? [];
     for (let i = 0; i < parsedAttachments.length; i++) {
@@ -527,10 +586,29 @@ export async function handler(event: SESEvent): Promise<void> {
       // from the extension so the client can preview/open it.
       const contentType = resolveContentType(a.contentType, filename);
       const aKey = attachmentS3Key(messageId, i, filename);
+      const size = a.size ?? a.content?.length ?? 0;
+      // Ciphertext is opaque bytes stored as octet-stream; the real content type
+      // lives in AttachmentMeta and is applied client-side after decryption.
+      const body = contentKey ? encryptWithContentKey(sodium, contentKey, a.content) : a.content;
       await s3.send(
-        new PutObjectCommand({ Bucket: MAIL_BUCKET, Key: aKey, Body: a.content, ContentType: contentType }),
+        new PutObjectCommand({
+          Bucket: MAIL_BUCKET,
+          Key: aKey,
+          Body: body,
+          ContentType: contentKey ? "application/octet-stream" : contentType,
+        }),
       );
-      attachments.push({ filename, contentType, sizeBytes: a.size ?? a.content?.length ?? 0, s3Key: aKey });
+      attachments.push({ filename, contentType, sizeBytes: size, s3Key: aKey });
+    }
+
+    // Seal the body by OVERWRITING the raw .eml with ciphertext (scrubs the
+    // plaintext SES wrote to S3). The client fetches this object, recovers the
+    // content key from its per-recipient wrap, decrypts, then parses as today.
+    if (contentKey) {
+      const sealedEml = encryptWithContentKey(sodium, contentKey, sodium.from_string(raw));
+      await s3.send(
+        new PutObjectCommand({ Bucket: MAIL_BUCKET, Key: key, Body: sealedEml, ContentType: "application/octet-stream" }),
+      );
     }
 
     // Deliver to each real recipient (apply spam/auth policy + storage quota).
@@ -558,6 +636,11 @@ export async function handler(event: SESEvent): Promise<void> {
         }
       }
 
+      // When encrypted, wrap the message content key to THIS recipient's pubkey
+      // and blank the snippet (it's body text). Subject + routing metadata stay
+      // clear (the Lambda needs them; disclosed to the admin).
+      const encWrappedKey = contentKey ? wrapContentKey(sodium, pubByRecipient.get(recipient)!, contentKey) : undefined;
+
       const meta: MessageMeta = {
         domain: addressDomain(recipient),
         mailbox: recipient,
@@ -567,7 +650,7 @@ export async function handler(event: SESEvent): Promise<void> {
         from,
         to,
         subject,
-        snippet,
+        snippet: encWrappedKey ? "" : snippet,
         date,
         flags: { unread: true },
         hasAttachments: attachments.length > 0,
@@ -575,6 +658,8 @@ export async function handler(event: SESEvent): Promise<void> {
         verdicts,
         s3Key: key,
         sizeBytes,
+        encrypted: encWrappedKey ? true : undefined,
+        encWrappedKey,
       };
 
       await ddb.send(

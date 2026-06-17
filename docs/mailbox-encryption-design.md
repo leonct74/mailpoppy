@@ -144,11 +144,26 @@ Rolling our own primitives is the most common way to ship broken crypto — out 
 
 ---
 
-## 10. Open decisions
-- **v1 launch blocker, or documented fast-follow?** (Pre-launch is the cheapest time — no mail to
-  migrate — which argues for v1; but it's a big, security-critical lift.)
-- **Mail-before-activation policy**: bounce/queue until first login, or accept plaintext-at-rest
-  until activation? (Cleanest privacy = don't accept mail for an un-activated mailbox.)
-- **Recovery key**: mandatory, optional, or none? (No admin escrow.)
-- **Encrypt the subject?** (Privacy vs. server-side subject filtering.)
-- Confirm libsodium + Argon2 parameters; threat-model review before implementation.
+## 10. Decisions (resolved 2026-06-17)
+- **v1 launch blocker** — building it now, pre-launch (no mail to migrate; must be in the
+  submitted mobile build).
+- **Mail-before-activation**: **accept plaintext-at-rest until activation.** A mailbox has no
+  keypair until first login, so mail that arrives before then is stored in clear; once the user
+  activates, new mail is sealed and the client encrypts the pending plaintext on first login.
+  **Must be disclosed to the admin** (bounded plaintext window). The inbound Lambda seals a message
+  only when *every* local recipient is activated; a mixed-recipient message degrades to
+  plaintext-at-rest (rare).
+- **Recovery key**: **optional, generated + shown once on first keygen** (no admin escrow). The
+  desktop login flow surfaces it behind an acknowledgement gate.
+- **Encrypt the subject? — NO (v1).** The subject (and sender/recipient/size/timestamp) stay
+  **cleartext**, consistent with the routing metadata the inbound Lambda already needs, and to keep
+  server-side subject triage open for the future agent layer. Only **body + attachments** are
+  sealed; the **snippet is blanked** for encrypted messages (it's body text). **Must be disclosed**:
+  privacy copy says "body + attachments are unreadable by the admin; subject + routing metadata are
+  visible." The `subjectEnc` path is kept reversible so a future multi-user/employer tier can flip
+  subject encryption on per-deployment. (Once encrypted, the server can never produce cleartext
+  again — so cleartext-now is the more reversible default.)
+- **Rollout switch**: the inbound Lambda gates sealing on an `ENCRYPTION_ENABLED` env flag (default
+  OFF). Phase 4 ships inert; the flag is flipped to `true` only in Phase 5, once all three clients
+  can decrypt. libsodium + Argon2id confirmed available across Node/web/desktop (sumo) and React
+  Native bindings.
