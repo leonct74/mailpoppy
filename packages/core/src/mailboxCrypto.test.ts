@@ -15,6 +15,8 @@ import {
   openString,
   openBytes,
   bytesToB64,
+  mailboxKeysKey,
+  isMailboxKeyRecord,
 } from "./mailboxCrypto";
 
 // One ready libsodium instance, injected into every binding-agnostic helper.
@@ -123,5 +125,25 @@ describe("mailboxCrypto: KDF determinism", () => {
     expect(bytesToB64(s, k1)).toBe(bytesToB64(s, k2));
     const k3 = deriveMasterKey(s, PASSWORD, randomSalt(s));
     expect(bytesToB64(s, k3)).not.toBe(bytesToB64(s, k1));
+  });
+});
+
+describe("mailboxCrypto: backend storage helpers", () => {
+  it("derives a per-mailbox settings key (normalised, namespaced)", () => {
+    expect(mailboxKeysKey("Demo@Youord.com")).toBe("keys#demo@youord.com");
+    expect(mailboxKeysKey(" a@b.io ")).toBe("keys#a@b.io");
+  });
+
+  it("accepts a real record and rejects malformed ones (the PUT validator)", () => {
+    const { record } = createMailboxKeyRecord(s, PASSWORD);
+    expect(isMailboxKeyRecord(record)).toBe(true);
+    expect(isMailboxKeyRecord({ ...record, recoveryKey: undefined })).toBe(true);
+
+    expect(isMailboxKeyRecord(null)).toBe(false);
+    expect(isMailboxKeyRecord({})).toBe(false);
+    expect(isMailboxKeyRecord({ ...record, publicKey: "" })).toBe(false);
+    expect(isMailboxKeyRecord({ ...record, salt: 123 })).toBe(false);
+    expect(isMailboxKeyRecord({ ...record, kdf: { opsLimit: 1 } })).toBe(false);
+    expect(isMailboxKeyRecord({ ...record, wrappedPrivateKeyRecovery: 5 })).toBe(false);
   });
 });

@@ -231,3 +231,24 @@ export function openBytes(s: Sodium, publicKeyB64: string, privateKey: Uint8Arra
 
 export const bytesToB64 = b64;
 export const b64ToBytes = unb64;
+
+// ── Backend storage ──────────────────────────────────────────────────────────
+
+/** Settings-table partition key holding a mailbox's {@link MailboxKeyRecord}.
+ *  Stored under every owned address so the inbound-processor can find the public
+ *  key to seal to, no matter which alias received the mail. */
+export function mailboxKeysKey(address: string): string {
+  return `keys#${address.trim().toLowerCase()}`;
+}
+
+/** Validate an untrusted value as a {@link MailboxKeyRecord} (the access-api PUT
+ *  path — the client uploads this on first login / password change). */
+export function isMailboxKeyRecord(x: unknown): x is MailboxKeyRecord {
+  const r = x as Partial<MailboxKeyRecord> | null;
+  if (!r || typeof r !== "object") return false;
+  const str = (v: unknown) => typeof v === "string" && v.length > 0;
+  if (!str(r.publicKey) || !str(r.wrappedPrivateKey) || !str(r.salt)) return false;
+  if (!r.kdf || typeof r.kdf.opsLimit !== "number" || typeof r.kdf.memLimit !== "number") return false;
+  if (r.wrappedPrivateKeyRecovery !== undefined && !str(r.wrappedPrivateKeyRecovery)) return false;
+  return true;
+}

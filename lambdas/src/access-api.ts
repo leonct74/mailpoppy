@@ -45,6 +45,9 @@ import {
   normalizeSendSettings,
   type SendSettings,
   formatBytes,
+  mailboxKeysKey,
+  isMailboxKeyRecord,
+  type MailboxKeyRecord,
 } from "@mailpoppy/core";
 
 /**
@@ -55,7 +58,7 @@ import {
  * critical multi-tenant isolation (DESIGN §6). Shared by desktop + mobile.
  *
  * Routes: GET /messages · GET /messages/{id}/raw · PATCH /messages/{id}/flags
- *        · POST /messages/{id}/move · POST /send
+ *        · POST /messages/{id}/move · POST /send · GET|PUT /mailbox-keys
  */
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true },
@@ -808,6 +811,50 @@ async function unregisterDevice(owned: string[], token: string): Promise<APIGate
   return json(200, { ok: true });
 }
 
+// ---- Mailbox encryption keys -----------------------------------------------
+// A mailbox's public key + password-wrapped private key live in SETTINGS under
+// `keys#<address>`. The admin can read this and STILL can't read mail: the wrapped
+// private key is useless without the user's password, and the public key only lets
+// senders encrypt *to* the mailbox. Stored under every owned address (primary +
+// aliases) so the inbound-processor finds the public key for whichever alias got mail.
+
+async function loadMailboxKeyRecord(address: string): Promise<MailboxKeyRecord | null> {
+  const out = await ddb.send(
+    new GetCommand({ TableName: SETTINGS_TABLE, Key: { pk: mailboxKeysKey(address) } }),
+  );
+  const raw = out.Item?.json;
+  if (typeof raw !== "string") return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return isMailboxKeyRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The caller's own key record. `record: null` tells the client to generate a
+ *  keypair on this login (first-login keygen) and PUT it back. */
+async function getMailboxKeys(owned: string[]): Promise<APIGatewayProxyResultV2> {
+  if (!SETTINGS_TABLE) return json(200, { record: null });
+  return json(200, { record: await loadMailboxKeyRecord(owned[0]!) });
+}
+
+/** Upload the caller's key record (first-login keygen, or re-wrap on password change).
+ *  Written under every owned address. Scoped to the JWT — a caller can only set its own. */
+async function putMailboxKeys(owned: string[], body: unknown): Promise<APIGatewayProxyResultV2> {
+  if (!SETTINGS_TABLE) return json(500, { error: "settings table not configured" });
+  if (!isMailboxKeyRecord(body)) return json(400, { error: "invalid key record" });
+  for (const address of owned) {
+    await ddb.send(
+      new PutCommand({
+        TableName: SETTINGS_TABLE,
+        Item: { pk: mailboxKeysKey(address), json: JSON.stringify(body) },
+      }),
+    );
+  }
+  return json(200, { ok: true });
+}
+
 // ---- Dispatcher -------------------------------------------------------------
 
 export async function handler(
@@ -868,6 +915,10 @@ export async function handler(
         const token = event.pathParameters?.token ? decodeURIComponent(event.pathParameters.token) : "";
         return await unregisterDevice(owned, token);
       }
+      case "GET /mailbox-keys":
+        return await getMailboxKeys(owned);
+      case "PUT /mailbox-keys":
+        return await putMailboxKeys(owned, parseBody<unknown>());
       default:
         return json(404, { error: `no route for ${route}` });
     }

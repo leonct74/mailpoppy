@@ -257,6 +257,7 @@ export class MailStack extends Stack {
         allowMethods: [
           CorsHttpMethod.GET,
           CorsHttpMethod.POST,
+          CorsHttpMethod.PUT,
           CorsHttpMethod.PATCH,
           CorsHttpMethod.DELETE,
           CorsHttpMethod.OPTIONS,
@@ -281,6 +282,8 @@ export class MailStack extends Stack {
     // Mobile push: register/refresh + unregister an Expo device token.
     httpApi.addRoutes({ path: "/devices", methods: [HttpMethod.POST], integration });
     httpApi.addRoutes({ path: "/devices/{token}", methods: [HttpMethod.DELETE], integration });
+    // Mailbox encryption: read / upload the caller's public + password-wrapped key.
+    httpApi.addRoutes({ path: "/mailbox-keys", methods: [HttpMethod.GET, HttpMethod.PUT], integration });
 
     // ---- Retention janitor (daily) -----------------------------------------
     new events.Rule(this, "JanitorSchedule", {
