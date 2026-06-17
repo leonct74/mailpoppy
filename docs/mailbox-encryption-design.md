@@ -168,8 +168,11 @@ Rolling our own primitives is the most common way to ship broken crypto — out 
   deploy with the param omitted ships inert / backward-compatible). The **desktop setup wizard, the
   only product deploy path, now defaults the "Encrypt mailboxes at rest" toggle ON** — security-on-by-
   default per the admin's call (2026-06-17); the wizard always passes an explicit value so a new
-  deploy gets encryption unless the admin opts out. **Client-readiness caveat: desktop + web read
-  paths decrypt today; the mobile app has no native libsodium module yet, so an encrypted deploy locks
-  mobile readers out until the RN libsodium module + EAS rebuild ship.** The toggle copy warns "turn
-  off only if some people will read mail in an older Mailpoppy app." libsodium + Argon2id confirmed
-  available across Node/web/desktop (sumo) and React Native bindings.
+  deploy gets encryption unless the admin opts out. **Client-readiness: desktop + web decrypt today;
+  mobile decryption is now implemented (react-native-libsodium binding in apps/mobile/src/sodium.ts +
+  key lifecycle/read path) but only takes effect after a fresh EAS/dev-client build — the native module
+  isn't in any already-installed build.** The toggle copy warns "turn off only if some people will read
+  mail in an older Mailpoppy app." libsodium + Argon2id run across Node/web/desktop (sumo) and mobile
+  (react-native-libsodium native). The mobile base64 binding implements ORIGINAL standard base64 itself
+  (the RN lib defaults to URLSAFE_NO_PADDING) so encoded key blobs are byte-identical across platforms —
+  verified against libsodium ORIGINAL.

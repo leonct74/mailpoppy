@@ -14,7 +14,8 @@ import { Ionicons } from "@expo/vector-icons";
 import type { RootStackParamList } from "../navigation";
 import { mail } from "../mailClient";
 import { parseEml, type ParsedEmail } from "../eml";
-import { saveOrShareAttachment } from "../attachments";
+import { saveOrShareAttachment, saveOrShareEncryptedAttachment } from "../attachments";
+import { decryptEml } from "../mailboxKeys";
 import { folderLabel } from "../folders";
 import { colors, fonts } from "../theme";
 
@@ -23,7 +24,7 @@ type IconName = React.ComponentProps<typeof Ionicons>["name"];
 
 export function MessageScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
-  const { messageId, folder } = route.params;
+  const { messageId, folder, encrypted, encWrappedKey } = route.params;
   const [email, setEmail] = useState<ParsedEmail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState<number | null>(null);
@@ -35,7 +36,9 @@ export function MessageScreen({ route, navigation }: Props) {
     void (async () => {
       try {
         const { eml } = await mail.getRaw(messageId);
-        const parsed = await parseEml(eml);
+        // Decrypt before parsing — a no-op for mail stored in clear.
+        const plain = await decryptEml({ encrypted, encWrappedKey }, eml);
+        const parsed = await parseEml(plain);
         if (alive) setEmail(parsed);
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : String(e));
@@ -44,7 +47,7 @@ export function MessageScreen({ route, navigation }: Props) {
     return () => {
       alive = false;
     };
-  }, [messageId]);
+  }, [messageId, encrypted, encWrappedKey]);
 
   function reply() {
     if (!email) return;
@@ -77,11 +80,14 @@ export function MessageScreen({ route, navigation }: Props) {
     try {
       const { url, filename, contentType } = await mail.getAttachmentUrl(messageId, index);
       const local = email?.attachments[index];
-      await saveOrShareAttachment(
-        url,
-        filename ?? local?.filename ?? `attachment-${index}`,
-        contentType ?? local?.mimeType,
-      );
+      const name = filename ?? local?.filename ?? `attachment-${index}`;
+      const type = contentType ?? local?.mimeType;
+      if (encrypted && encWrappedKey) {
+        // Ciphertext on S3 — fetch, decrypt on-device, then share the plaintext.
+        await saveOrShareEncryptedAttachment(url, { encrypted, encWrappedKey }, name, type);
+      } else {
+        await saveOrShareAttachment(url, name, type);
+      }
     } catch (e) {
       Alert.alert("Couldn't open attachment", e instanceof Error ? e.message : String(e));
     } finally {
@@ -137,8 +143,16 @@ export function MessageScreen({ route, navigation }: Props) {
         <>
           <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
             <Text style={styles.subject}>{email.subject || "(no subject)"}</Text>
-            <View style={styles.chip}>
-              <Text style={styles.chipText}>{folderLabel(folder).toUpperCase()}</Text>
+            <View style={styles.badgeRow}>
+              <View style={styles.chip}>
+                <Text style={styles.chipText}>{folderLabel(folder).toUpperCase()}</Text>
+              </View>
+              {encrypted && (
+                <View style={styles.encBadge}>
+                  <Ionicons name="lock-closed" size={12} color={colors.primary} />
+                  <Text style={styles.encBadgeText}>ENCRYPTED</Text>
+                </View>
+              )}
             </View>
 
             {/* Sender card */}
@@ -254,15 +268,25 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   content: { padding: 16, paddingBottom: 24 },
   subject: { fontFamily: fonts.bold, fontSize: 24, lineHeight: 30, color: colors.text, marginBottom: 10 },
+  badgeRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16 },
   chip: {
     alignSelf: "flex-start",
     backgroundColor: "rgba(255,86,55,0.12)",
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 4,
-    marginBottom: 16,
   },
   chipText: { fontFamily: fonts.semibold, fontSize: 11, color: colors.primary, letterSpacing: 0.6 },
+  encBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(255,86,55,0.12)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  encBadgeText: { fontFamily: fonts.semibold, fontSize: 11, color: colors.primary, letterSpacing: 0.6 },
   senderCard: {
     flexDirection: "row",
     alignItems: "center",

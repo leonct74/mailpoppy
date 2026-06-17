@@ -116,6 +116,8 @@ export function InboxScreen({ navigation }: Props) {
       subject: item.subject,
       from: item.from.name || item.from.address,
       folder,
+      encrypted: item.encrypted,
+      encWrappedKey: item.encWrappedKey,
     });
   }
 
@@ -469,11 +471,14 @@ function Row({ item, folder, onPress }: { item: MessageMeta; folder: Folder; onP
           {item.subject || "(no subject)"}
         </Text>
         <View style={styles.snippetRow}>
+          {item.encrypted && (
+            <Ionicons name="lock-closed" size={13} color={colors.primary} style={styles.clip} />
+          )}
           {item.hasAttachments && (
             <Ionicons name="attach" size={14} color={colors.textMuted} style={styles.clip} />
           )}
           <Text style={styles.snippet} numberOfLines={1}>
-            {item.snippet}
+            {item.encrypted && !item.snippet ? "Encrypted message" : item.snippet}
           </Text>
         </View>
       </View>

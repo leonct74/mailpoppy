@@ -11,6 +11,8 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
+import { decryptAttachmentBytes, type EncryptedRef } from "./mailboxKeys";
+import { bytesToBase64 } from "./sodium";
 
 export interface PickedAttachment {
   filename: string;
@@ -42,6 +44,29 @@ export async function saveOrShareAttachment(
     await Sharing.shareAsync(uri, { mimeType: contentType, dialogTitle: filename });
   } else {
     await Linking.openURL(url);
+  }
+}
+
+/**
+ * Save/share an ENCRYPTED attachment. The S3 object is base64 ciphertext (text),
+ * so we fetch it, decrypt with the cached mailbox key (decryption happens on the
+ * device — the bytes are never readable server-side), write the plaintext to the
+ * cache, and hand it to the share sheet. No CORS concerns: this is a native fetch.
+ */
+export async function saveOrShareEncryptedAttachment(
+  url: string,
+  meta: EncryptedRef,
+  filename: string,
+  contentType?: string,
+): Promise<void> {
+  const ciphertextB64 = await (await fetch(url)).text();
+  const bytes = await decryptAttachmentBytes(meta, ciphertextB64);
+  const target = `${FileSystem.cacheDirectory}${Date.now()}_${sanitize(filename)}`;
+  await FileSystem.writeAsStringAsync(target, bytesToBase64(bytes), { encoding: FileSystem.EncodingType.Base64 });
+  if (await Sharing.isAvailableAsync()) {
+    await Sharing.shareAsync(target, { mimeType: contentType, dialogTitle: filename });
+  } else {
+    throw new Error("Sharing isn't available on this device, so this encrypted file can't be opened here.");
   }
 }
 

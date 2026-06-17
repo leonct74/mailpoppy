@@ -3,7 +3,16 @@ import type { Folder } from "@mailpoppy/core";
 // Route params for the signed-in stack (React Navigation native-stack).
 export type RootStackParamList = {
   Inbox: undefined; // the mailbox; folder is internal state (defaults to inbox)
-  Message: { messageId: string; subject: string; from: string; folder: Folder };
+  Message: {
+    messageId: string;
+    subject: string;
+    from: string;
+    folder: Folder;
+    // Encryption fields (off MessageMeta) needed to decrypt the body/attachments
+    // on the read screen. Absent ⇒ the message is stored in clear.
+    encrypted?: boolean;
+    encWrappedKey?: string;
+  };
   Settings: undefined; // account info + sign out
 
   Compose:
