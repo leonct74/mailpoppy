@@ -37,7 +37,7 @@ export const FAQS: { q: string; a: string }[] = [
   },
   {
     q: "Can I move my existing email over?",
-    a: "Yes. MailPoppy can import your existing mailboxes over IMAP, so you keep your history when you switch.",
+    a: "Yes. MailPoppy can import your existing mailboxes over IMAP, so you keep your history when you switch. See the migration guide at /migrate for step-by-step instructions on importing from Gmail, Microsoft 365, WorkMail, or any IMAP-compatible email service.",
   },
   {
     q: "What if I want to leave?",
