@@ -1,4 +1,4 @@
-import type { MessageMeta, Folder, MessageFlags } from "@mailpoppy/core";
+import type { MessageMeta, Folder, MessageFlags, MailboxKeyRecord } from "@mailpoppy/core";
 
 /**
  * An API call that failed. `message` is always safe to show a user directly;
@@ -211,6 +211,19 @@ export class MailpoppyClient {
   }
   getUsage(): Promise<MailboxUsage> {
     return this.req(`/usage`);
+  }
+  /**
+   * The signed-in mailbox's stored key record. `record: null` means none exists
+   * yet — the client should generate a keypair this login (see
+   * establishMailboxKeys in @mailpoppy/core). The record is public material only:
+   * the admin can read it and still cannot decrypt mail.
+   */
+  getMailboxKeys(): Promise<{ record: MailboxKeyRecord | null }> {
+    return this.req(`/mailbox-keys`);
+  }
+  /** Store the mailbox key record (first-login keygen, re-key, or password change). */
+  putMailboxKeys(record: MailboxKeyRecord): Promise<{ ok: true }> {
+    return this.req(`/mailbox-keys`, { method: "PUT", body: JSON.stringify(record) });
   }
   /** Register / refresh this device's Expo push token for new-mail notifications. */
   registerDevice(token: string, platform: "ios" | "android"): Promise<{ ok: true }> {

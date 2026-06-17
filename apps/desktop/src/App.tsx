@@ -10,8 +10,10 @@ import { MigrationView } from "./views/MigrationView";
 import { ConnectView } from "./views/ConnectView";
 import { LoginView } from "./views/LoginView";
 import { CapabilityLights } from "./views/CapabilityLights";
+import { MailpoppyClient } from "@mailpoppy/api-client";
 import { CognitoAuth } from "./lib/auth";
 import { makeMailClient } from "./lib/mailClient";
+import { establishMailboxKeysForLogin, clearMailboxKeySession } from "./lib/mailboxKeys";
 import { cn, Logo } from "./ui";
 import {
   loadDeploymentConfig,
@@ -54,6 +56,13 @@ function InboxTab({ prefillEmail }: { prefillEmail?: string | null }) {
   const auth = useMemo(() => (config ? new CognitoAuth(config) : null), [config]);
   const liveClient = useMemo(
     () => (config && auth ? makeMailClient({ apiBaseUrl: config.apiBaseUrl, getToken: () => auth.getToken() }) : null),
+    [config, auth],
+  );
+  // A direct client for the mailbox-key endpoints (GET/PUT /mailbox-keys), used by
+  // the login flow to generate/unwrap the encryption keypair. Same Cognito JWT as
+  // the mail path — no AWS credentials.
+  const keyStore = useMemo(
+    () => (config && auth ? new MailpoppyClient({ apiBaseUrl: config.apiBaseUrl, getToken: () => auth.getToken() }) : null),
     [config, auth],
   );
 
@@ -104,6 +113,7 @@ function InboxTab({ prefillEmail }: { prefillEmail?: string | null }) {
         prefillEmail={prefillEmail ?? undefined}
         onSignedIn={() => setSignedIn(true)}
         onReconfigure={() => setEditingConfig(true)}
+        onEstablishKeys={keyStore ? (pw) => establishMailboxKeysForLogin(keyStore, pw) : undefined}
       />
     );
   }
@@ -116,11 +126,11 @@ function InboxTab({ prefillEmail }: { prefillEmail?: string | null }) {
         <span className="text-secondary">
           ✅ Connected to <code className="font-mono text-xs">{config.apiBaseUrl}</code>
         </span>
-        <button className={linkBtn} onClick={() => { auth?.signOut(); setSignedIn(false); }}>Sign out</button>
+        <button className={linkBtn} onClick={() => { auth?.signOut(); clearMailboxKeySession(); setSignedIn(false); }}>Sign out</button>
         <button className={linkBtn} onClick={() => setEditingConfig(true)}>Change deployment</button>
         <button
           className={linkBtn}
-          onClick={() => { clearDeploymentConfig(); setConfig(null); setSignedIn(false); }}
+          onClick={() => { clearDeploymentConfig(); clearMailboxKeySession(); setConfig(null); setSignedIn(false); }}
         >
           Disconnect
         </button>

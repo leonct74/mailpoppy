@@ -15,3 +15,4 @@ export * from "./deliverability";
 export * from "./dmarc";
 export * from "./ini";
 export * from "./mailboxCrypto";
+export * from "./mailboxKeySession";

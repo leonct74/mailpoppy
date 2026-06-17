@@ -58,6 +58,59 @@ describe("LoginView", () => {
     expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("info@boxord.com");
   });
 
+  it("shows the recovery key once when a keypair is created, and continues only after acknowledgement", async () => {
+    const auth = mockAuth();
+    const onSignedIn = vi.fn();
+    const onEstablishKeys = vi.fn(async () => ({ created: true, rekeyed: false, recoveryKey: "RECOVER-ME-1234" }));
+    render(<LoginView auth={auth} onSignedIn={onSignedIn} onEstablishKeys={onEstablishKeys} />);
+
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "you@x.com" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "hunter2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    // The recovery key is shown and the inbox is NOT entered yet.
+    expect(await screen.findByText("Save your recovery key")).toBeInTheDocument();
+    expect(screen.getByLabelText("Recovery key")).toHaveTextContent("RECOVER-ME-1234");
+    expect(onEstablishKeys).toHaveBeenCalledWith("hunter2");
+    expect(onSignedIn).not.toHaveBeenCalled();
+
+    // Continue is gated on the acknowledgement checkbox.
+    const cont = screen.getByRole("button", { name: /Continue to mailbox/ });
+    expect(cont).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(cont);
+    expect(onSignedIn).toHaveBeenCalled();
+  });
+
+  it("skips the recovery panel when no keypair was created", async () => {
+    const auth = mockAuth();
+    const onSignedIn = vi.fn();
+    const onEstablishKeys = vi.fn(async () => ({ created: false, rekeyed: false }));
+    render(<LoginView auth={auth} onSignedIn={onSignedIn} onEstablishKeys={onEstablishKeys} />);
+
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "you@x.com" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "hunter2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalled());
+    expect(screen.queryByText("Save your recovery key")).not.toBeInTheDocument();
+  });
+
+  it("still signs in if key establishment fails (encryption is non-blocking during rollout)", async () => {
+    const auth = mockAuth();
+    const onSignedIn = vi.fn();
+    const onEstablishKeys = vi.fn(async () => {
+      throw new Error("keys endpoint unavailable");
+    });
+    render(<LoginView auth={auth} onSignedIn={onSignedIn} onEstablishKeys={onEstablishKeys} />);
+
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "you@x.com" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "hunter2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalled());
+  });
+
   it("shows an error when authentication fails", async () => {
     const auth = mockAuth({
       signIn: vi.fn(async () => {
