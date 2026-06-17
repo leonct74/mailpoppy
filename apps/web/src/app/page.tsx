@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { ComponentType } from "react";
 import { Logo } from "@/components/webmail/Logo";
 import { SITE_URL, SITE_NAME, SITE_DESCRIPTION, FAQS, REPO_URL, REPO_PUBLIC } from "@/lib/site";
+import { FaqAnswer } from "@/lib/faq-renderer";
 import {
   ShieldIcon,
   ServerIcon,
@@ -885,7 +886,7 @@ function Faq() {
                 <PlusIcon />
               </span>
             </summary>
-            <p className="text-muted mt-3 text-sm leading-relaxed">{f.a}</p>
+            <FaqAnswer question={f.q} answer={f.a} />
           </details>
         ))}
       </div>

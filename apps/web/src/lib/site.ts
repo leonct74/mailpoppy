@@ -14,6 +14,17 @@ export const SITE_DESCRIPTION =
 export const REPO_URL = "https://github.com/leonct74/mailpoppy-engine";
 export const REPO_PUBLIC = false;
 
+// Configuration for FAQs that include links. Maps question to array of link replacements.
+export const FAQ_LINKS: Record<string, Array<{ find: string; href: string; text: string }>> = {
+  "Can I move my existing email over?": [
+    {
+      find: "migration guide at /migrate",
+      href: "/migrate",
+      text: "migration guide",
+    },
+  ],
+};
+
 export const FAQS: { q: string; a: string }[] = [
   {
     q: "Does MailPoppy store or read my email?",

@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { ComponentType, ReactNode } from "react";
 import { Logo } from "@/components/webmail/Logo";
 import { SITE_URL, SITE_NAME } from "@/lib/site";
+import { FaqAnswer } from "@/lib/faq-renderer";
 import {
   ArrowRightIcon,
   ClockIcon,
@@ -404,7 +405,7 @@ function Faq() {
                 <PlusIcon />
               </span>
             </summary>
-            <p className="text-muted mt-3 text-sm leading-relaxed">{f.a}</p>
+            <FaqAnswer question={f.q} answer={f.a} />
           </details>
         ))}
       </div>
