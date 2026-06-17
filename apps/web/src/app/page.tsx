@@ -77,6 +77,7 @@ export default function Home() {
   return (
     <main className="bg-bg text-text">
       <StructuredData />
+      <WorkMailBanner />
       <Header />
       <Hero />
       <TrustStrip />
@@ -96,6 +97,29 @@ export default function Home() {
       <FinalCta />
       <Footer />
     </main>
+  );
+}
+
+/* ─────────────────────────── WorkMail announcement bar ─────────────────────────── */
+
+function WorkMailBanner() {
+  return (
+    <Link
+      href="/workmail-alternative"
+      className="border-hairline bg-primary/10 hover:bg-primary/15 block border-b text-center transition-colors"
+    >
+      <div className="text-text mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-x-2 gap-y-1 px-5 py-2.5 text-xs font-medium sm:text-sm">
+        <span className="text-primary">
+          <ClockIcon size={14} />
+        </span>
+        <span>
+          <b className="font-bold">AWS WorkMail is shutting down in 2027.</b> Move to email you own —
+        </span>
+        <span className="text-primary inline-flex items-center gap-1 font-semibold">
+          see the WorkMail alternative <ArrowRightIcon size={14} />
+        </span>
+      </div>
+    </Link>
   );
 }
 
@@ -533,7 +557,13 @@ function HowItWorks() {
         ))}
       </div>
       <p className="text-muted mt-8 text-center text-sm">
-        Coming from AWS WorkMail, Gmail or Microsoft 365?{" "}
+        On AWS WorkMail (shutting down in 2027)?{" "}
+        <Link href="/workmail-alternative" className="text-primary font-semibold hover:underline">
+          See why MailPoppy is the natural move →
+        </Link>
+      </p>
+      <p className="text-muted mt-2 text-center text-sm">
+        Coming from Gmail or Microsoft 365?{" "}
         <Link href="/migrate" className="text-primary font-semibold hover:underline">
           Read the migration guide →
         </Link>
@@ -916,6 +946,7 @@ function Footer() {
           <a href="#features" className="hover:text-text transition-colors">Features</a>
           <a href="#security" className="hover:text-text transition-colors">Security</a>
           <a href="#open" className="hover:text-text transition-colors">Open source</a>
+          <Link href="/workmail-alternative" className="hover:text-text transition-colors">WorkMail alternative</Link>
           <Link href="/migrate" className="hover:text-text transition-colors">Migrate</Link>
           <a href="#pricing" className="hover:text-text transition-colors">Pricing</a>
           <a href="#faq" className="hover:text-text transition-colors">FAQ</a>
