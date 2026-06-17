@@ -36,8 +36,22 @@ export function MessageScreen({ route, navigation }: Props) {
     void (async () => {
       try {
         const { eml } = await mail.getRaw(messageId);
+        // A notification tap carries only messageId (the encryption fields can't
+        // travel through the push service), so `encrypted === undefined` means we
+        // were opened from a notification — look up this message's metadata before
+        // decrypting. From the inbox, the fields are passed in and no lookup runs.
+        let enc: { encrypted?: boolean; encWrappedKey?: string } = { encrypted, encWrappedKey };
+        if (encrypted === undefined) {
+          try {
+            const { items } = await mail.list({ folder, limit: 100 });
+            const m = items.find((x) => x.messageId === messageId);
+            if (m) enc = { encrypted: m.encrypted, encWrappedKey: m.encWrappedKey };
+          } catch {
+            /* leave as-is; a sealed body simply won't parse and shows as empty */
+          }
+        }
         // Decrypt before parsing — a no-op for mail stored in clear.
-        const plain = await decryptEml({ encrypted, encWrappedKey }, eml);
+        const plain = await decryptEml(enc, eml);
         const parsed = await parseEml(plain);
         if (alive) setEmail(parsed);
       } catch (e) {
@@ -47,7 +61,7 @@ export function MessageScreen({ route, navigation }: Props) {
     return () => {
       alive = false;
     };
-  }, [messageId, encrypted, encWrappedKey]);
+  }, [messageId, encrypted, encWrappedKey, folder]);
 
   function reply() {
     if (!email) return;

@@ -4,6 +4,7 @@ import { cognitoStorage } from "./cognitoStorage";
 import { hydrateDeployment, resolveConfig } from "./config";
 import { resetContacts } from "./contacts";
 import { registerForPush, unregisterForPush } from "./push";
+import * as Notifications from "expo-notifications";
 import { mail } from "./mailClient";
 import { establishMailboxKeysForLogin, clearMailboxKeySession } from "./mailboxKeys";
 import { KeyNoticeModal, type KeyNotice } from "./components/KeyNoticeModal";
@@ -108,6 +109,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     void unregisterForPush().finally(() => {
       auth.signOut();
       clearMailboxKeySession(); // drop the unlocked private key
+      void Notifications.setBadgeCountAsync(0).catch(() => {}); // clear app-icon badge
       resetContacts(); // don't carry one mailbox's autocomplete into the next sign-in
       setEmail(null);
       setStatus("signed-out");

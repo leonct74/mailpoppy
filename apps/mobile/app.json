@@ -29,7 +29,8 @@
       [
         "expo-notifications",
         {
-          "color": "#1a73e8"
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#ff5637"
         }
       ],
       "expo-sharing",

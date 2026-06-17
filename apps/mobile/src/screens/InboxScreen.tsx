@@ -19,6 +19,7 @@ import {
   View,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
+import * as Notifications from "expo-notifications";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
@@ -70,6 +71,12 @@ export function InboxScreen({ navigation }: Props) {
         });
         setItems((prev) => (mode === "more" ? [...prev, ...res.items] : res.items));
         setCursor(res.cursor);
+        // Keep the app-icon badge in sync with the inbox's unread count whenever
+        // the inbox (re)loads — open app / pull-to-refresh / focus. (Closed-app
+        // badge updates would need the push to carry a badge count; see follow-up.)
+        if (folder === "inbox" && mode !== "more") {
+          void Notifications.setBadgeCountAsync(res.items.filter((m) => m.flags.unread).length).catch(() => {});
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -116,7 +123,9 @@ export function InboxScreen({ navigation }: Props) {
       subject: item.subject,
       from: item.from.name || item.from.address,
       folder,
-      encrypted: item.encrypted,
+      // Definite boolean (never undefined) so the reader knows the meta is known
+      // and skips the notification-tap meta lookup.
+      encrypted: !!item.encrypted,
       encWrappedKey: item.encWrappedKey,
     });
   }
