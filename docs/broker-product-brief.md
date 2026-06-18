@@ -141,14 +141,17 @@ The open engine (`mailpoppy-engine`, FSL-1.1-Apache-2.0) is what delivers the *s
 and is a launch prerequisite — but it stays **private until explicit approval**. Before going
 public:
 
-- [ ] **License notes** — add per-file license/copyright headers (SPDX) + a `NOTICE`, matching
-      the LICENSE's copyright holder; confirm README states the license clearly. *(User asked
-      explicitly to remember this, 2026-06-18.)*
-- [ ] **Sensitive-data scan** — AWS account IDs, emails, test domain, any key material (even
-      with squashed history).
+- [x] **License notes** — done 2026-06-18: SPDX header (`Copyright 2026 Marco Tomasello
+      (MailPoppy)` / FSL-1.1-Apache-2.0) on all 46 `.ts` files + a `NOTICE`. typecheck + 165
+      tests green. Folded into the single initial commit (`30d0ea5`), **not pushed**.
+- [x] **Sensitive-data scan** — done: no keys / account-IDs / credential files; real domain
+      `ollydigital.com` scrubbed → `example.com`. (User is happy keeping their *name* in the
+      copyright headers — CV signal.)
 - [ ] **Rebrand to AgentsPoppy** — repo name, README/positioning, `brand/` logo asset, update
       the submodule ref in `mailpoppy-app`.
-- [ ] **Then, only on the user's explicit go:** flip the repo to public.
+- [ ] **Then, only on the user's explicit go:** flip the repo to public. NB: first force-push
+      the amended clean engine commit to sync the private remote — the old commit `2115571`
+      still holds the real domain in *private* history (local reflog + `origin/main`).
 
 ## Open decisions still to make
 
