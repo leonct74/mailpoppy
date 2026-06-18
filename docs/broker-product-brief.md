@@ -135,6 +135,21 @@ consumer before exposing it (how good platform APIs actually get built).
   build GCP/Azure backends for free; assume we'll do the next cloud if it matters). Stay
   **AWS-only** to start; design so other clouds are *possible*, don't promise them.
 
+## Pre-publish gate — engine → public (DO NOT publish until user approves)
+
+The open engine (`mailpoppy-engine`, FSL-1.1-Apache-2.0) is what delivers the *safety label*
+and is a launch prerequisite — but it stays **private until explicit approval**. Before going
+public:
+
+- [ ] **License notes** — add per-file license/copyright headers (SPDX) + a `NOTICE`, matching
+      the LICENSE's copyright holder; confirm README states the license clearly. *(User asked
+      explicitly to remember this, 2026-06-18.)*
+- [ ] **Sensitive-data scan** — AWS account IDs, emails, test domain, any key material (even
+      with squashed history).
+- [ ] **Rebrand to AgentsPoppy** — repo name, README/positioning, `brand/` logo asset, update
+      the submodule ref in `mailpoppy-app`.
+- [ ] **Then, only on the user's explicit go:** flip the repo to public.
+
 ## Open decisions still to make
 
 1. Caller-authentication mechanism (the security crux).
