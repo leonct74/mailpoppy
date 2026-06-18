@@ -42,6 +42,9 @@
       ],
       "react-native-libsodium"
     ],
+    "experiments": {
+      "onDemandFilesystem": false
+    },
     "extra": {
       "eas": {
         "projectId": "dde74ba7-83a4-42f0-8dff-9b97afdf8158"
