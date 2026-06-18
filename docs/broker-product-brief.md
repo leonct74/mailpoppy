@@ -98,14 +98,14 @@ account) **without** giving away the paid product. The broker == the already-sta
 
 ## Brand / naming
 
-- **AgentsPoppy** — rides the agent wedge (attention now); risk: boxes it into "agents only"
-  when MailPoppy (the first client) isn't an agent, and "agents" may date.
-- **BrokerPoppy** — names the durable *function*; covers apps *and* agents; ages better; risk:
-  drier, faint finance connotation.
-- Lean: name for the durable capability, *market* via the agent wedge. Both `.com`s are free —
-  **grab both** to keep optionality; the name matters far less than the architecture + license.
-- The shared **"Poppy" family brand is itself a trust asset** — signals a common trusted house,
-  which is exactly the trust-transfer we want.
+- **Confirmed: AgentsPoppy** (decided 2026-06-18). Leads with the agent wedge for attention;
+  markets the durable broker capability underneath it.
+- **Logo:** an "A" monogram — red→navy gradient legs with a navy upward chevron nested in the
+  negative space, on black (the Poppy crimson-navy palette; reduces cleanly to a small
+  monochrome mark). Asset to be version-controlled under `brand/` in the engine repo.
+- The shared **"Poppy" family brand is a trust asset** — signals a common trusted house, which
+  is exactly the trust-transfer we want.
+- *(Rejected: BrokerPoppy — more accurate to the function, but drier and less timely.)*
 
 ## Business model (DEFERRED — do not build yet)
 
@@ -141,4 +141,5 @@ consumer before exposing it (how good platform APIs actually get built).
 2. How presigned URLs / side channels are handled (the bypass-coverage honesty line).
 3. Lead threat for the opening demo: runaway agent **spend**, **destructive actions**, or
    **data exfiltration**? (Picks the first enforcement feature + the demo.)
-4. Final name (AgentsPoppy vs BrokerPoppy) — low urgency; hedge both domains.
+4. ~~Final name~~ — **Resolved: AgentsPoppy** (2026-06-18). Grab `agentspoppy.com`; add the
+   logo to the engine repo `brand/` dir.
