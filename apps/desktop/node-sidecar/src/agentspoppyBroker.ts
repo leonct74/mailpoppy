@@ -21,6 +21,14 @@ const REFRESH_BUFFER_MS = 300_000; // re-mint 5 min before expiry
 /** The stack tag AgentsPoppy attributes + tears down on (must match the broker). */
 export const CONNECTION_TAG_KEY = "agentspoppy:connection";
 
+/**
+ * AgentsPoppy's sentinel resourceScope meaning "only resources tagged as THIS
+ * connection's own" — the broker turns it into an `aws:ResourceTag/agentspoppy:connection`
+ * condition on the vended session policy. Value must match @agentspoppy/core's
+ * TAGGED_AS_SELF. Used to ensure MailPoppy can only touch resources it created.
+ */
+const TAGGED_AS_SELF = "tagged-as-self";
+
 /** AWS SDK v3 `AwsCredentialIdentity` shape (structural — no SDK import needed). */
 export interface AwsCredentialIdentity {
   accessKeyId: string;
@@ -81,7 +89,6 @@ function permissionSet() {
   const apis = "arn:aws:apigateway:*::/apis*";
   const buckets = "arn:aws:s3:::mailpoppy*";
   const objects = "arn:aws:s3:::mailpoppy*/*";
-  const userPool = "arn:aws:cognito-idp:*:*:userpool/*";
   return {
     id: "mailpoppy-backend",
     name: "MailPoppy backend",
@@ -131,14 +138,20 @@ function permissionSet() {
       ], buckets),
       grant("s3", ["GetObject", "PutObject", "DeleteObject"], objects),
       grant("s3", ["ListAllMyBuckets"]),
-      // --- Cognito: pool lifecycle is account-wide (CreateUserPool can't be scoped);
-      //     per-user mailbox admin is pinned to user pools ---
+      // --- Cognito: creating a pool/client, reading, and tagging can't be tied to a
+      //     not-yet-existing resource (and CFN needs TagResource to stamp the propagated
+      //     connection tag onto the new pool), so they stay account-wide — harmless.
+      //     But every operation that could DAMAGE or read out an existing pool (delete,
+      //     reconfigure, or touch its users) is scoped to pools tagged as MailPoppy's
+      //     OWN — so MailPoppy can never delete or alter another app's user pool. ---
       grant("cognito-idp", [
-        "CreateUserPool", "DeleteUserPool", "UpdateUserPool", "DescribeUserPool", "CreateUserPoolClient",
-        "DeleteUserPoolClient", "UpdateUserPoolClient", "DescribeUserPoolClient", "SetUserPoolMfaConfig",
+        "CreateUserPool", "CreateUserPoolClient", "DescribeUserPool", "DescribeUserPoolClient",
         "GetUserPoolMfaConfig", "TagResource", "UntagResource",
       ]),
-      grant("cognito-idp", ["AdminCreateUser", "AdminSetUserPassword", "AdminDeleteUser", "ListUsers"], userPool),
+      grant("cognito-idp", [
+        "DeleteUserPool", "UpdateUserPool", "DeleteUserPoolClient", "UpdateUserPoolClient",
+        "SetUserPoolMfaConfig", "AdminCreateUser", "AdminSetUserPassword", "AdminDeleteUser", "ListUsers",
+      ], TAGGED_AS_SELF),
       // --- Services with no resource-level IAM support: specific actions, account-wide ---
       grant("ses", [
         "CreateReceiptRuleSet", "CreateReceiptRule", "DeleteReceiptRule", "DeleteReceiptRuleSet",
