@@ -77,7 +77,7 @@ describe("AwsOnboarding", () => {
     render(<AwsOnboarding onResult={onResult} onRecheck={vi.fn()} submit={submit} />);
     openPaste();
 
-    const connect = screen.getByRole("button", { name: /^connect/i });
+    const connect = screen.getByRole("button", { name: /^connect$/i });
     expect(connect).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText("Access Key ID"), { target: { value: "AKIAEXAMPLE" } });
@@ -101,7 +101,7 @@ describe("AwsOnboarding", () => {
     openPaste();
     fireEvent.change(screen.getByLabelText("Access Key ID"), { target: { value: "AKIA" } });
     fireEvent.change(screen.getByLabelText("Secret Access Key"), { target: { value: "nope" } });
-    fireEvent.click(screen.getByRole("button", { name: /^connect/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^connect$/i }));
     await waitFor(() => expect(screen.getByText(/didn't accept those keys/i)).toBeInTheDocument());
     expect(screen.getByText(/InvalidClientTokenId/)).toBeInTheDocument();
     expect(onResult).toHaveBeenCalledWith(bad);

@@ -116,6 +116,7 @@ import {
   DeleteUserPoolCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import { record, readLedger, type LedgerEntry } from "./ledger";
+import { brokerCredentials, brokerConnectionTag, isBrokerEnabled } from "./agentspoppyBroker";
 
 export interface AwsContext {
   region: string;
@@ -123,6 +124,11 @@ export interface AwsContext {
 }
 
 function clients(ctx: AwsContext) {
+  // Credential source. When AgentsPoppy broker mode is on AND a connection is
+  // approved, AWS calls go through short-lived broker-vended credentials (so
+  // AgentsPoppy governs + can tear down what we deploy). Otherwise we resolve the
+  // local ~/.aws `mailpoppy` profile exactly as before.
+  //
   // The sidecar is long-lived and the credentials file legitimately changes
   // underneath it during onboarding: the in-app "paste keys" path writes a
   // [mailpoppy] profile, and so does `aws configure --profile mailpoppy`. The SDK
@@ -130,7 +136,8 @@ function clients(ctx: AwsContext) {
   // written *after* the first read would resolve against a stale parse — surfacing
   // as "Could not resolve credentials using profile: [mailpoppy]" right after the
   // user pastes valid keys. `ignoreCache` forces a fresh read on every call.
-  const credentials = ctx.profile ? fromIni({ profile: ctx.profile, ignoreCache: true }) : undefined;
+  const credentials =
+    brokerCredentials() ?? (ctx.profile ? fromIni({ profile: ctx.profile, ignoreCache: true }) : undefined);
   const base = { region: ctx.region, credentials };
   return {
     sts: new STSClient(base),
@@ -415,6 +422,19 @@ export async function deployBackend(
   ctx: AwsContext,
   args: { domain: string; stackName?: string; enableMalwareProtection?: boolean; enableEncryption?: boolean },
 ): Promise<DeployResult> {
+  // In broker mode the stack MUST carry the connection tag, or AgentsPoppy can't
+  // attribute or tear it down — so refuse to deploy until the connection is
+  // approved (rather than silently falling back to the local profile).
+  const connectionTag = brokerConnectionTag();
+  if (isBrokerEnabled() && !connectionTag) {
+    throw new Error(
+      "AgentsPoppy broker mode is on but no approved connection — connect MailPoppy in AgentsPoppy and approve it before deploying.",
+    );
+  }
+  // Stack-level tags CloudFormation records on the stack; AgentsPoppy lists stacks
+  // and tears down those tagged with its connection id (`agentspoppy:connection`).
+  const Tags = connectionTag ? [connectionTag, { Key: "agentspoppy:managed", Value: "mailpoppy" }] : undefined;
+
   const { s3, cloudformation } = clients(ctx);
   const region = ctx.region;
   const stackName = args.stackName ?? "MailpoppyMailStack";
@@ -467,12 +487,12 @@ export async function deployBackend(
     status = null;
     operation = "RECREATE";
     await cloudformation.send(
-      new CreateStackCommand({ StackName: stackName, TemplateURL: templateUrl, Parameters, Capabilities }),
+      new CreateStackCommand({ StackName: stackName, TemplateURL: templateUrl, Parameters, Capabilities, Tags }),
     );
   } else if (status) {
     try {
       await cloudformation.send(
-        new UpdateStackCommand({ StackName: stackName, TemplateURL: templateUrl, Parameters, Capabilities }),
+        new UpdateStackCommand({ StackName: stackName, TemplateURL: templateUrl, Parameters, Capabilities, Tags }),
       );
       operation = "UPDATE";
     } catch (e) {
@@ -481,7 +501,7 @@ export async function deployBackend(
     }
   } else {
     await cloudformation.send(
-      new CreateStackCommand({ StackName: stackName, TemplateURL: templateUrl, Parameters, Capabilities }),
+      new CreateStackCommand({ StackName: stackName, TemplateURL: templateUrl, Parameters, Capabilities, Tags }),
     );
     operation = "CREATE";
   }

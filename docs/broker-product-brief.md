@@ -135,23 +135,41 @@ consumer before exposing it (how good platform APIs actually get built).
   build GCP/Azure backends for free; assume we'll do the next cloud if it matters). Stay
   **AWS-only** to start; design so other clouds are *possible*, don't promise them.
 
-## Pre-publish gate — engine → public (DO NOT publish until user approves)
+## PIVOT (2026-06-18, later same day) — AgentsPoppy is a SEPARATE agnostic product
 
-The open engine (`mailpoppy-engine`, FSL-1.1-Apache-2.0) is what delivers the *safety label*
-and is a launch prerequisite — but it stays **private until explicit approval**. Before going
-public:
+The earlier framing in this brief — *"AgentsPoppy == the rebranded `mailpoppy-engine`"* — is
+**superseded.** Decision: AgentsPoppy must be **genuinely agnostic** (zero mail code) — a
+standalone permission broker with its own API, its own UI, and its own domain (agentspoppy.com,
+purchased) that MailPoppy *connects to* as its first client. A cosmetic rebrand of the mail
+engine was the wrong vehicle, because that repo *is* mail code.
 
-- [x] **License notes** — done 2026-06-18: SPDX header (`Copyright 2026 Marco Tomasello
-      (MailPoppy)` / FSL-1.1-Apache-2.0) on all 46 `.ts` files + a `NOTICE`. typecheck + 165
-      tests green. Folded into the single initial commit (`30d0ea5`), **not pushed**.
-- [x] **Sensitive-data scan** — done: no keys / account-IDs / credential files; real domain
-      `ollydigital.com` scrubbed → `example.com`. (User is happy keeping their *name* in the
-      copyright headers — CV signal.)
-- [ ] **Rebrand to AgentsPoppy** — repo name, README/positioning, `brand/` logo asset, update
-      the submodule ref in `mailpoppy-app`.
-- [ ] **Then, only on the user's explicit go:** flip the repo to public. NB: first force-push
-      the amended clean engine commit to sync the private remote — the old commit `2115571`
-      still holds the real domain in *private* history (local reflog + `origin/main`).
+**What was done:**
+- The cosmetic AgentsPoppy rebrand of `mailpoppy-engine` was **reverted** — that repo is
+  MailPoppy's private mail engine again (single commit, not pushed).
+- New repo scaffolded **locally** at `/Users/mt/Projects/agentspoppy` (`agentspoppy`,
+  FSL-1.1-Apache-2.0): meta (README/NOTICE/TRADEMARK/LICENSE) + `brand/` logo + `packages/core`
+  — the agnostic domain model, per-app inventory/ledger helpers (generalised from MailPoppy),
+  and the consent/permission model with enforceable tag-attribution. **17 tests + typecheck
+  green. No git remote, not published.**
+- v1 design: [agentspoppy-v1-spec.md](agentspoppy-v1-spec.md) — model (ConnectedAccount →
+  Connection → per-app Inventory), attribution + teardown, the basic API, and the boundary
+  rule *"does the daily MailPoppy user need it?"* (e.g. Sending health stays in MailPoppy;
+  CloudFormation stacks are AgentsPoppy-only).
+
+**Next:** broker API service + desktop UI → wire MailPoppy as first client → shed MailPoppy's
+admin UI (`AccountView`/`ResourcesView` move to AgentsPoppy).
+
+## Pre-publish gate — AgentsPoppy → public (DO NOT publish until user approves)
+
+`agentspoppy` is **local-only**. Before it ever goes public (only on explicit go):
+
+- [x] **License:** FSL `LICENSE` + `NOTICE` + `TRADEMARK` (reserve "AgentsPoppy" + "Poppy") +
+      SPDX headers on all `.ts`.
+- [ ] **Sensitive-data scan** once more code lands (no keys / account-ids / credential files).
+- [ ] **Create the GitHub repo + remote**, then flip public — on explicit go only.
+
+*(The old engine-rename / `mailpoppy-app` submodule-repoint steps are obsolete: the engine
+stays MailPoppy's, unchanged.)*
 
 ## Open decisions still to make
 

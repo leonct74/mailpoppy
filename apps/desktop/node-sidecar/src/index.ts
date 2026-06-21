@@ -11,6 +11,7 @@ import * as mailboxImport from "./mailboxImport";
 import { readLedger } from "./ledger";
 import { writeMailpoppyProfile, mailpoppyProfileExists, MAILPOPPY_PROFILE } from "./awsProfile";
 import { checkCapabilities } from "./capabilities";
+import { beginBrokerConnect, refreshBrokerStatus, disconnectBroker } from "./agentspoppyBroker";
 import { SES_INBOUND_REGIONS } from "@mailpoppy/core";
 
 // 25 MiB body limit (Fastify defaults to 1 MiB): the bulk-mailbox importer POSTs
@@ -225,6 +226,35 @@ app.post("/aws/credentials", async (req, reply) => {
   }
   currentProfile = MAILPOPPY_PROFILE; // use the just-written keys from now on
   return prov.checkReadiness(ctx());
+});
+
+// --- AgentsPoppy broker (opt-in): get AWS credentials from a local AgentsPoppy ---
+// instead of the ~/.aws profile, so AgentsPoppy can govern + tear down what we
+// deploy. Connect → user approves in AgentsPoppy → poll status until "active".
+
+// Request (or reuse) MailPoppy's connection on the local AgentsPoppy broker.
+app.post("/agentspoppy/connect", async (req, reply) => {
+  const b = (req.body ?? {}) as { accountId?: string };
+  try {
+    return await beginBrokerConnect({ accountId: b.accountId });
+  } catch (e) {
+    return reply.code(502).send({ ok: false, error: (e as Error).message });
+  }
+});
+
+// Poll the connection's approval status (UI shows "approve in AgentsPoppy…").
+app.get("/agentspoppy/status", async (_req, reply) => {
+  try {
+    return await refreshBrokerStatus();
+  } catch (e) {
+    return reply.code(502).send({ ok: false, error: (e as Error).message });
+  }
+});
+
+// Stop using broker credentials (back to the local profile).
+app.post("/agentspoppy/disconnect", async () => {
+  disconnectBroker();
+  return { ok: true };
 });
 
 // Read-only: confirm credentials + that the domain's zone exists (wizard step 1).

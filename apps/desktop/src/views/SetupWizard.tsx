@@ -9,6 +9,7 @@ import { MailboxStorageRow } from "./MailboxStorageRow";
 import { MailFromSetup } from "./MailFromSetup";
 import { RegionPicker } from "./RegionPicker";
 import { AwsOnboarding } from "./AwsOnboarding";
+import { AgentsPoppyConnect } from "./AgentsPoppyConnect";
 import { friendlyError } from "../lib/errors";
 import { AdminPrivacyNotice } from "./AdminPrivacyNotice";
 import { SetupProgress } from "./SetupProgress";
@@ -681,6 +682,11 @@ export function SetupWizard({
                 <ShieldCheck className="size-4" /> Environment ready — you can set up a domain.
               </div>
             )}
+
+            {/* Optional: broker credentials through a local AgentsPoppy instead of a
+                stored profile, so it can govern + tear down what MailPoppy deploys.
+                Shown regardless of how credentials currently resolve. */}
+            <AgentsPoppyConnect onRecheck={() => void loadReadiness()} />
           </div>
         )}
       </StepCard>

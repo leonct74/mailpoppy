@@ -1,8 +1,9 @@
-import { SlidersHorizontal } from "lucide-react";
+import { SlidersHorizontal, ShieldCheck } from "lucide-react";
 import { resolveStackName } from "../lib/deploymentConfig";
 import { SendingAccessView } from "./SendingAccessView";
 import { SendSettingsEditor } from "./SendSettingsEditor";
 import { ResourcesView } from "./ResourcesView";
+import { AgentsPoppyConnect } from "./AgentsPoppyConnect";
 import { Card } from "../ui";
 
 // Account — the home for what's genuinely shared across the whole install rather
@@ -28,6 +29,21 @@ export function AccountView({ stackName = resolveStackName() }: { stackName?: st
           inside each domain's workspace.
         </p>
       </div>
+
+      {/* How MailPoppy gets its AWS credentials. Optional: route them through a
+          local AgentsPoppy broker so it can monitor + tear down what MailPoppy
+          deploys. Install-wide (one credential source), so it lives here. */}
+      <Card>
+        <h3 className="flex items-center gap-2 text-base font-semibold text-on-surface">
+          <ShieldCheck className="size-4 text-primary" /> AWS credential source
+        </h3>
+        <p className="mt-1 text-sm text-on-surface-variant">
+          By default MailPoppy uses your local AWS profile. You can instead connect through{" "}
+          <b className="text-on-surface">AgentsPoppy</b> — a local broker that vends short-lived, scoped credentials and
+          can pause, revoke, or tear down what MailPoppy creates.
+        </p>
+        <AgentsPoppyConnect />
+      </Card>
 
       {/* Sending access is an AWS account+region property (SES sandbox →
           production), not per-domain — it lives here. */}
