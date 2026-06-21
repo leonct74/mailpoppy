@@ -226,6 +226,51 @@ async function api<T>(path: string, init?: { method?: string; body?: unknown }):
   return (await res.json()) as T;
 }
 
+function isScopedCredentials(v: unknown): v is ScopedCredentials {
+  const c = v as Partial<ScopedCredentials> | null;
+  return !!c && !!c.accessKeyId && !!c.secretAccessKey && !!c.sessionToken && !!c.expiration;
+}
+
+/** Poll interval while a supervised approval is pending (the user decides in AgentsPoppy). */
+const APPROVAL_POLL_MS = 2000;
+
+/**
+ * Mint scoped credentials. For a normal connection this returns at once. For a
+ * *supervised* connection the broker answers with `202 { approvalRequired, approval }`
+ * — the user must approve the operation in the AgentsPoppy window — so we poll
+ * (echoing the approval id) until it's approved (→ credentials) or denied (→ error).
+ * That's how AgentsPoppy can require a human OK before MailPoppy changes anything.
+ */
+async function mintCredentials(connectionId: string): Promise<ScopedCredentials> {
+  const path = `/connections/${encodeURIComponent(connectionId)}/credentials`;
+  const post = (body?: unknown) =>
+    doFetch(path, {
+      method: "POST",
+      headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+
+  let res = await post();
+  for (;;) {
+    if (!res.ok) {
+      let message = `AgentsPoppy broker returned ${res.status}`;
+      try {
+        const b = (await res.json()) as { message?: string };
+        if (b?.message) message = b.message;
+      } catch {
+        /* keep status-based message */
+      }
+      throw new Error(message);
+    }
+    const body = await res.json();
+    if (isScopedCredentials(body)) return body;
+    const approvalId = (body as { approval?: { id?: string } }).approval?.id;
+    if (!approvalId) throw new Error("AgentsPoppy broker returned an unexpected credentials response");
+    await new Promise((r) => setTimeout(r, APPROVAL_POLL_MS));
+    res = await post({ approvalId });
+  }
+}
+
 function makeProvider(connectionId: string): AwsCredentialIdentityProvider {
   let cached: ScopedCredentials | null = null;
   let inflight: Promise<ScopedCredentials> | null = null;
@@ -235,7 +280,7 @@ function makeProvider(connectionId: string): AwsCredentialIdentityProvider {
   };
   const refresh = (): Promise<ScopedCredentials> => {
     if (!inflight) {
-      inflight = api<ScopedCredentials>(`/connections/${encodeURIComponent(connectionId)}/credentials`, { method: "POST" })
+      inflight = mintCredentials(connectionId)
         .then((c) => {
           cached = c;
           return c;
