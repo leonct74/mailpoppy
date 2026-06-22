@@ -311,6 +311,16 @@ async function mintCredentials(connectionId: string): Promise<ScopedCredentials>
       } catch {
         /* keep status-based message */
       }
+      // A pending approval has a 15-min TTL. If it lapses (or was already consumed)
+      // while we're still mid-deploy — e.g. the user took a moment to walk over to
+      // AgentsPoppy — that's NOT a failure: transparently re-request a fresh approval
+      // (which re-notifies them) and keep waiting, instead of surfacing a bare "error".
+      // A genuine denial still propagates so the user's "no" is honoured.
+      if (/expired|already been used|request again/i.test(message)) {
+        await new Promise((r) => setTimeout(r, APPROVAL_POLL_MS));
+        res = await post();
+        continue;
+      }
       throw new Error(message);
     }
     const body = await res.json();
