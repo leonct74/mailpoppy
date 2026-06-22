@@ -177,9 +177,26 @@ let baseUrl = process.env.AGENTSPOPPY_BASE_URL ?? DEFAULT_BASE_URL;
 let enabled = /^(1|true|yes|on)$/i.test(process.env.MAILPOPPY_AGENTSPOPPY_BROKER ?? "");
 let connection: ConnectionDTO | null = null;
 let credsProvider: AwsCredentialIdentityProvider | null = null;
+/** AWS account number behind the active connection (for display); set on connect. */
+let awsAccountId: string | null = null;
 
 export function isBrokerEnabled(): boolean {
   return enabled;
+}
+
+/**
+ * True when an approved AgentsPoppy connection is the active credential source.
+ * Readiness treats this as "environment ready" without probing AWS — AgentsPoppy
+ * has already granted a known, scoped permission set, and the actual credential
+ * mint (with its supervised approval) happens at deploy time, not form-enable time.
+ */
+export function brokerConnected(): boolean {
+  return enabled && connection?.status === "active";
+}
+
+/** The AWS account number behind the active broker connection, if known. */
+export function brokerAccountId(): string | undefined {
+  return brokerConnected() ? awsAccountId ?? undefined : undefined;
 }
 
 /** The stack tag to stamp on deploys, or null if not connected+active. */
@@ -336,6 +353,7 @@ export async function beginBrokerConnect(opts: { accountId?: string } = {}): Pro
       body: { accountId: account.id, app: APP, permissionSet: permissionSet() },
     }));
   credsProvider = makeProvider(connection.id);
+  awsAccountId = account.accountId;
   return { connectionId: connection.id, status: connection.status, accountId: account.accountId, alias: account.alias };
 }
 
@@ -357,6 +375,7 @@ export async function refreshBrokerStatus(): Promise<BrokerStatus> {
 export function disconnectBroker(): void {
   connection = null;
   credsProvider = null;
+  awsAccountId = null;
   enabled = /^(1|true|yes|on)$/i.test(process.env.MAILPOPPY_AGENTSPOPPY_BROKER ?? "");
 }
 

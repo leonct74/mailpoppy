@@ -116,7 +116,7 @@ import {
   DeleteUserPoolCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import { record, readLedger, type LedgerEntry } from "./ledger";
-import { brokerCredentials, brokerConnectionTag, isBrokerEnabled } from "./agentspoppyBroker";
+import { brokerCredentials, brokerConnectionTag, isBrokerEnabled, brokerConnected, brokerAccountId } from "./agentspoppyBroker";
 
 export interface AwsContext {
   region: string;
@@ -1120,6 +1120,21 @@ async function probe(send: Promise<unknown>): Promise<"ok" | "denied" | "error">
  */
 export async function checkReadiness(ctx: AwsContext): Promise<Readiness> {
   const cli = detectCli();
+
+  // Brokered by a connected AgentsPoppy → the environment IS ready: AgentsPoppy has
+  // granted MailPoppy a known, scoped permission set, so we deliberately don't probe.
+  // Probing here would mint credentials, which (under supervised mode) forces a human
+  // approval just to enable the form. The real credential mint + its approval happen
+  // when MailPoppy actually deploys.
+  if (brokerConnected()) {
+    return {
+      cli,
+      credentials: { ok: true, arn: "Brokered by AgentsPoppy", account: brokerAccountId() },
+      permissions: { route53: "ok", ses: "ok", sesv2: "ok", s3: "ok" },
+      ready: true,
+    };
+  }
+
   const c = clients(ctx);
 
   const credentials: Readiness["credentials"] = { ok: false };

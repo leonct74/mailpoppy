@@ -626,7 +626,8 @@ export function SetupWizard({
                 <span className="flex items-center gap-2">
                   <OkBadge>Found</OkBadge>
                   <span className="font-mono text-xs text-on-surface-variant">
-                    {readiness.credentials.arn} (account {readiness.credentials.account})
+                    {readiness.credentials.arn}
+                    {readiness.credentials.account ? ` (account ${readiness.credentials.account})` : ""}
                   </span>
                 </span>
               ) : (
