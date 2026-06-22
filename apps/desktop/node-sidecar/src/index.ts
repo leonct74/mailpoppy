@@ -11,7 +11,7 @@ import * as mailboxImport from "./mailboxImport";
 import { readLedger } from "./ledger";
 import { writeMailpoppyProfile, mailpoppyProfileExists, MAILPOPPY_PROFILE } from "./awsProfile";
 import { checkCapabilities } from "./capabilities";
-import { beginBrokerConnect, refreshBrokerStatus, disconnectBroker } from "./agentspoppyBroker";
+import { beginBrokerConnect, refreshBrokerStatus, disconnectBroker, brokerRegion, brokerPort } from "./agentspoppyBroker";
 import { SES_INBOUND_REGIONS } from "@mailpoppy/core";
 
 // 25 MiB body limit (Fastify defaults to 1 MiB): the bulk-mailbox importer POSTs
@@ -108,7 +108,9 @@ app.setErrorHandler((err, _req, reply) => {
 // The active AWS region for provisioning. Starts from the env, but the admin can
 // change it from the wizard (data-residency) BEFORE deploying — the frontend
 // re-applies its saved choice on launch. Route53 stays global (pinned in clients()).
-let currentRegion = process.env.AWS_REGION ?? "eu-west-1";
+// In container mode the AgentsPoppy host resolves the region for the connection and
+// injects it via the bootstrap; honour that over the env default.
+let currentRegion = brokerRegion() ?? process.env.AWS_REGION ?? "eu-west-1";
 
 // The active credential profile. An explicit AWS_PROFILE (power users) always
 // wins; otherwise, if a [mailpoppy] profile exists in ~/.aws/credentials (written
@@ -761,7 +763,9 @@ app.post("/domain/remove", async (req, reply) => {
   }
 });
 
-const port = Number(process.env.PORT ?? 8787);
+// Container mode: the host assigns the loopback port and injects it (no fixed-port
+// discovery). Standalone: PORT env, else the historical 8787.
+const port = brokerPort() ?? Number(process.env.PORT ?? 8787);
 app
   .listen({ port, host: "127.0.0.1" })
   .then(() => app.log.info(`mailpoppy provisioning sidecar on http://127.0.0.1:${port}`))

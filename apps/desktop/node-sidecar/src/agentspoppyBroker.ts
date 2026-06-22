@@ -202,14 +202,72 @@ function grantsSignature(grants: unknown): string {
   );
 }
 
+/**
+ * What the AgentsPoppy *container host* injects into MailPoppy's backend when it
+ * spawns it as an extension (env `AGENTSPOPPY_BOOTSTRAP`, a JSON blob). This REPLACES
+ * the old self-discovery dance (`beginBrokerConnect`): the host has already created
+ * (and the user has approved) the connection, so the backend doesn't hunt for the
+ * broker on a fixed port or request its own connection — it's handed the exact
+ * connection id, a loopback endpoint to mint this connection's scoped credentials,
+ * the port to listen on, and the resolved AWS account/region. Mirror of
+ * @agentspoppy/extension-sdk's BackendBootstrap (structural — no cross-repo dep).
+ *
+ * Absent → standalone mode (the existing self-connect / ~/.aws profile path), unchanged.
+ */
+interface BackendBootstrap {
+  connectionId: string;
+  credentialsUrl: string;
+  port?: number;
+  account: { accountId: string; region: string };
+}
+
+function readBootstrap(): BackendBootstrap | null {
+  const raw = process.env.AGENTSPOPPY_BOOTSTRAP;
+  if (!raw) return null;
+  try {
+    const b = JSON.parse(raw) as Partial<BackendBootstrap>;
+    if (
+      b &&
+      typeof b.connectionId === "string" &&
+      typeof b.credentialsUrl === "string" &&
+      b.account &&
+      typeof b.account.accountId === "string" &&
+      typeof b.account.region === "string"
+    ) {
+      return {
+        connectionId: b.connectionId,
+        credentialsUrl: b.credentialsUrl,
+        port: typeof b.port === "number" ? b.port : undefined,
+        account: { accountId: b.account.accountId, region: b.account.region },
+      };
+    }
+  } catch {
+    /* malformed bootstrap → treat as standalone */
+  }
+  return null;
+}
+
 // --- module state (the sidecar is a single long-lived process) ---
 
+/** Set when the host spawned us as an in-container extension; null in standalone mode. */
+const bootstrap = readBootstrap();
+
 let baseUrl = process.env.AGENTSPOPPY_BASE_URL ?? DEFAULT_BASE_URL;
-let enabled = /^(1|true|yes|on)$/i.test(process.env.MAILPOPPY_AGENTSPOPPY_BROKER ?? "");
+let enabled = bootstrap !== null || /^(1|true|yes|on)$/i.test(process.env.MAILPOPPY_AGENTSPOPPY_BROKER ?? "");
 let connection: ConnectionDTO | null = null;
 let credsProvider: AwsCredentialIdentityProvider | null = null;
 /** AWS account number behind the active connection (for display); set on connect. */
 let awsAccountId: string | null = null;
+
+// In container (bootstrap) mode the host only spawns this backend once the connection
+// is active, so bind to it immediately — no /accounts lookup, no connection request,
+// no approval poll for the *connection* itself (per-mint supervised approval still
+// happens against credentialsUrl, exactly as in standalone mode).
+if (bootstrap) {
+  connection = { id: bootstrap.connectionId, accountId: bootstrap.account.accountId, status: "active", app: APP };
+  awsAccountId = bootstrap.account.accountId;
+  credsProvider = makeProvider(bootstrap.connectionId);
+}
 
 export function isBrokerEnabled(): boolean {
   return enabled;
@@ -228,6 +286,21 @@ export function brokerConnected(): boolean {
 /** The AWS account number behind the active broker connection, if known. */
 export function brokerAccountId(): string | undefined {
   return brokerConnected() ? awsAccountId ?? undefined : undefined;
+}
+
+/** True when the host spawned us as an in-container extension (vs standalone). */
+export function isContainerMode(): boolean {
+  return bootstrap !== null;
+}
+
+/** The AWS region the host resolved for this connection (container mode only). */
+export function brokerRegion(): string | undefined {
+  return bootstrap?.account.region;
+}
+
+/** The loopback port the host assigned this backend to listen on (container mode only). */
+export function brokerPort(): number | undefined {
+  return bootstrap?.port;
 }
 
 /** The stack tag to stamp on deploys, or null if not connected+active. */
@@ -257,9 +330,14 @@ interface FetchResponse {
   json(): Promise<unknown>;
 }
 function doFetch(path: string, init?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<FetchResponse> {
+  return fetchUrl(`${baseUrl}${path}`, init);
+}
+
+/** Fetch an ABSOLUTE url (used for the host-injected credentialsUrl in bootstrap mode). */
+function fetchUrl(url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<FetchResponse> {
   const f = (globalThis as { fetch?: (u: string, i?: unknown) => Promise<FetchResponse> }).fetch;
   if (!f) throw new Error("global fetch unavailable (Node 18+ required) for AgentsPoppy broker");
-  return f(`${baseUrl}${path}`, init);
+  return f(url, init);
 }
 
 async function api<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
@@ -297,9 +375,13 @@ const APPROVAL_POLL_MS = 2000;
  * That's how AgentsPoppy can require a human OK before MailPoppy changes anything.
  */
 async function mintCredentials(connectionId: string): Promise<ScopedCredentials> {
-  const path = `/connections/${encodeURIComponent(connectionId)}/credentials`;
+  // In container (bootstrap) mode the host hands us the exact loopback mint endpoint;
+  // standalone, we address the broker's own /connections/:id/credentials route.
+  const url = bootstrap
+    ? bootstrap.credentialsUrl
+    : `${baseUrl}/connections/${encodeURIComponent(connectionId)}/credentials`;
   const post = (body?: unknown) =>
-    doFetch(path, {
+    fetchUrl(url, {
       method: "POST",
       headers: body !== undefined ? { "content-type": "application/json" } : undefined,
       body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -436,6 +518,9 @@ export async function refreshBrokerStatus(): Promise<BrokerStatus> {
 
 /** Forget the connection and stop using broker credentials (back to the profile). */
 export function disconnectBroker(): void {
+  // In container mode the host owns the connection lifecycle — there's no ~/.aws
+  // profile to fall back to, so a stray standalone "disconnect" must be a no-op.
+  if (bootstrap) return;
   connection = null;
   credsProvider = null;
   awsAccountId = null;
