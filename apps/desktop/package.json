@@ -11,6 +11,7 @@
     "build:sidecar": "node node-sidecar/scripts/build-sidecar.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
+    "tauri:dev:clean": "lsof -ti tcp:1420 | xargs kill -9 2>/dev/null; lsof -ti tcp:8787 | xargs kill -9 2>/dev/null; pkill -9 -f 'apps/desktop/src-tauri/target/debug/mailpoppy' 2>/dev/null; tauri dev",
     "tauri:build": "tauri build"
   },
   "dependencies": {
