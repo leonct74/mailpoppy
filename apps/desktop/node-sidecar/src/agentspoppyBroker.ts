@@ -50,6 +50,8 @@ interface ConnectionDTO {
   accountId: string;
   status: ConnectionStatus;
   app?: { id: string; name: string };
+  /** The scope the broker stored at creation — compared on reconnect to detect drift. */
+  permissionSet?: { grants?: unknown[] };
 }
 interface AccountDTO {
   id: string;
@@ -177,6 +179,23 @@ function permissionSet() {
     requiredTags: [CONNECTION_TAG_KEY],
     limits: null,
   };
+}
+
+/**
+ * A canonical signature of a permission set's grants, for detecting whether the scope
+ * MailPoppy declares has drifted from what a stored connection was created with. Per
+ * grant we take [service, sorted actions, resourceScope]; actions are sorted so a mere
+ * ordering difference isn't seen as a change, but grant order (and any added/removed
+ * grant) still is. Anything non-array → "" so a malformed/absent set always differs.
+ */
+function grantsSignature(grants: unknown): string {
+  if (!Array.isArray(grants)) return "";
+  return JSON.stringify(
+    grants.map((g) => {
+      const x = (g ?? {}) as { service?: string; actions?: string[]; resourceScope?: string };
+      return [x.service ?? "", [...(x.actions ?? [])].sort(), x.resourceScope ?? ""];
+    }),
+  );
 }
 
 // --- module state (the sidecar is a single long-lived process) ---
@@ -358,15 +377,30 @@ export async function beginBrokerConnect(opts: { accountId?: string } = {}): Pro
     : accounts[0];
   if (!account) throw new Error(`AgentsPoppy account "${opts.accountId}" not found`);
 
+  const desired = permissionSet();
   const existing = (await api<ConnectionDTO[]>("/connections")).find(
     (c) => c.app?.id === APP.id && c.accountId === account.id && c.status !== "revoked",
   );
+  // The broker stores a connection's scope at creation and never updates it, so a reused
+  // connection keeps vending whatever it was first granted. If MailPoppy's declared scope
+  // has since changed (e.g. a broker-grant fix shipped), reusing it would silently deploy
+  // with the OLD permissions. Detect that drift and supersede the stale connection with a
+  // fresh one — which the user re-approves, the correct behaviour for a scope change.
+  const stale = !!existing && grantsSignature(existing.permissionSet?.grants) !== grantsSignature(desired.grants);
+  if (existing && stale) {
+    try {
+      await api(`/connections/${encodeURIComponent(existing.id)}`, { method: "DELETE" }); // revoke
+    } catch {
+      /* best-effort; worst case the user revokes the old connection manually */
+    }
+  }
   connection =
-    existing ??
-    (await api<ConnectionDTO>("/connections", {
-      method: "POST",
-      body: { accountId: account.id, app: APP, permissionSet: permissionSet() },
-    }));
+    existing && !stale
+      ? existing
+      : await api<ConnectionDTO>("/connections", {
+          method: "POST",
+          body: { accountId: account.id, app: APP, permissionSet: desired },
+        });
   credsProvider = makeProvider(connection.id);
   awsAccountId = account.accountId;
   return { connectionId: connection.id, status: connection.status, accountId: account.accountId, alias: account.alias };
