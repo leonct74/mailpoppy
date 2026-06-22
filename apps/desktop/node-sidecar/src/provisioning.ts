@@ -99,6 +99,7 @@ import {
 import {
   CloudFormationClient,
   DescribeStackResourcesCommand,
+  DescribeStackEventsCommand,
   DescribeStacksCommand,
   CreateStackCommand,
   UpdateStackCommand,
@@ -565,7 +566,46 @@ export async function getDeployStatus(ctx: AwsContext, stackName: string): Promi
     }
   }
 
-  return { status, complete, failed, reason: stack?.StackStatusReason, outputs, stackId: stack?.StackId };
+  // The top-level StackStatusReason on a rollback is usually empty or just "The
+  // following resource(s) failed to create: [...]". The actual cause (an AccessDenied,
+  // a bad parameter, a service limit) lives in the per-resource events — so on failure
+  // dig out the FIRST *_FAILED resource event and surface its reason. Without this the
+  // UI only ever sees "error" with no way to tell why.
+  let reason = stack?.StackStatusReason;
+  if (failed) {
+    const detail = await firstFailureReason(cloudformation, stackName);
+    if (detail) reason = detail;
+  }
+
+  return { status, complete, failed, reason, outputs, stackId: stack?.StackId };
+}
+
+/**
+ * The first resource-level failure in a stack's event log — what actually broke,
+ * before the cascade of "Resource creation cancelled" rollbacks. Events come back
+ * newest-first, so we scan to the oldest *_FAILED with a reason that isn't just the
+ * generic cancellation. Best-effort: any error here just yields undefined (the caller
+ * falls back to the top-level reason).
+ */
+async function firstFailureReason(
+  cloudformation: CloudFormationClient,
+  stackName: string,
+): Promise<string | undefined> {
+  try {
+    const out = await cloudformation.send(new DescribeStackEventsCommand({ StackName: stackName }));
+    const failures = (out.StackEvents ?? []).filter(
+      (e) =>
+        /_FAILED$/.test(e.ResourceStatus ?? "") &&
+        e.ResourceStatusReason &&
+        !/^Resource creation cancelled$/i.test(e.ResourceStatusReason),
+    );
+    const root = failures[failures.length - 1]; // oldest failure = the trigger
+    if (!root) return undefined;
+    const where = root.LogicalResourceId ? ` (${root.LogicalResourceId} / ${root.ResourceType ?? "?"})` : "";
+    return `${root.ResourceStatusReason}${where}`;
+  } catch {
+    return undefined;
+  }
 }
 
 // ---- Mailboxes (Cognito users in the deployed backend's user pool) ----
