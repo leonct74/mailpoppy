@@ -210,7 +210,14 @@ export function brokerConnectionTag(): { Key: string; Value: string } | null {
  * `active` (approved) — a pending/paused/revoked connection can't mint.
  */
 export function brokerCredentials(): AwsCredentialIdentityProvider | undefined {
-  return enabled && connection?.status === "active" && credsProvider ? credsProvider : undefined;
+  if (!(enabled && connection?.status === "active")) return undefined;
+  // Arm the provider lazily so it can never lag behind "connected". Without this,
+  // a connection observed as active via a path that didn't run beginBrokerConnect
+  // (e.g. status re-sync after a restart) would leave credsProvider null →
+  // readiness (brokerConnected) says ready, but AWS calls silently fall back to the
+  // local profile and fail. Keyed off connection.id so it always matches.
+  if (!credsProvider) credsProvider = makeProvider(connection.id);
+  return credsProvider;
 }
 
 interface FetchResponse {
