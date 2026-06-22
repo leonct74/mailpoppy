@@ -141,7 +141,7 @@
         "apigateway:TagResource",
         "apigateway:UntagResource"
       ],
-      "Resource": ["arn:aws:apigateway:*::/apis", "arn:aws:apigateway:*::/apis/*"]
+      "Resource": ["arn:aws:apigateway:*::/apis*", "arn:aws:apigateway:*::/v2/apis*", "arn:aws:apigateway:*::/tags*"]
     },
     {
       "Sid": "Sns",

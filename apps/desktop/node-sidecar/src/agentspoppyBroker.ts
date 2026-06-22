@@ -86,7 +86,7 @@ function permissionSet() {
   const logs = "arn:aws:logs:*:*:log-group:/aws/lambda/MailpoppyMailStack-*";
   const topic = "arn:aws:sns:*:*:MailpoppyMailStack-*";
   const rule = "arn:aws:events:*:*:rule/MailpoppyMailStack-*";
-  const apis = "arn:aws:apigateway:*::/apis*";
+  const apigwVerbs = ["POST", "GET", "PATCH", "PUT", "DELETE", "TagResource", "UntagResource"];
   const buckets = "arn:aws:s3:::mailpoppy*";
   const objects = "arn:aws:s3:::mailpoppy*/*";
   return {
@@ -128,7 +128,15 @@ function permissionSet() {
         "PutRule", "DeleteRule", "DescribeRule", "PutTargets", "RemoveTargets",
         "ListTargetsByRule", "TagResource", "UntagResource",
       ], rule),
-      grant("apigateway", ["POST", "GET", "PATCH", "PUT", "DELETE", "TagResource", "UntagResource"], apis),
+      // API Gateway control-plane ARNs are account-less and the API id is server-assigned, so
+      // we can't pin to "our" API at create time — but we DO keep it to the /apis (v1+v2) and
+      // /tags paths only (never /domainnames, /account, /vpclinks, /usageplans). Tagging a new
+      // API/stage is a POST to the SEPARATE /tags/<arn> path; an /apis-only scope missed it, so
+      // the create rolled back (AccessDenied on apigateway:POST /tags/...). AWS's own
+      // AmazonAPIGatewayAdministrator just uses the broader /*.
+      grant("apigateway", apigwVerbs, "arn:aws:apigateway:*::/apis*"),
+      grant("apigateway", apigwVerbs, "arn:aws:apigateway:*::/v2/apis*"),
+      grant("apigateway", apigwVerbs, "arn:aws:apigateway:*::/tags*"),
       // --- S3: only mailpoppy* buckets/objects (+ read-only bucket listing) ---
       grant("s3", [
         "CreateBucket", "DeleteBucket", "PutBucketPolicy", "GetBucketPolicy", "DeleteBucketPolicy",
