@@ -48,6 +48,13 @@ async function main() {
   console.log("[0/5] generate backend bundle");
   execFileSync(process.execPath, [join(sidecarRoot, "scripts", "build-backend-bundle.mjs")], { stdio: "inherit" });
 
+  // Regenerate the AgentsPoppy extension manifest (apps/desktop/extension.json) from
+  // the live permissionSet() so the container host's declared scope can't drift.
+  console.log("[0b/5] generate extension manifest");
+  execFileSync(process.execPath, ["--import", "tsx", join(sidecarRoot, "scripts", "build-manifest.ts")], {
+    stdio: "inherit",
+  });
+
   const triple = targetTriple();
   const isWin = process.platform === "win32";
   const binName = `mailpoppy-sidecar-${triple}${isWin ? ".exe" : ""}`;

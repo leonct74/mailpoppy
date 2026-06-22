@@ -61,7 +61,7 @@ interface AccountDTO {
 }
 
 /** How MailPoppy introduces itself to AgentsPoppy. */
-const APP = { id: "com.mailpoppy.desktop", name: "MailPoppy" } as const;
+export const APP = { id: "com.mailpoppy.desktop", name: "MailPoppy" } as const;
 
 /**
  * What MailPoppy asks AgentsPoppy to broker — a faithful mirror of MailPoppy's own
@@ -78,8 +78,12 @@ const APP = { id: "com.mailpoppy.desktop", name: "MailPoppy" } as const;
  *
  * Keep this in sync with infra/policies/mailpoppy-deploy-policy.json +
  * mailpoppy-provisioning-policy.json — those are the tested source of truth.
+ *
+ * This is ALSO the source the AgentsPoppy extension manifest (`extension.json`) is
+ * generated from (see extensionManifest.ts / scripts/build-manifest.mjs), so the
+ * container host reconciles the exact same scope and the two can never drift.
  */
-function permissionSet() {
+export function permissionSet() {
   const grant = (service: string, actions: string[], resourceScope = "*") => ({ service, actions, resourceScope });
   const stack = "arn:aws:cloudformation:*:*:stack/MailpoppyMailStack/*";
   const role = "arn:aws:iam::*:role/MailpoppyMailStack-*";

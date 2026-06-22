@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "gen:backend": "node scripts/build-backend-bundle.mjs",
+    "gen:manifest": "tsx scripts/build-manifest.ts",
     "predev": "npm run gen:backend",
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
+    "prebuild:binary": "npm run gen:manifest",
     "build:binary": "node scripts/build-sidecar.mjs",
     "pretypecheck": "npm run gen:backend",
     "typecheck": "tsc --noEmit"
