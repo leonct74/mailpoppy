@@ -6,6 +6,11 @@ import tailwindcss from "@tailwindcss/vite";
 // once the Tauri shell is added (see README.md).
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Relative asset paths so the build works wherever it's served from: the standalone
+  // Tauri webview (root), the Vite dev server, AND mounted under a subpath when MailPoppy
+  // runs as an AgentsPoppy extension (host serves it at /ext-ui/<id>/). With Vite's
+  // default base "/", the absolute /assets/... URLs would 404 under that subpath.
+  base: "./",
   clearScreen: false,
   // amazon-cognito-identity-js (via its bundled `buffer` polyfill) references the
   // Node global `global` — unguarded (`global.TYPED_ARRAY_SUPPORT`). It doesn't
