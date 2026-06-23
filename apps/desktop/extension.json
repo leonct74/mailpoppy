@@ -223,7 +223,8 @@
           "DescribeUserPoolClient",
           "GetUserPoolMfaConfig",
           "TagResource",
-          "UntagResource"
+          "UntagResource",
+          "ListUsers"
         ],
         "resourceScope": "*"
       },
@@ -237,8 +238,7 @@
           "SetUserPoolMfaConfig",
           "AdminCreateUser",
           "AdminSetUserPassword",
-          "AdminDeleteUser",
-          "ListUsers"
+          "AdminDeleteUser"
         ],
         "resourceScope": "tagged-as-self"
       },

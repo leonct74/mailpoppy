@@ -161,10 +161,18 @@ export function permissionSet() {
       grant("cognito-idp", [
         "CreateUserPool", "CreateUserPoolClient", "DescribeUserPool", "DescribeUserPoolClient",
         "GetUserPoolMfaConfig", "TagResource", "UntagResource",
+        // ListUsers is account-wide, NOT tagged-as-self: AWS does not populate
+        // aws:ResourceTag in the authorization context for cognito-idp:ListUsers, so a
+        // tag-scoped grant for it is an effective DENY (unlike the Admin* item ops below,
+        // which DO get the resource tag — that's why mailbox-create works tag-scoped but
+        // the manage view's mailbox-LIST didn't). Exposure is bounded: it can only list a
+        // pool whose id it already knows, and there's no ListUserPools grant to discover
+        // others — MailPoppy only ever lists its own pool (from its stack outputs).
+        "ListUsers",
       ]),
       grant("cognito-idp", [
         "DeleteUserPool", "UpdateUserPool", "DeleteUserPoolClient", "UpdateUserPoolClient",
-        "SetUserPoolMfaConfig", "AdminCreateUser", "AdminSetUserPassword", "AdminDeleteUser", "ListUsers",
+        "SetUserPoolMfaConfig", "AdminCreateUser", "AdminSetUserPassword", "AdminDeleteUser",
       ], TAGGED_AS_SELF),
       // --- Services with no resource-level IAM support: specific actions, account-wide ---
       grant("ses", [
