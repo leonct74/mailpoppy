@@ -117,7 +117,7 @@ import {
   DeleteUserPoolCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import { record, readLedger, type LedgerEntry } from "./ledger";
-import { brokerCredentials, brokerConnectionTag, isBrokerEnabled, brokerConnected, brokerAccountId } from "./agentspoppyBroker";
+import { brokerCredentials, brokerStackTags, isBrokerEnabled, brokerConnected, brokerAccountId } from "./agentspoppyBroker";
 
 export interface AwsContext {
   region: string;
@@ -423,18 +423,20 @@ export async function deployBackend(
   ctx: AwsContext,
   args: { domain: string; stackName?: string; enableMalwareProtection?: boolean; enableEncryption?: boolean },
 ): Promise<DeployResult> {
-  // In broker mode the stack MUST carry the connection tag, or AgentsPoppy can't
+  // In broker mode the stack MUST carry the attribution tags, or AgentsPoppy can't
   // attribute or tear it down — so refuse to deploy until the connection is
   // approved (rather than silently falling back to the local profile).
-  const connectionTag = brokerConnectionTag();
-  if (isBrokerEnabled() && !connectionTag) {
+  const brokerTags = brokerStackTags();
+  if (isBrokerEnabled() && !brokerTags) {
     throw new Error(
       "AgentsPoppy broker mode is on but no approved connection — connect MailPoppy in AgentsPoppy and approve it before deploying.",
     );
   }
-  // Stack-level tags CloudFormation records on the stack; AgentsPoppy lists stacks
-  // and tears down those tagged with its connection id (`agentspoppy:connection`).
-  const Tags = connectionTag ? [connectionTag, { Key: "agentspoppy:managed", Value: "mailpoppy" }] : undefined;
+  // Stack-level tags CloudFormation records on the stack and propagates to every
+  // taggable resource. AgentsPoppy attributes + tears down by the stable app tag
+  // (`agentspoppy:app`), so this survives a connection supersede; the connection id
+  // rides along only as an audit tag.
+  const Tags = brokerTags ? [...brokerTags, { Key: "agentspoppy:managed", Value: "mailpoppy" }] : undefined;
 
   const { s3, cloudformation } = clients(ctx);
   const region = ctx.region;

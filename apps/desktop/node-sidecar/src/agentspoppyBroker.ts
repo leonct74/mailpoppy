@@ -18,12 +18,22 @@
 const DEFAULT_BASE_URL = "http://127.0.0.1:8799";
 const REFRESH_BUFFER_MS = 300_000; // re-mint 5 min before expiry
 
-/** The stack tag AgentsPoppy attributes + tears down on (must match the broker). */
+/**
+ * The stable ownership tag AgentsPoppy attributes + tears down on (must match the
+ * broker). Keyed to the APP, not the connection, so a stack survives connection
+ * supersedes instead of being orphaned. CloudFormation propagates it to resources.
+ */
+export const APP_TAG_KEY = "agentspoppy:app";
+
+/** Audit tag recording which connection created the stack (not used for ownership). */
 export const CONNECTION_TAG_KEY = "agentspoppy:connection";
+
+/** Account attribution tag. */
+export const ACCOUNT_TAG_KEY = "agentspoppy:account";
 
 /**
  * AgentsPoppy's sentinel resourceScope meaning "only resources tagged as THIS
- * connection's own" — the broker turns it into an `aws:ResourceTag/agentspoppy:connection`
+ * app's own" — the broker turns it into an `aws:ResourceTag/agentspoppy:app`
  * condition on the vended session policy. Value must match @agentspoppy/core's
  * TAGGED_AS_SELF. Used to ensure MailPoppy can only touch resources it created.
  */
@@ -311,9 +321,21 @@ export function brokerPort(): number | undefined {
   return bootstrap?.port;
 }
 
-/** The stack tag to stamp on deploys, or null if not connected+active. */
-export function brokerConnectionTag(): { Key: string; Value: string } | null {
-  return connection && connection.status === "active" ? { Key: CONNECTION_TAG_KEY, Value: connection.id } : null;
+/**
+ * The stack-level tags to stamp on deploys, or null if not connected+active.
+ * Ownership is the stable app tag (`agentspoppy:app`), so AgentsPoppy can still
+ * attribute + tear this stack down after a connection supersede; the connection id
+ * is kept only as an audit tag. CloudFormation propagates these to every taggable
+ * resource in the stack (the user pool, its client, buckets, …).
+ */
+export function brokerStackTags(): { Key: string; Value: string }[] | null {
+  if (!(connection && connection.status === "active")) return null;
+  const tags = [
+    { Key: APP_TAG_KEY, Value: APP.id },
+    { Key: CONNECTION_TAG_KEY, Value: connection.id },
+  ];
+  if (awsAccountId) tags.push({ Key: ACCOUNT_TAG_KEY, Value: awsAccountId });
+  return tags;
 }
 
 /**
