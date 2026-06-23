@@ -182,9 +182,24 @@ export function App() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-base text-on-surface">
       {/* Top navigation — horizontal tabs, so the full window width below is content */}
-      <header className="flex shrink-0 items-center gap-4 border-b border-outline-variant/10 bg-surface-container-low px-6 py-2.5">
-        <Logo />
-        <nav className="flex items-center gap-1 overflow-x-auto">
+      <header className="flex shrink-0 flex-col border-b border-outline-variant/10 bg-surface-container-low">
+        {/* Row 1 — logo + meta, on their own line so the tabs below get full width */}
+        <div className="flex items-center gap-4 px-6 pt-3 pb-1.5">
+          <Logo />
+          <div className="ml-auto flex shrink-0 items-center gap-3">
+            <span
+              className="hidden items-center gap-1.5 text-xs text-on-surface-variant md:flex"
+              title={CREDENTIALS_TOOLTIP}
+            >
+              <ShieldCheck className="size-4 shrink-0 text-secondary" /> Credentials stay on this computer
+            </span>
+            <span className="rounded-full bg-primary-container/15 px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-wider text-primary">
+              Admin
+            </span>
+          </div>
+        </div>
+        {/* Row 2 — navigation tabs, spanning the full width */}
+        <nav className="flex items-center gap-1 overflow-x-auto px-4 pb-2">
           {NAV.map(({ id, label, icon: Icon, blurb }) => {
             const active = tab === id;
             return (
@@ -214,17 +229,6 @@ export function App() {
             );
           })}
         </nav>
-        <div className="ml-auto flex shrink-0 items-center gap-3">
-          <span
-            className="hidden items-center gap-1.5 text-xs text-on-surface-variant md:flex"
-            title={CREDENTIALS_TOOLTIP}
-          >
-            <ShieldCheck className="size-4 shrink-0 text-secondary" /> Credentials stay on this computer
-          </span>
-          <span className="rounded-full bg-primary-container/15 px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-wider text-primary">
-            Admin
-          </span>
-        </div>
       </header>
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {/* Views stay mounted after first visit (only the active one is shown)
