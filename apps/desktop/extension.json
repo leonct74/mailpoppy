@@ -93,9 +93,26 @@
           "UpdateTimeToLive",
           "TagResource",
           "UntagResource",
-          "ListTagsOfResource"
+          "ListTagsOfResource",
+          "GetItem",
+          "BatchGetItem",
+          "PutItem",
+          "UpdateItem",
+          "DeleteItem",
+          "Query",
+          "Scan",
+          "BatchWriteItem",
+          "ConditionCheckItem"
         ],
         "resourceScope": "arn:aws:dynamodb:*:*:table/MailpoppyMailStack-*"
+      },
+      {
+        "service": "dynamodb",
+        "actions": [
+          "Query",
+          "Scan"
+        ],
+        "resourceScope": "arn:aws:dynamodb:*:*:table/MailpoppyMailStack-*/index/*"
       },
       {
         "service": "logs",

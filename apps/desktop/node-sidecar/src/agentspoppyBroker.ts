@@ -99,6 +99,7 @@ export function permissionSet() {
   const role = "arn:aws:iam::*:role/MailpoppyMailStack-*";
   const fn = "arn:aws:lambda:*:*:function:MailpoppyMailStack-*";
   const table = "arn:aws:dynamodb:*:*:table/MailpoppyMailStack-*";
+  const tableIndexes = "arn:aws:dynamodb:*:*:table/MailpoppyMailStack-*/index/*";
   const logs = "arn:aws:logs:*:*:log-group:/aws/lambda/MailpoppyMailStack-*";
   const topic = "arn:aws:sns:*:*:MailpoppyMailStack-*";
   const rule = "arn:aws:events:*:*:rule/MailpoppyMailStack-*";
@@ -131,10 +132,18 @@ export function permissionSet() {
         "InvokeFunction", "TagResource", "UntagResource", "ListTags",
       ], fn),
       grant("dynamodb", [
+        // control plane: table lifecycle
         "CreateTable", "DeleteTable", "DescribeTable", "UpdateTable", "DescribeContinuousBackups",
         "UpdateContinuousBackups", "DescribeTimeToLive", "UpdateTimeToLive", "TagResource",
         "UntagResource", "ListTagsOfResource",
+        // data plane: the sidecar reads/writes items directly — listing & purging a
+        // mailbox's messages (Query/Scan + BatchWriteItem), per-mailbox quota/settings
+        // (Get/Put/DeleteItem). Without these, deleting a mailbox fails on dynamodb:Query.
+        "GetItem", "BatchGetItem", "PutItem", "UpdateItem", "DeleteItem", "Query", "Scan",
+        "BatchWriteItem", "ConditionCheckItem",
       ], table),
+      // Query/Scan against a table's secondary indexes need the index ARN as well.
+      grant("dynamodb", ["Query", "Scan"], tableIndexes),
       grant("logs", ["CreateLogGroup", "DeleteLogGroup", "DescribeLogGroups", "PutRetentionPolicy", "TagResource"], logs),
       grant("sns", [
         "CreateTopic", "DeleteTopic", "Subscribe", "Unsubscribe", "GetTopicAttributes",
