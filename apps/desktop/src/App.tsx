@@ -9,7 +9,6 @@ import { SendingHealthView } from "./views/SendingHealthView";
 import { MigrationView } from "./views/MigrationView";
 import { ConnectView } from "./views/ConnectView";
 import { LoginView } from "./views/LoginView";
-import { CapabilityLights } from "./views/CapabilityLights";
 import { MailpoppyClient } from "@mailpoppy/api-client";
 import { CognitoAuth } from "./lib/auth";
 import { makeMailClient } from "./lib/mailClient";
@@ -175,26 +174,18 @@ export function App() {
       cancelled = true;
     };
   }, []);
-  const current = NAV.find((n) => n.id === tab)!;
-
   function go(id: Tab) {
     setTab(id);
     setVisited((v) => (v.has(id) ? v : new Set(v).add(id)));
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-base text-on-surface">
-      {/* Sidebar — fixed to the window, never scrolls with content */}
-      <aside className="flex h-full w-sidebar-width shrink-0 flex-col border-r border-outline-variant/10 bg-surface-container-low">
-        <div className="flex items-center gap-3 px-5 py-6">
-          <Logo />
-          <span className="ml-auto rounded-full bg-primary-container/15 px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-wider text-primary">
-            Admin
-          </span>
-        </div>
-
-        <nav className="flex flex-1 flex-col gap-1 px-3">
-          {NAV.map(({ id, label, icon: Icon }) => {
+    <div className="flex h-screen flex-col overflow-hidden bg-base text-on-surface">
+      {/* Top navigation — horizontal tabs, so the full window width below is content */}
+      <header className="flex shrink-0 items-center gap-4 border-b border-outline-variant/10 bg-surface-container-low px-6 py-2.5">
+        <Logo />
+        <nav className="flex items-center gap-1 overflow-x-auto">
+          {NAV.map(({ id, label, icon: Icon, blurb }) => {
             const active = tab === id;
             return (
               <button
@@ -209,8 +200,9 @@ export function App() {
                   go(id);
                 }}
                 aria-current={active ? "page" : undefined}
+                title={blurb}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors",
+                  "flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors",
                   active
                     ? "bg-primary-container/10 font-semibold text-primary"
                     : "font-medium text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface",
@@ -222,36 +214,19 @@ export function App() {
             );
           })}
         </nav>
-
-        {/* Pinned to the bottom of the sidebar so it's visible on every screen:
-            live "permissions lights" for the active AWS identity, plus the
-            credentials-stay-local reassurance. */}
-        <div className="flex flex-col gap-3 px-3 pb-3 pt-2">
-          <CapabilityLights />
-          <div className="rounded-lg border border-outline-variant/10 bg-surface-container-lowest/60 p-4">
-            <div
-              className="flex items-start gap-2.5 text-xs leading-relaxed text-on-surface-variant"
-              title={CREDENTIALS_TOOLTIP}
-            >
-              <ShieldCheck className="mt-0.5 size-4 shrink-0 text-secondary" />
-              <span>
-                Your AWS credentials never leave this computer — read locally (like the AWS CLI), never uploaded or stored.
-              </span>
-            </div>
-          </div>
+        <div className="ml-auto flex shrink-0 items-center gap-3">
+          <span
+            className="hidden items-center gap-1.5 text-xs text-on-surface-variant md:flex"
+            title={CREDENTIALS_TOOLTIP}
+          >
+            <ShieldCheck className="size-4 shrink-0 text-secondary" /> Credentials stay on this computer
+          </span>
+          <span className="rounded-full bg-primary-container/15 px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-wider text-primary">
+            Admin
+          </span>
         </div>
-      </aside>
-
-      {/* Main */}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {/* Top bar — fixed to the window; only the content below it scrolls */}
-        <header className="flex shrink-0 items-center justify-between border-b border-outline-variant/10 bg-surface px-8 py-4">
-          <div className="min-w-0">
-            <h1 className="text-xl font-semibold tracking-tight text-on-surface">{current.label}</h1>
-            <p className="truncate text-sm text-on-surface-variant">{current.blurb}</p>
-          </div>
-        </header>
-        <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      </header>
+      <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {/* Views stay mounted after first visit (only the active one is shown)
               so form data + scroll position survive tab switches. */}
           {visited.has("inbox") && (
@@ -313,7 +288,6 @@ export function App() {
             </div>
           )}
         </main>
-      </div>
     </div>
   );
 }
