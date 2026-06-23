@@ -38,3 +38,37 @@ export function persistRegion(region: string): void {
     /* ignore */
   }
 }
+
+/**
+ * Decide which region to restore to the sidecar at startup, or null to leave it
+ * as-is. Prefers the connected deployment's region (the ground truth for what's
+ * listable), else the admin's last explicit pick. Only returns a region that
+ * differs from the current one AND is actually available — so we never POST a
+ * no-op or an unsupported region. Pure + unit-tested.
+ */
+export function startupRegion(opts: {
+  deploymentRegion?: string | null;
+  saved?: string | null;
+  current: string;
+  available: string[];
+}): string | null {
+  const want = opts.deploymentRegion ?? opts.saved ?? null;
+  if (!want || want === opts.current || !opts.available.includes(want)) return null;
+  return want;
+}
+
+/**
+ * Re-apply the persisted region to the sidecar on launch so the first listing
+ * (Home) queries the right region. Without this the sidecar starts at its env /
+ * account default, and a domain deployed to another region looks missing until the
+ * admin detours through the region picker and back. Best-effort: any failure leaves
+ * the sidecar at its default. Returns the region now in effect.
+ */
+export async function restoreStartupRegion(deploymentRegion?: string | null): Promise<string> {
+  const cfg = await getRegion();
+  const want = startupRegion({ deploymentRegion, saved: savedRegion(), current: cfg.region, available: cfg.available });
+  if (!want) return cfg.region;
+  const r = await setRegion(want);
+  persistRegion(r.region);
+  return r.region;
+}

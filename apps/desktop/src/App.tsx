@@ -14,7 +14,8 @@ import { MailpoppyClient } from "@mailpoppy/api-client";
 import { CognitoAuth } from "./lib/auth";
 import { makeMailClient } from "./lib/mailClient";
 import { establishMailboxKeysForLogin, clearMailboxKeySession } from "./lib/mailboxKeys";
-import { cn, Logo } from "./ui";
+import { cn, Logo, Spinner } from "./ui";
+import { restoreStartupRegion } from "./lib/region";
 import {
   loadDeploymentConfig,
   saveDeploymentConfig,
@@ -158,6 +159,22 @@ export function App() {
   // be pre-filled for.
   const [migrateDomain, setMigrateDomain] = useState<string | null>(null);
   const [inboxEmail, setInboxEmail] = useState<string | null>(null);
+  // Re-apply the persisted region to the sidecar before Home does its first listing.
+  // The sidecar boots at its env/account-default region, so without this a domain
+  // deployed elsewhere looks missing until you detour through the region picker. Gate
+  // the Home overview on it so the first load already queries the right region.
+  const [regionReady, setRegionReady] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void restoreStartupRegion(loadDeploymentConfig()?.region)
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setRegionReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const current = NAV.find((n) => n.id === tab)!;
 
   function go(id: Tab) {
@@ -264,6 +281,10 @@ export function App() {
                       go("migrate");
                     }}
                   />
+                ) : !regionReady ? (
+                  <div className="flex items-center gap-2 text-sm text-on-surface-variant">
+                    <Spinner /> Loading…
+                  </div>
                 ) : (
                   <HomeView onGoToSetup={() => setSetupTarget({})} onOpenDomain={(d) => setSelectedDomain(d)} />
                 )}
