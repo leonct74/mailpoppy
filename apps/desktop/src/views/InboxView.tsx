@@ -25,6 +25,7 @@ import {
   ShieldQuestion,
   RefreshCw,
   Lock,
+  ChevronLeft,
 } from "lucide-react";
 import type { MessageMeta, Folder } from "@mailpoppy/core";
 import { formatBytes, usagePercent, usageLevel } from "@mailpoppy/core";
@@ -71,6 +72,31 @@ function shortDate(iso: string): string {
   return Number.isNaN(d.getTime())
     ? iso
     : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * True when there's room for the three-pane layout. Inside the AgentsPoppy frame
+ * (a ~520–700px iframe) this is false, so the inbox collapses to a single-column,
+ * navigate-to-read layout (like the mobile app) and the message body gets the full
+ * width. Defaults to wide where `matchMedia` is unavailable (jsdom/SSR), keeping
+ * the tests on the three-pane layout.
+ */
+function useIsWide(minPx = 900): boolean {
+  const query = `(min-width: ${minPx}px)`;
+  const [wide, setWide] = useState(() =>
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia(query).matches
+      : true,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia(query);
+    const on = () => setWide(mq.matches);
+    on();
+    mq.addEventListener?.("change", on);
+    return () => mq.removeEventListener?.("change", on);
+  }, [query]);
+  return wide;
 }
 
 export function InboxView({
@@ -267,6 +293,317 @@ export function InboxView({
 
   const unreadCount = items.filter((m) => m.flags.unread).length;
   const visible = filterMessages(items, query);
+  const wide = useIsWide();
+
+  const goBackToList = () => {
+    setSelected(null);
+    setRaw(null);
+    setParsed(null);
+  };
+
+  // The signed-in mailbox identity (folder rail, wide layout).
+  const signedIn = mailboxEmail ? (
+    <div className="flex items-center gap-2.5 border-b border-outline-variant/10 px-4 py-3" title={mailboxEmail}>
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary-container/20 text-primary">
+        <AtSign className="size-4" />
+      </div>
+      <div className="min-w-0">
+        <div className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">Signed in as</div>
+        <div className="truncate text-sm font-medium text-on-surface">{mailboxEmail}</div>
+      </div>
+    </div>
+  ) : null;
+
+  // Vertical folder rail (wide layout).
+  const folderRail = (
+    <nav aria-label="Folders" className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
+      <div className="mb-1 ml-2 mt-1 font-mono text-[11px] uppercase tracking-wider text-on-surface-variant">Mailbox</div>
+      {FOLDERS.map((f) => {
+        const active = f === folder;
+        const Icon = FOLDER_ICON[f] ?? Mail;
+        const count = f === "inbox" ? unreadCount : 0;
+        return (
+          <button
+            key={f}
+            onClick={() => setFolder(f)}
+            aria-current={active}
+            className={cn(
+              "flex items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors",
+              active
+                ? "border border-primary/10 bg-primary-container/10 font-medium text-primary"
+                : "text-on-surface-variant hover:bg-surface-container hover:text-on-surface",
+            )}
+          >
+            <span className="flex items-center gap-3">
+              <Icon className="size-4" />
+              {FOLDER_LABEL[f] ?? f}
+            </span>
+            {count > 0 && (
+              <span className="rounded bg-primary/20 px-1.5 py-0.5 font-mono text-xs text-primary">{count}</span>
+            )}
+          </button>
+        );
+      })}
+
+      <div className="mb-1 ml-2 mt-6 font-mono text-[11px] uppercase tracking-wider text-on-surface-variant">Tools</div>
+      <button
+        onClick={() => setSecurityOpen(true)}
+        title="How your email is protected"
+        className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-on-surface-variant transition-colors hover:bg-surface-container hover:text-on-surface"
+      >
+        <ShieldCheck className="size-4 text-tertiary" />
+        Security
+      </button>
+
+      {usage && <StorageMeter usage={usage} />}
+    </nav>
+  );
+
+  // Horizontal folder chips (narrow layout).
+  const folderChips = (
+    <div className="flex gap-1.5 overflow-x-auto pb-0.5" aria-label="Folders">
+      {FOLDERS.map((f) => {
+        const active = f === folder;
+        const Icon = FOLDER_ICON[f] ?? Mail;
+        const count = f === "inbox" ? unreadCount : 0;
+        return (
+          <button
+            key={f}
+            onClick={() => setFolder(f)}
+            aria-current={active}
+            className={cn(
+              "flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors",
+              active
+                ? "border-primary/20 bg-primary-container/15 font-medium text-primary"
+                : "border-outline-variant/20 text-on-surface-variant hover:bg-surface-container hover:text-on-surface",
+            )}
+          >
+            <Icon className="size-4" />
+            {FOLDER_LABEL[f] ?? f}
+            {count > 0 && <span className="rounded bg-primary/20 px-1.5 font-mono text-xs text-primary">{count}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  // Search box + message list (shared by both layouts).
+  const messageList = (
+    <>
+      <div className="border-b border-outline-variant/10 p-3">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-on-surface-variant" />
+            <input
+              aria-label="Search messages"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={`Search ${FOLDER_LABEL[folder] ?? folder}…`}
+              className="w-full rounded-lg border border-outline-variant/20 bg-surface-container-lowest py-1.5 pl-8 pr-3 text-sm text-on-surface placeholder:text-on-surface-variant/60 focus:border-primary/50 focus:outline-none"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => void refresh(folder)}
+            disabled={loading}
+            aria-label="Refresh"
+            title="Check for new mail"
+            className="shrink-0 rounded-lg border border-outline-variant/20 bg-surface-container-lowest p-2 text-on-surface-variant hover:text-on-surface disabled:opacity-50"
+          >
+            <RefreshCw className={cn("size-4", loading && "animate-spin")} />
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 divide-y divide-outline-variant/10 overflow-y-auto">
+        {loading && (
+          <p className="flex items-center gap-2 p-4 text-sm text-on-surface-variant">
+            <Spinner /> Loading…
+          </p>
+        )}
+        {error && <p className="p-4 text-sm text-tertiary">{error}</p>}
+        {!loading && !error && items.length === 0 && (
+          <p className="p-4 text-sm text-on-surface-variant">No messages in {FOLDER_LABEL[folder] ?? folder}.</p>
+        )}
+        {!loading && !error && items.length > 0 && visible.length === 0 && (
+          <p className="p-4 text-sm text-on-surface-variant">No messages match “{query}”.</p>
+        )}
+        {visible.map((m) => {
+          const active = selected?.messageId === m.messageId;
+          const unread = m.flags.unread;
+          return (
+            <button
+              key={m.messageId}
+              onClick={() => void open(m)}
+              aria-label={`Open: ${m.subject}`}
+              className={cn(
+                "block w-full border-l-2 p-4 text-left transition-colors hover:bg-surface-container",
+                active ? "border-l-primary bg-primary/10" : unread ? "border-l-primary bg-primary/5" : "border-l-transparent",
+              )}
+            >
+              <div className="mb-1 flex items-baseline justify-between gap-2">
+                <span className={cn("flex items-center gap-1 truncate", unread ? "font-bold text-on-surface" : "text-on-surface-variant")}>
+                  {m.flags.starred && <Star className="size-3.5 shrink-0 fill-amber-300 text-amber-300" />}
+                  {fromLabel(m)}
+                </span>
+                <span className={cn("shrink-0 whitespace-nowrap font-mono text-xs", unread ? "text-primary" : "text-on-surface-variant")}>
+                  {shortDate(m.date)}
+                </span>
+              </div>
+              <div className={cn("mb-1 flex items-center gap-1 truncate text-sm", unread ? "font-semibold text-on-surface" : "text-on-surface")}>
+                {m.encrypted && (
+                  <Lock className="size-3.5 shrink-0 text-secondary" aria-label="Encrypted at rest">
+                    <title>Encrypted at rest</title>
+                  </Lock>
+                )}
+                {m.hasAttachments && <Paperclip className="size-3.5 shrink-0 text-on-surface-variant" />}
+                {m.subject}
+              </div>
+              <div className="truncate text-xs text-on-surface-variant/70">{m.snippet}</div>
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+
+  // "No message selected" placeholder (wide layout only).
+  const emptyReading = (
+    <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
+      <div className="mb-6 flex size-16 items-center justify-center rounded-2xl border border-outline-variant/10 bg-surface-container shadow-inner">
+        <Mail className="size-8 text-on-surface-variant/50" />
+      </div>
+      <h2 className="mb-2 text-2xl font-semibold text-on-surface">No message selected</h2>
+      <p className="max-w-sm text-on-surface-variant">Select a message from the list to read it, or compose a new one.</p>
+    </div>
+  );
+
+  // The open message: header, security/verdicts, attachments, actions, body
+  // (shared by both layouts; gets the full width in the narrow layout).
+  const readingArticle = selected ? (
+    <article className="flex-1 overflow-y-auto p-6">
+      <h3 className="mb-1 text-xl font-semibold text-on-surface">{selected.subject}</h3>
+      <div className="text-sm text-on-surface-variant">
+        From <strong className="text-on-surface">{fromLabel(selected)}</strong>{" "}
+        <span className="font-mono text-xs">&lt;{selected.from.address}&gt;</span>
+      </div>
+      <div className="text-xs text-on-surface-variant/80">
+        To {selected.to.map((t) => t.address).join(", ")} · {shortDate(selected.date)}
+      </div>
+
+      {selected.encrypted && (
+        <div
+          title="Body and attachments are stored encrypted in S3 with this mailbox's key. Even the AWS account admin can't read them — they're decrypted here, on your device."
+          className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-secondary/30 bg-secondary/10 px-2.5 py-1 text-xs font-medium text-secondary"
+        >
+          <Lock className="size-3.5" /> Encrypted at rest
+        </div>
+      )}
+
+      {selected.verdicts && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs text-on-surface-variant">
+          <span
+            title="Antivirus scan result from AWS SES. Virus-positive mail is quarantined and never delivered to the inbox."
+            className={cn(
+              "inline-flex items-center gap-1",
+              selected.verdicts.virus === "PASS" ? "text-secondary" : selected.verdicts.virus === "FAIL" ? "text-tertiary" : "text-on-surface-variant",
+            )}
+          >
+            <ShieldQuestion className="size-3.5" /> virus {selected.verdicts.virus}
+          </span>
+          <span>· SPF {selected.verdicts.spf} · DKIM {selected.verdicts.dkim} · DMARC {selected.verdicts.dmarc} · spam {selected.verdicts.spam}</span>
+        </div>
+      )}
+
+      {selected.attachments && selected.attachments.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {selected.attachments.map((a, i) => (
+            <button
+              key={`${a.filename}-${i}`}
+              onClick={() => void downloadAttachment(selected.messageId, i, a.filename)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/30 bg-surface-container px-3 py-1.5 text-xs text-on-surface transition-colors hover:border-primary/50 hover:text-primary"
+            >
+              <Paperclip className="size-3.5" /> {a.filename} ({Math.max(1, Math.round(a.sizeBytes / 1024))} KB)
+              <Download className="size-3.5" />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {attachmentLink && (
+        <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100">
+          <div>
+            Couldn’t open <strong>{attachmentLink.filename}</strong> automatically. Click below, or copy this link into
+            your browser to download it (the link is valid for 5 minutes):
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={() => void openExternal(attachmentLink.url)}>
+              <ExternalLink className="size-3.5" /> Open in browser
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => void navigator.clipboard?.writeText(attachmentLink.url)}>
+              <Copy className="size-3.5" /> Copy link
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setAttachmentLink(null)}>
+              Dismiss
+            </Button>
+          </div>
+          <input
+            readOnly
+            value={attachmentLink.url}
+            onFocus={(e) => e.currentTarget.select()}
+            className="mt-2 w-full rounded border border-outline-variant/30 bg-surface-container-lowest p-1.5 font-mono text-[11px] text-on-surface-variant"
+          />
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap gap-2 border-t border-outline-variant/10 pt-4">
+        <Button size="sm" variant="secondary" onClick={() => startReply("reply")}>
+          <ReplyIcon className="size-4" /> Reply
+        </Button>
+        {selected.to.length > 1 && (
+          <Button size="sm" variant="secondary" onClick={() => startReply("replyAll")}>
+            <ReplyAll className="size-4" /> Reply all
+          </Button>
+        )}
+        <Button size="sm" variant="secondary" onClick={() => startReply("forward")}>
+          <Forward className="size-4" /> Forward
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => void toggleRead(selected)}>
+          <MailOpen className="size-4" /> {selected.flags.unread ? "Mark read" : "Mark unread"}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => void toggleStar(selected)}>
+          <Star className="size-4" /> {selected.flags.starred ? "Unstar" : "Star"}
+        </Button>
+        {folder !== "trash" ? (
+          <Button size="sm" variant="ghost" aria-label="Move to Trash" onClick={() => void moveTo(selected, "trash")}>
+            <Trash2 className="size-4" /> Trash
+          </Button>
+        ) : (
+          <Button size="sm" variant="ghost" aria-label="Restore to Inbox" onClick={() => void moveTo(selected, "inbox")}>
+            <Undo2 className="size-4" /> Restore to Inbox
+          </Button>
+        )}
+      </div>
+
+      <MessageBody
+        parsed={parsed}
+        raw={raw}
+        allowImages={allowImages}
+        onLoadImages={() => setAllowImages(true)}
+        showRaw={showRaw}
+        onToggleRaw={() => setShowRaw((v) => !v)}
+      />
+    </article>
+  ) : null;
+
+  // Floating "scanned & verified" reassurance (wide layout only).
+  const footerBadge = (
+    <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
+      <div className="flex items-center gap-2 rounded-full border border-outline-variant/20 bg-surface-container/80 px-3 py-1.5 backdrop-blur">
+        <ShieldCheck className="size-3.5 text-secondary" />
+        <span className="font-mono text-[11px] text-on-surface-variant">Incoming mail scanned &amp; verified by AWS SES</span>
+      </div>
+    </div>
+  );
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-4">
@@ -309,282 +646,76 @@ export function InboxView({
         </div>
       )}
 
-      {/* Three-pane inbox */}
-      <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-low shadow-lg">
-        {/* Pane 1 — folders & actions */}
-        <div className="flex w-60 shrink-0 flex-col border-r border-outline-variant/20 bg-surface-container-lowest/60">
-          {mailboxEmail && (
-            <div className="flex items-center gap-2.5 border-b border-outline-variant/10 px-4 py-3" title={mailboxEmail}>
-              <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary-container/20 text-primary">
-                <AtSign className="size-4" />
-              </div>
-              <div className="min-w-0">
-                <div className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">Signed in as</div>
-                <div className="truncate text-sm font-medium text-on-surface">{mailboxEmail}</div>
-              </div>
+      {wide ? (
+        /* Three-pane inbox (room to spare). */
+        <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-low shadow-lg">
+          {/* Pane 1 — folders & actions */}
+          <div className="flex w-60 shrink-0 flex-col border-r border-outline-variant/20 bg-surface-container-lowest/60">
+            {signedIn}
+            <div className="border-b border-outline-variant/10 p-4">
+              <Button className="w-full" onClick={() => setComposeInit({ to: [], subject: "", text: "" })}>
+                <PenSquare className="size-4" />
+                Compose
+              </Button>
             </div>
-          )}
-          <div className="border-b border-outline-variant/10 p-4">
-            <Button className="w-full" onClick={() => setComposeInit({ to: [], subject: "", text: "" })}>
-              <PenSquare className="size-4" />
-              Compose
-            </Button>
+            {folderRail}
           </div>
-          <nav aria-label="Folders" className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
-            <div className="mb-1 ml-2 mt-1 font-mono text-[11px] uppercase tracking-wider text-on-surface-variant">Mailbox</div>
-            {FOLDERS.map((f) => {
-              const active = f === folder;
-              const Icon = FOLDER_ICON[f] ?? Mail;
-              const count = f === "inbox" ? unreadCount : 0;
-              return (
-                <button
-                  key={f}
-                  onClick={() => setFolder(f)}
-                  aria-current={active}
-                  className={cn(
-                    "flex items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors",
-                    active
-                      ? "border border-primary/10 bg-primary-container/10 font-medium text-primary"
-                      : "text-on-surface-variant hover:bg-surface-container hover:text-on-surface",
-                  )}
-                >
-                  <span className="flex items-center gap-3">
-                    <Icon className="size-4" />
-                    {FOLDER_LABEL[f] ?? f}
-                  </span>
-                  {count > 0 && (
-                    <span className="rounded bg-primary/20 px-1.5 py-0.5 font-mono text-xs text-primary">{count}</span>
-                  )}
-                </button>
-              );
-            })}
 
-            <div className="mb-1 ml-2 mt-6 font-mono text-[11px] uppercase tracking-wider text-on-surface-variant">Tools</div>
-            <button
-              onClick={() => setSecurityOpen(true)}
-              title="How your email is protected"
-              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-on-surface-variant transition-colors hover:bg-surface-container hover:text-on-surface"
-            >
-              <ShieldCheck className="size-4 text-tertiary" />
-              Security
-            </button>
-
-            {usage && <StorageMeter usage={usage} />}
-          </nav>
-        </div>
-
-        {/* Pane 2 — message list */}
-        <div className="flex w-80 shrink-0 flex-col border-r border-outline-variant/20 bg-surface-container-low">
-          <div className="border-b border-outline-variant/10 p-3">
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-on-surface-variant" />
-                <input
-                  aria-label="Search messages"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder={`Search ${FOLDER_LABEL[folder] ?? folder}…`}
-                  className="w-full rounded-lg border border-outline-variant/20 bg-surface-container-lowest py-1.5 pl-8 pr-3 text-sm text-on-surface placeholder:text-on-surface-variant/60 focus:border-primary/50 focus:outline-none"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => void refresh(folder)}
-                disabled={loading}
-                aria-label="Refresh"
-                title="Check for new mail"
-                className="shrink-0 rounded-lg border border-outline-variant/20 bg-surface-container-lowest p-2 text-on-surface-variant hover:text-on-surface disabled:opacity-50"
-              >
-                <RefreshCw className={cn("size-4", loading && "animate-spin")} />
-              </button>
-            </div>
+          {/* Pane 2 — message list */}
+          <div className="flex w-80 shrink-0 flex-col border-r border-outline-variant/20 bg-surface-container-low">
+            {messageList}
           </div>
-          <div className="flex-1 divide-y divide-outline-variant/10 overflow-y-auto">
-            {loading && (
-              <p className="flex items-center gap-2 p-4 text-sm text-on-surface-variant">
-                <Spinner /> Loading…
-              </p>
-            )}
-            {error && <p className="p-4 text-sm text-tertiary">{error}</p>}
-            {!loading && !error && items.length === 0 && (
-              <p className="p-4 text-sm text-on-surface-variant">No messages in {FOLDER_LABEL[folder] ?? folder}.</p>
-            )}
-            {!loading && !error && items.length > 0 && visible.length === 0 && (
-              <p className="p-4 text-sm text-on-surface-variant">No messages match “{query}”.</p>
-            )}
-            {visible.map((m) => {
-              const active = selected?.messageId === m.messageId;
-              const unread = m.flags.unread;
-              return (
-                <button
-                  key={m.messageId}
-                  onClick={() => void open(m)}
-                  aria-label={`Open: ${m.subject}`}
-                  className={cn(
-                    "block w-full border-l-2 p-4 text-left transition-colors hover:bg-surface-container",
-                    active ? "border-l-primary bg-primary/10" : unread ? "border-l-primary bg-primary/5" : "border-l-transparent",
-                  )}
-                >
-                  <div className="mb-1 flex items-baseline justify-between gap-2">
-                    <span className={cn("flex items-center gap-1 truncate", unread ? "font-bold text-on-surface" : "text-on-surface-variant")}>
-                      {m.flags.starred && <Star className="size-3.5 shrink-0 fill-amber-300 text-amber-300" />}
-                      {fromLabel(m)}
-                    </span>
-                    <span className={cn("shrink-0 whitespace-nowrap font-mono text-xs", unread ? "text-primary" : "text-on-surface-variant")}>
-                      {shortDate(m.date)}
-                    </span>
-                  </div>
-                  <div className={cn("mb-1 flex items-center gap-1 truncate text-sm", unread ? "font-semibold text-on-surface" : "text-on-surface")}>
-                    {m.encrypted && (
-                      <Lock className="size-3.5 shrink-0 text-secondary" aria-label="Encrypted at rest">
-                        <title>Encrypted at rest</title>
-                      </Lock>
-                    )}
-                    {m.hasAttachments && <Paperclip className="size-3.5 shrink-0 text-on-surface-variant" />}
-                    {m.subject}
-                  </div>
-                  <div className="truncate text-xs text-on-surface-variant/70">{m.snippet}</div>
-                </button>
-              );
-            })}
+
+          {/* Pane 3 — reading / preview */}
+          <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-surface-container-lowest">
+            {selected ? readingArticle : emptyReading}
+            {footerBadge}
           </div>
         </div>
-
-        {/* Pane 3 — reading / preview */}
-        <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-surface-container-lowest">
-          {!selected ? (
-            <div className="flex flex-1 flex-col items-center justify-center p-8 text-center">
-              <div className="mb-6 flex size-16 items-center justify-center rounded-2xl border border-outline-variant/10 bg-surface-container shadow-inner">
-                <Mail className="size-8 text-on-surface-variant/50" />
+      ) : (
+        /* Single-column inbox (narrow / inside AgentsPoppy): list ↔ message, like
+           the mobile app, so the body always gets the full width. */
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-low shadow-lg">
+          {selected ? (
+            <div className="flex min-h-0 flex-1 flex-col bg-surface-container-lowest">
+              <div className="flex shrink-0 items-center gap-2 border-b border-outline-variant/10 p-2">
+                <Button size="sm" variant="ghost" onClick={goBackToList}>
+                  <ChevronLeft className="size-4" /> Back
+                </Button>
               </div>
-              <h2 className="mb-2 text-2xl font-semibold text-on-surface">No message selected</h2>
-              <p className="max-w-sm text-on-surface-variant">Select a message from the list to read it, or compose a new one.</p>
+              {readingArticle}
             </div>
           ) : (
-            <article className="flex-1 overflow-y-auto p-6">
-              <h3 className="mb-1 text-xl font-semibold text-on-surface">{selected.subject}</h3>
-              <div className="text-sm text-on-surface-variant">
-                From <strong className="text-on-surface">{fromLabel(selected)}</strong>{" "}
-                <span className="font-mono text-xs">&lt;{selected.from.address}&gt;</span>
-              </div>
-              <div className="text-xs text-on-surface-variant/80">
-                To {selected.to.map((t) => t.address).join(", ")} · {shortDate(selected.date)}
-              </div>
-
-              {selected.encrypted && (
-                <div
-                  title="Body and attachments are stored encrypted in S3 with this mailbox's key. Even the AWS account admin can't read them — they're decrypted here, on your device."
-                  className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-secondary/30 bg-secondary/10 px-2.5 py-1 text-xs font-medium text-secondary"
-                >
-                  <Lock className="size-3.5" /> Encrypted at rest
-                </div>
-              )}
-
-              {selected.verdicts && (
-                <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs text-on-surface-variant">
-                  <span
-                    title="Antivirus scan result from AWS SES. Virus-positive mail is quarantined and never delivered to the inbox."
-                    className={cn(
-                      "inline-flex items-center gap-1",
-                      selected.verdicts.virus === "PASS" ? "text-secondary" : selected.verdicts.virus === "FAIL" ? "text-tertiary" : "text-on-surface-variant",
-                    )}
-                  >
-                    <ShieldQuestion className="size-3.5" /> virus {selected.verdicts.virus}
-                  </span>
-                  <span>· SPF {selected.verdicts.spf} · DKIM {selected.verdicts.dkim} · DMARC {selected.verdicts.dmarc} · spam {selected.verdicts.spam}</span>
-                </div>
-              )}
-
-              {selected.attachments && selected.attachments.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {selected.attachments.map((a, i) => (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="flex shrink-0 flex-col gap-2 border-b border-outline-variant/10 p-3">
+                <div className="flex items-center gap-2">
+                  {mailboxEmail && (
+                    <div className="flex min-w-0 items-center gap-1.5" title={mailboxEmail}>
+                      <AtSign className="size-4 shrink-0 text-primary" />
+                      <span className="truncate text-xs font-medium text-on-surface">{mailboxEmail}</span>
+                    </div>
+                  )}
+                  <div className="ml-auto flex shrink-0 items-center gap-1.5">
                     <button
-                      key={`${a.filename}-${i}`}
-                      onClick={() => void downloadAttachment(selected.messageId, i, a.filename)}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/30 bg-surface-container px-3 py-1.5 text-xs text-on-surface transition-colors hover:border-primary/50 hover:text-primary"
+                      onClick={() => setSecurityOpen(true)}
+                      title="How your email is protected"
+                      aria-label="Security"
+                      className="rounded-lg border border-outline-variant/20 p-2 text-on-surface-variant hover:text-on-surface"
                     >
-                      <Paperclip className="size-3.5" /> {a.filename} ({Math.max(1, Math.round(a.sizeBytes / 1024))} KB)
-                      <Download className="size-3.5" />
+                      <ShieldCheck className="size-4 text-tertiary" />
                     </button>
-                  ))}
-                </div>
-              )}
-
-              {attachmentLink && (
-                <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100">
-                  <div>
-                    Couldn’t open <strong>{attachmentLink.filename}</strong> automatically. Click below, or copy this link into
-                    your browser to download it (the link is valid for 5 minutes):
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <Button size="sm" variant="secondary" onClick={() => void openExternal(attachmentLink.url)}>
-                      <ExternalLink className="size-3.5" /> Open in browser
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => void navigator.clipboard?.writeText(attachmentLink.url)}>
-                      <Copy className="size-3.5" /> Copy link
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setAttachmentLink(null)}>
-                      Dismiss
+                    <Button size="sm" onClick={() => setComposeInit({ to: [], subject: "", text: "" })}>
+                      <PenSquare className="size-4" /> Compose
                     </Button>
                   </div>
-                  <input
-                    readOnly
-                    value={attachmentLink.url}
-                    onFocus={(e) => e.currentTarget.select()}
-                    className="mt-2 w-full rounded border border-outline-variant/30 bg-surface-container-lowest p-1.5 font-mono text-[11px] text-on-surface-variant"
-                  />
                 </div>
-              )}
-
-              <div className="mt-4 flex flex-wrap gap-2 border-t border-outline-variant/10 pt-4">
-                <Button size="sm" variant="secondary" onClick={() => startReply("reply")}>
-                  <ReplyIcon className="size-4" /> Reply
-                </Button>
-                {selected.to.length > 1 && (
-                  <Button size="sm" variant="secondary" onClick={() => startReply("replyAll")}>
-                    <ReplyAll className="size-4" /> Reply all
-                  </Button>
-                )}
-                <Button size="sm" variant="secondary" onClick={() => startReply("forward")}>
-                  <Forward className="size-4" /> Forward
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => void toggleRead(selected)}>
-                  <MailOpen className="size-4" /> {selected.flags.unread ? "Mark read" : "Mark unread"}
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => void toggleStar(selected)}>
-                  <Star className="size-4" /> {selected.flags.starred ? "Unstar" : "Star"}
-                </Button>
-                {folder !== "trash" ? (
-                  <Button size="sm" variant="ghost" aria-label="Move to Trash" onClick={() => void moveTo(selected, "trash")}>
-                    <Trash2 className="size-4" /> Trash
-                  </Button>
-                ) : (
-                  <Button size="sm" variant="ghost" aria-label="Restore to Inbox" onClick={() => void moveTo(selected, "inbox")}>
-                    <Undo2 className="size-4" /> Restore to Inbox
-                  </Button>
-                )}
+                {folderChips}
               </div>
-
-              <MessageBody
-                parsed={parsed}
-                raw={raw}
-                allowImages={allowImages}
-                onLoadImages={() => setAllowImages(true)}
-                showRaw={showRaw}
-                onToggleRaw={() => setShowRaw((v) => !v)}
-              />
-            </article>
-          )}
-
-          {/* Footer badge */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
-            <div className="flex items-center gap-2 rounded-full border border-outline-variant/20 bg-surface-container/80 px-3 py-1.5 backdrop-blur">
-              <ShieldCheck className="size-3.5 text-secondary" />
-              <span className="font-mono text-[11px] text-on-surface-variant">Incoming mail scanned &amp; verified by AWS SES</span>
+              {messageList}
             </div>
-          </div>
+          )}
         </div>
-      </div>
+      )}
 
       {composeInit && (
         <ComposeDialog
