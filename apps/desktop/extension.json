@@ -324,6 +324,9 @@
     "entry": "backend/mailpoppy-sidecar-aarch64-apple-darwin",
     "transport": "http"
   },
+  "teardown": {
+    "endpoint": "/teardown"
+  },
   "capabilities": [
     "aws:credentials",
     "connection:read",

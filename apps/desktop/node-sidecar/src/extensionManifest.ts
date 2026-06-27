@@ -36,6 +36,8 @@ export interface ExtensionManifest {
   permissionSet: ReturnType<typeof permissionSet>;
   frontend: { entry: string };
   backend?: { entry: string; transport?: "http" | "stdio" };
+  /** Cleanup hook the host POSTs at teardown for resources the stack delete leaves behind. */
+  teardown?: { endpoint: string };
   capabilities: Capability[];
 }
 
@@ -75,6 +77,10 @@ export function buildExtensionManifest(): ExtensionManifest {
     permissionSet: permissionSet(),
     frontend: { entry: "frontend/index.html" },
     backend: { entry: `backend/${BACKEND_BINARY}`, transport: "http" },
+    // Leave no trace: the host POSTs /teardown before deleting our stack, so teardownAll
+    // removes the resources the stack RETAINs on delete (mail bucket, DynamoDB tables,
+    // Cognito user pool) plus the SES identity + DNS records — nothing survives a teardown.
+    teardown: { endpoint: "/teardown" },
     capabilities: ["aws:credentials", "connection:read", "backend:invoke", "host:openExternal", "host:notify"],
   };
 }
