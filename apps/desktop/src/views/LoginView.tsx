@@ -136,6 +136,35 @@ export function LoginView({
 }
 
 /**
+ * Copy text to the clipboard, robust to contexts where the async Clipboard API is
+ * blocked — e.g. inside a host iframe that doesn't delegate `clipboard-write`, or a
+ * non-secure origin. Falls back to the legacy execCommand path, which only needs a
+ * user gesture (the button click) and no Permissions-Policy grant.
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    /* fall through to the legacy path */
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Shown once, right after a mailbox keypair is created (first login, or a re-key
  * after an admin password reset). The recovery key is the user's ONLY way back
  * into their encrypted mail if they forget their password — no one, including the
@@ -147,13 +176,11 @@ function RecoveryKeyPanel({ recoveryKey, rekeyed, onContinue }: { recoveryKey: s
   const [acknowledged, setAcknowledged] = useState(false);
 
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(recoveryKey);
+    if (await copyText(recoveryKey)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* clipboard blocked — the user can still select the text manually */
     }
+    /* if both paths fail, the key stays visible for manual selection */
   }
 
   return (
