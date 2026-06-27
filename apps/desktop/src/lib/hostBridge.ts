@@ -71,3 +71,13 @@ function callHost<T>(method: string, params: unknown[]): Promise<T> {
 export function invokeBackend<T>(req: { method: string; path: string; body?: unknown }): Promise<T> {
   return callHost<T>("invokeBackend", [req]);
 }
+
+/**
+ * Ask the host to open a URL in the OS browser (gated by the `host:openExternal`
+ * capability). Inside the container the iframe can't open OS windows itself
+ * (window.open is a no-op in the host webview, no Tauri opener in the frame), so this
+ * is how a presigned attachment URL / external link actually reaches the browser.
+ */
+export function openExternalViaHost(url: string): Promise<void> {
+  return callHost<void>("openExternal", [url]);
+}

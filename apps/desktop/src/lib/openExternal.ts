@@ -8,7 +8,21 @@
 // browser window opened). Returns false when nothing could open it — e.g. a
 // Tauri build whose opener plugin isn't active yet (needs a full app restart);
 // callers should then surface the link so the user is never stuck.
+import { inAgentsPoppyContainer, openExternalViaHost } from "./hostBridge";
+
 export async function openExternal(url: string): Promise<boolean> {
+  // Inside the AgentsPoppy container the iframe has neither a Tauri opener nor a
+  // working window.open — only the host can reach the OS browser. Route through the
+  // host's openExternal capability (declared in MailPoppy's manifest).
+  if (inAgentsPoppyContainer()) {
+    try {
+      await openExternalViaHost(url);
+      return true;
+    } catch (hostErr) {
+      console.warn("openExternal: host openExternal failed:", hostErr);
+      return false;
+    }
+  }
   try {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
     await openUrl(url);
