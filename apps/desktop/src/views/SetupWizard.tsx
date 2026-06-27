@@ -58,7 +58,7 @@ function readDomainDraft(): string {
   }
 }
 
-const noAutoCap = { autoCapitalize: "off", autoCorrect: "off", spellCheck: false } as const;
+const noAutoCap = { autoCapitalize: "off", autoCorrect: "off", spellCheck: false, autoComplete: "off" } as const;
 
 const inputCls =
   "rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-outline-variant transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50";
@@ -915,6 +915,7 @@ export function SetupWizard({
                   Email address
                   <input
                     aria-label="Mailbox email"
+                    name="new-mailbox-address"
                     value={mbEmail}
                     onChange={(e) => setMbEmail(e.target.value.trim().toLowerCase())}
                     placeholder="you@yourdomain.com"
@@ -927,6 +928,8 @@ export function SetupWizard({
                   <input
                     aria-label="Mailbox password"
                     type="password"
+                    name="new-mailbox-password"
+                    autoComplete="new-password"
                     value={mbPassword}
                     onChange={(e) => setMbPassword(e.target.value)}
                     className={cn(inputCls, "w-64")}
