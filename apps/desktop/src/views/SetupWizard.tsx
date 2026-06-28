@@ -463,6 +463,19 @@ export function SetupWizard({
     try {
       const { deployed, backend } = await loadMailboxes();
 
+      // Background-resume: if a deploy is STILL running server-side (its CloudFormation
+      // stack is mid-create), drop the user straight back onto the live progress. The
+      // deploy poller re-attaches itself purely from step === "deploying", so this is all
+      // it takes for "leave the screen, the deploy keeps running, come back to its status".
+      if (!deployed) {
+        const inFlight = await deployStatus(stackName).catch(() => null);
+        if (inFlight && /_IN_PROGRESS$/i.test(inFlight.status ?? "")) {
+          setDeploy(inFlight);
+          setStep((cur) => (cur === "start" ? "deploying" : cur));
+          return;
+        }
+      }
+
       let domains: string[] = [];
       try {
         const d = await sidecar<{ ok: boolean; domains: string[] }>(`/teardown/domains/${encodeURIComponent(stackName)}`);
@@ -781,7 +794,9 @@ export function SetupWizard({
         {step === "deploying" && (
           <div className="mt-4 flex items-center gap-2 text-sm text-on-surface-variant">
             <Spinner /> Setting up your backend… <C>{deploy?.status ?? "starting"}</C>{" "}
-            <span className="text-on-surface-variant/60">(this usually takes 1–3 minutes — you can keep this window open)</span>
+            <span className="text-on-surface-variant/60">
+              (this usually takes 1–3 minutes — it keeps running in the background, so you can leave this screen and come back)
+            </span>
           </div>
         )}
 

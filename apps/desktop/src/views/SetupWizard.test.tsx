@@ -366,4 +366,21 @@ describe("SetupWizard · resume from reality", () => {
     expect(await screen.findByText(/leftover mail DNS/i)).toBeInTheDocument();
     expect((screen.getByPlaceholderText("yourdomain.com") as HTMLInputElement).value).toBe("leftover.com");
   });
+
+  it("resumes a deploy that is still running in the background after a restart", async () => {
+    mockSidecar.mockImplementation(async (path: string) => {
+      if (path === "/aws/readiness") return READY;
+      if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
+      // The shared backend stack is mid-create — the deploy the user kicked off before
+      // navigating away is still in flight server-side.
+      if (path.endsWith("/status")) return { status: "CREATE_IN_PROGRESS", complete: false, failed: false, stackId: "s-inflight" };
+      throw new Error(`unexpected sidecar path ${path}`);
+    });
+
+    render(<SetupWizard />);
+
+    // We land back on the LIVE deploy progress — not a blank form or a dead spinner.
+    // (The "keeps running in the background" line is unique to the active deploy view.)
+    expect(await screen.findByText(/keeps running in the background/i)).toBeInTheDocument();
+  });
 });
