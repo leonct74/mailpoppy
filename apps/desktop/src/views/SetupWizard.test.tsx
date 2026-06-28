@@ -172,7 +172,7 @@ describe("SetupWizard · Mailboxes", () => {
 
     // Deploy the backend for a brand-new domain (its SES/DNS isn't verified yet).
     fireEvent.change(screen.getByPlaceholderText("yourdomain.com"), { target: { value: "yourdomain.com" } });
-    fireEvent.click(screen.getByRole("button", { name: /Check AWS/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
     await screen.findByText(/Hosted zone/i);
     fireEvent.click(screen.getByRole("button", { name: /Deploy backend/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Yes, continue/i }));
@@ -240,7 +240,7 @@ describe("SetupWizard · Mailboxes", () => {
     await screen.findByText(/Environment ready/i);
 
     fireEvent.change(screen.getByPlaceholderText("yourdomain.com"), { target: { value: "ollydigital.com" } });
-    fireEvent.click(screen.getByRole("button", { name: /Check AWS/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
     await screen.findByText(/Hosted zone/i);
 
     fireEvent.click(screen.getByRole("button", { name: /Deploy backend/i }));
@@ -264,7 +264,7 @@ describe("SetupWizard · Mailboxes", () => {
     render(<SetupWizard />);
     await screen.findByText(/Environment ready/i);
     fireEvent.change(screen.getByPlaceholderText("yourdomain.com"), { target: { value: "ollydigital.com" } });
-    fireEvent.click(screen.getByRole("button", { name: /Check AWS/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
     await screen.findByText(/Hosted zone/i);
 
     fireEvent.click(screen.getByRole("button", { name: /Deploy backend/i }));
@@ -300,7 +300,7 @@ describe("SetupWizard · Mailboxes", () => {
     expect(input.value).toBe("second.com");
     expect(input).toBeDisabled();
 
-    fireEvent.click(screen.getByRole("button", { name: /Check AWS/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
     await screen.findByText(/Hosted zone/i);
 
     // No deploy step — the backend exists — so the SES/DNS provision button is shown instead.

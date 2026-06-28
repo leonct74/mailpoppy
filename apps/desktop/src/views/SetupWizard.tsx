@@ -136,6 +136,9 @@ export function SetupWizard({
   const [recipient, setRecipient] = useState("");
   const [step, setStep] = useState<Step>("start");
   const [preflight, setPreflight] = useState<Preflight | null>(null);
+  // Fire the resume auto-preflight at most once, so reopening a deployed domain lands
+  // the user on the real next action instead of a bare "check" button.
+  const autoPreflightedRef = useRef(false);
   const [provision, setProvision] = useState<ProvisionResult | null>(null);
   const [status, setStatus] = useState<IdentityStatus | null>(null);
   const [messageId, setMessageId] = useState<string | null>(null);
@@ -206,11 +209,12 @@ export function SetupWizard({
     setConfirmAction({ message, run });
   }
 
-  async function runPreflight() {
+  async function runPreflight(forDomain?: string) {
+    const d = forDomain ?? domain;
     setError(null);
     setBusy(true);
     try {
-      setPreflight(await sidecar<Preflight>(`/aws/preflight/${encodeURIComponent(domain)}`));
+      setPreflight(await sidecar<Preflight>(`/aws/preflight/${encodeURIComponent(d)}`));
       setStep("preflighted");
     } catch (e) {
       fail(e);
@@ -501,6 +505,15 @@ export function SetupWizard({
       }
 
       setStep((cur) => (cur === "start" ? r.step : cur));
+
+      // Resume convenience: when we drop the user back at the domain form for an
+      // ALREADY-deployed backend, run the AWS/DNS check for them so they land straight
+      // on the real next action (set up mail / publish DNS) — not a bare "Continue"
+      // button they have to discover. Once only, and only on resume (never while typing).
+      if (deployed && r.domain && r.step === "start" && !autoPreflightedRef.current) {
+        autoPreflightedRef.current = true;
+        void runPreflight(r.domain);
+      }
     } finally {
       setReconciling(false);
     }
@@ -714,8 +727,8 @@ export function SetupWizard({
               {...noAutoCap}
             />
           </label>
-          <Button onClick={runPreflight} disabled={!ready || !domain || busy || step !== "start"}>
-            <Globe className="size-4" /> 1. Check AWS &amp; DNS
+          <Button onClick={() => void runPreflight()} disabled={!ready || !domain || busy || step !== "start"}>
+            <Globe className="size-4" /> Continue
           </Button>
         </div>
 
@@ -748,7 +761,7 @@ export function SetupWizard({
                   </span>
                 </label>
                 <Button onClick={onDeploy} disabled={busy}>
-                  <Rocket className="size-4" /> 2. Deploy backend
+                  <Rocket className="size-4" /> Deploy backend
                 </Button>
               </div>
             )}
@@ -780,7 +793,7 @@ export function SetupWizard({
               {step === "deployed" && (
                 <div className="mt-3">
                   <Button onClick={provisionDomain} disabled={busy}>
-                    <Globe className="size-4" /> 3. Set up domain mail (SES + DNS)
+                    <Globe className="size-4" /> Set up domain mail (SES + DNS)
                   </Button>
                 </div>
               )}
