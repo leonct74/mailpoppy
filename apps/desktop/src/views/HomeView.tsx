@@ -22,6 +22,7 @@ import {
   type TeardownResult,
 } from "../lib/teardown";
 import { friendlyError } from "../lib/errors";
+import { withTimeout } from "../lib/withTimeout";
 import { listMailboxes as defaultListMailboxes, type Mailbox } from "../lib/mailbox";
 import { getSesAccount as defaultGetAccount } from "../lib/sesAccount";
 import { getMailFromStatus as defaultGetMailFrom } from "../lib/mailFrom";
@@ -56,35 +57,6 @@ const isNoBackend = (e: unknown) => {
 };
 
 const domainOf = (email: string) => email.split("@")[1]?.toLowerCase() ?? "";
-
-// A backend call should never hang the whole overview on an indefinite spinner — if it doesn't
-// answer in time (backend still starting, a region mismatch wedging an AWS call, creds in flux),
-// reject so the load resolves into the actionable error state (with Retry) instead of "Loading…"
-// forever.
-const LOAD_TIMEOUT_MS = 20000;
-function withTimeout<T>(p: Promise<T>, label: string, ms = LOAD_TIMEOUT_MS): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(
-      () =>
-        reject(
-          new Error(
-            `Timed out loading your ${label}. Your backend may be in a different AWS region than your linked account, still starting up, or your AWS credentials may need attention.`,
-          ),
-        ),
-      ms,
-    );
-    p.then(
-      (v) => {
-        clearTimeout(t);
-        resolve(v);
-      },
-      (e) => {
-        clearTimeout(t);
-        reject(e as Error);
-      },
-    );
-  });
-}
 
 export function HomeView({
   stackName = resolveStackName(),

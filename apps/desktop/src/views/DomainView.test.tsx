@@ -250,4 +250,17 @@ describe("DomainView", () => {
     render(<DomainView domain="boxord.com" {...loaders({ listMailboxes: noBackend })} />);
     expect(await screen.findByText(/No backend is deployed yet/i)).toBeInTheDocument();
   });
+
+  it("explains a load failure (region/creds + teardown path), not a bare error", async () => {
+    const failing = vi.fn(async () => {
+      throw new Error('sidecar 500: {"ok":false,"error":"ResourceNotFoundException: user pool does not exist"}');
+    });
+    render(<DomainView domain="boxord.com" {...loaders({ listMailboxes: failing })} />);
+    expect(await screen.findByText(/Couldn't load boxord\.com/i)).toBeInTheDocument();
+    // explains the most likely cause…
+    expect(screen.getByText(/different AWS region/i)).toBeInTheDocument();
+    // …and the escape hatch when it's a half-built domain
+    expect(screen.getByText(/AgentsPoppy/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Retry/i })).toBeInTheDocument();
+  });
 });

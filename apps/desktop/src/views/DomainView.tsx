@@ -27,6 +27,7 @@ import { getMailFromStatus as defaultGetMailFrom } from "../lib/mailFrom";
 import { getDomainIdentityStatus as defaultGetDomainStatus, type DomainIdentityStatus } from "../lib/provision";
 import { removeDomain as defaultRemoveDomain, type RemoveDomainResult } from "../lib/teardown";
 import { friendlyError } from "../lib/errors";
+import { withTimeout } from "../lib/withTimeout";
 import { MailboxStorageRow } from "./MailboxStorageRow";
 import { PolicyEditor } from "./PolicyEditor";
 import { RetentionEditor } from "./RetentionEditor";
@@ -126,7 +127,7 @@ export function DomainView({
   const [removeErr, setRemoveErr] = useState<string | null>(null);
 
   async function reload() {
-    const res = await listMailboxes(stackName);
+    const res = await withTimeout(listMailboxes(stackName), "mailboxes");
     setMailboxes(res.mailboxes);
     setBackend({ region: res.region, userPoolId: res.userPoolId, clientId: res.clientId, apiBaseUrl: res.apiBaseUrl });
   }
@@ -282,6 +283,16 @@ export function DomainView({
         <Card>
           <h3 className="text-lg font-semibold text-on-surface">Couldn't load {domain}</h3>
           <p className="mt-2 text-sm text-tertiary">{errMsg}</p>
+          <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
+            This usually means the backend is in a <b className="text-on-surface">different AWS region</b> than your
+            linked account, is still starting up, or your AWS credentials need attention. Check the region on your
+            linked account, then Retry.
+          </p>
+          <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
+            If this domain was only <b className="text-on-surface">partly set up</b> (created, but never finished) and you
+            can't recover it, you can remove it from the <b className="text-on-surface">AgentsPoppy</b> management console
+            (tear it down there) and start fresh.
+          </p>
           <Button variant="secondary" className="mt-4" onClick={() => setReloadKey((k) => k + 1)}>
             <RefreshCw className="size-4" /> Retry
           </Button>
