@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, act } from "@testing-library/react";
 import { HomeView } from "./HomeView";
 
 afterEach(() => cleanup());
@@ -121,5 +121,26 @@ describe("HomeView", () => {
     const btn = await screen.findByRole("button", { name: /Set up your first domain/ });
     fireEvent.click(btn);
     expect(onGoToSetup).toHaveBeenCalled();
+  });
+
+  it("surfaces a timeout (with Retry) instead of an infinite spinner when a backend call hangs", async () => {
+    vi.useFakeTimers();
+    try {
+      const hang = () => new Promise<never>(() => {}); // never settles — models a wedged backend call
+      render(<HomeView {...ready} listMailboxes={hang} listDomains={hang} getAccount={hang} />);
+
+      // Before the timeout it's still loading…
+      expect(screen.getByText(/Loading your domains and mailboxes/)).toBeInTheDocument();
+
+      // …and once the load timeout elapses it resolves into the actionable error state.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20000);
+      });
+      expect(screen.getByText("Couldn't load your overview")).toBeInTheDocument();
+      expect(screen.getByText(/Timed out loading/i)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Retry/i })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
