@@ -284,18 +284,31 @@ export function DomainView({
           <h3 className="text-lg font-semibold text-on-surface">Couldn't load {domain}</h3>
           <p className="mt-2 text-sm text-tertiary">{errMsg}</p>
           <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
-            This usually means the backend is in a <b className="text-on-surface">different AWS region</b> than your
-            linked account, is still starting up, or your AWS credentials need attention. Check the region on your
-            linked account, then Retry.
+            This usually means this domain was <b className="text-on-surface">only partly set up</b> — created, but its
+            backend deploy or DNS step never finished. It can also happen if the backend is in a{" "}
+            <b className="text-on-surface">different AWS region</b> than your linked account, or your AWS credentials need
+            attention.
           </p>
-          <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
-            If this domain was only <b className="text-on-surface">partly set up</b> (created, but never finished) and you
-            can't recover it, you can remove it from the <b className="text-on-surface">AgentsPoppy</b> management console
-            (tear it down there) and start fresh.
+          {onRunSetup && (
+            <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
+              The quickest fix is to <b className="text-on-surface">resume the setup</b> — it picks up from wherever it
+              stopped and reuses anything already created, so you won't get duplicates.
+            </p>
+          )}
+          <div className="mt-4 flex flex-wrap gap-2">
+            {onRunSetup && (
+              <Button onClick={onRunSetup}>
+                <Settings className="size-4" /> Resume {domain} setup
+              </Button>
+            )}
+            <Button variant="secondary" onClick={() => setReloadKey((k) => k + 1)}>
+              <RefreshCw className="size-4" /> Retry
+            </Button>
+          </div>
+          <p className="mt-3 text-xs leading-relaxed text-on-surface-variant/80">
+            Still stuck? If this domain can't be recovered, remove it from the{" "}
+            <b className="text-on-surface">AgentsPoppy</b> console (tear it down there) and start fresh.
           </p>
-          <Button variant="secondary" className="mt-4" onClick={() => setReloadKey((k) => k + 1)}>
-            <RefreshCw className="size-4" /> Retry
-          </Button>
         </Card>
       </div>
     );

@@ -251,16 +251,22 @@ describe("DomainView", () => {
     expect(await screen.findByText(/No backend is deployed yet/i)).toBeInTheDocument();
   });
 
-  it("explains a load failure (region/creds + teardown path), not a bare error", async () => {
+  it("explains a load failure and offers resume as the primary fix, not a bare error", async () => {
     const failing = vi.fn(async () => {
       throw new Error('sidecar 500: {"ok":false,"error":"ResourceNotFoundException: user pool does not exist"}');
     });
-    render(<DomainView domain="boxord.com" {...loaders({ listMailboxes: failing })} />);
+    const onRunSetup = vi.fn();
+    render(<DomainView domain="boxord.com" onRunSetup={onRunSetup} {...loaders({ listMailboxes: failing })} />);
     expect(await screen.findByText(/Couldn't load boxord\.com/i)).toBeInTheDocument();
-    // explains the most likely cause…
+    // explains the most likely cause (a half-finished setup) and the region/creds angle…
+    expect(screen.getByText(/only partly set up/i)).toBeInTheDocument();
     expect(screen.getByText(/different AWS region/i)).toBeInTheDocument();
-    // …and the escape hatch when it's a half-built domain
-    expect(screen.getByText(/AgentsPoppy/)).toBeInTheDocument();
+    // …leads with a resume action that re-opens this domain's setup wizard…
+    const resume = screen.getByRole("button", { name: /Resume boxord\.com setup/i });
+    fireEvent.click(resume);
+    expect(onRunSetup).toHaveBeenCalled();
+    // …keeps Retry, and demotes teardown to a footnote.
     expect(screen.getByRole("button", { name: /Retry/i })).toBeInTheDocument();
+    expect(screen.getByText(/AgentsPoppy/)).toBeInTheDocument();
   });
 });
