@@ -634,11 +634,14 @@ export function SetupWizard({
         </p>
       </div>
 
-      {/* Two columns (Stitch layout): the main step content fills the left; the
-          reassuring guidance ("messages to the user") sits in a sticky right
-          column so it doesn't push the main content down the page. */}
-      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-3">
-        <div className="flex flex-col gap-6 lg:col-span-2">
+      {/* The compact progress stepper is pinned at the TOP of the view: the user
+          sees the whole journey first, then the controls follow directly below it
+          — so the active step's action is never above its own progress map. */}
+      <div className="sticky top-0 z-10 bg-base pb-1 pt-0.5">
+        <SetupProgress phases={phases} reconciling={reconciling} />
+      </div>
+
+      <div className="flex flex-col gap-6">
           {/* ---- Data residency: choose the AWS region ---- */}
           <Card>
             <RegionPicker lockedRegion={loadDeploymentConfig()?.region} />
@@ -1078,16 +1081,10 @@ export function SetupWizard({
           {/* Mail rules + retention are account-wide (one backend per install),
               so they live in the Account tab — not here, where the focus is
               first-domain onboarding. */}
-        </div>
 
-        {/* Right column — the always-visible progress map + guidance. (The live
-            AWS-permissions lights live permanently in the app sidebar.) */}
-        <aside className="lg:col-span-1">
-          <div className="flex flex-col gap-4 lg:sticky lg:top-0">
-            <SetupProgress phases={phases} reconciling={reconciling} />
-            <AdminPrivacyNotice />
-          </div>
-        </aside>
+          {/* Reassuring guidance, at the end so it never pushes the controls down.
+              (The live AWS-permissions lights live permanently in the app sidebar.) */}
+          <AdminPrivacyNotice />
       </div>
     </div>
   );

@@ -1,32 +1,50 @@
 import { Check, Lock, Clock } from "lucide-react";
 import { Spinner, cn } from "../ui";
-import type { PhaseView } from "../lib/setupProgress";
+import type { PhaseView, PhaseKey } from "../lib/setupProgress";
 
-// The persistent progress map shown alongside the wizard. It never disappears,
-// so the user always sees which steps are done (✓), which one is live (spinner
-// or highlighted "your turn"), and which are still ahead — plus a plain-language
-// time expectation, and an amber stall warning on steps AWS can hold up (DKIM).
+// The persistent progress stepper, pinned at the top of the setup view. A compact
+// HORIZONTAL rail shows every phase at a glance — done (✓), the live one
+// (highlighted / spinner), and what's still ahead — so the whole journey stays
+// visible without a tall stacked list. Below the rail, a single line spells out
+// the CURRENT step one at a time: its plain-language detail, a live spinner, and
+// an amber stall note on steps AWS can hold up (DKIM verification).
 
-function PhaseIcon({ phase, index }: { phase: PhaseView; index: number }) {
-  if (phase.busy) return <Spinner className="mt-0.5 size-5 shrink-0" />;
+// Short labels for the rail (the full phrasing lives in the current-step line).
+const SHORT_LABEL: Record<PhaseKey, string> = {
+  connect: "AWS account",
+  deploy: "Backend",
+  domain: "Domain mail",
+  verify: "Verify",
+  mailbox: "Mailbox",
+};
+
+function Node({ phase, index }: { phase: PhaseView; index: number }) {
+  const base = "flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold";
+  if (phase.busy) {
+    return (
+      <span className={cn(base, "bg-primary/15 text-primary")}>
+        <Spinner className="size-4" />
+      </span>
+    );
+  }
   if (phase.status === "done") {
     return (
-      <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-secondary/20 text-secondary">
-        <Check className="size-3.5" />
+      <span className={cn(base, "bg-secondary/20 text-secondary")}>
+        <Check className="size-4" />
       </span>
     );
   }
   if (phase.status === "current") {
-    // "Your turn" — a filled, gently pulsing badge draws the eye to the next action.
+    // "Your turn" — a filled, gently pulsing badge draws the eye to the live step.
     return (
-      <span className="relative mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-on-primary">
+      <span className={cn(base, "relative bg-primary text-on-primary")}>
         <span aria-hidden className="absolute inset-0 animate-ping rounded-full bg-primary/40" />
         <span className="relative">{index + 1}</span>
       </span>
     );
   }
   return (
-    <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border border-outline-variant/30 text-on-surface-variant/50">
+    <span className={cn(base, "border border-outline-variant/30 text-on-surface-variant/50")}>
       <Lock className="size-3" />
     </span>
   );
@@ -34,6 +52,10 @@ function PhaseIcon({ phase, index }: { phase: PhaseView; index: number }) {
 
 export function SetupProgress({ phases, reconciling }: { phases: PhaseView[]; reconciling?: boolean }) {
   const done = phases.filter((p) => p.status === "done").length;
+  const current = phases.find((p) => p.status === "current") ?? null;
+  const allDone = done === phases.length;
+  const last = phases.length - 1;
+
   return (
     <section aria-label="Setup progress" className="rounded-xl border border-outline-variant/15 bg-surface-container p-4">
       <div className="mb-3 flex items-center justify-between">
@@ -49,32 +71,71 @@ export function SetupProgress({ phases, reconciling }: { phases: PhaseView[]; re
         )}
       </div>
 
-      <ol className="flex flex-col gap-3">
+      {/* Horizontal rail — every phase at a glance, connectors filled as you go. */}
+      <ol className="flex items-start">
         {phases.map((p, idx) => (
-          <li key={p.key} className="flex items-start gap-3">
-            <PhaseIcon phase={p} index={idx} />
-            <div className="min-w-0 flex-1">
-              <div
+          <li
+            key={p.key}
+            aria-current={p.status === "current" ? "step" : undefined}
+            className="flex min-w-0 flex-1 flex-col items-center"
+          >
+            <div className="flex w-full items-center">
+              <span
                 className={cn(
-                  "text-sm",
-                  p.status === "upcoming" ? "font-medium text-on-surface-variant/60" : "font-semibold text-on-surface",
+                  "h-0.5 flex-1 rounded-full",
+                  idx === 0 ? "opacity-0" : phases[idx - 1]?.status === "done" ? "bg-secondary/50" : "bg-outline-variant/20",
                 )}
-              >
-                {p.label}
-              </div>
-              <div className={cn("text-xs leading-snug", p.status === "upcoming" ? "text-on-surface-variant/50" : "text-on-surface-variant")}>
-                {p.detail}
-              </div>
-              {p.canStall && p.status !== "done" && (
-                <div className="mt-1 inline-flex items-start gap-1 rounded border border-amber-400/30 bg-amber-400/10 px-1.5 py-1 text-[11px] leading-snug text-amber-200">
+              />
+              <Node phase={p} index={idx} />
+              <span
+                className={cn(
+                  "h-0.5 flex-1 rounded-full",
+                  idx === last ? "opacity-0" : p.status === "done" ? "bg-secondary/50" : "bg-outline-variant/20",
+                )}
+              />
+            </div>
+            <span
+              className={cn(
+                "mt-1.5 px-1 text-center text-[11px] leading-tight",
+                p.status === "upcoming"
+                  ? "text-on-surface-variant/50"
+                  : p.status === "current"
+                    ? "font-semibold text-primary"
+                    : "text-on-surface-variant",
+              )}
+            >
+              {SHORT_LABEL[p.key]}
+            </span>
+          </li>
+        ))}
+      </ol>
+
+      {/* The active step, spelled out one at a time — what's happening + time. */}
+      <div className="mt-3 border-t border-outline-variant/10 pt-3">
+        {current ? (
+          <div className="flex items-start gap-2 text-sm">
+            {current.busy ? (
+              <Spinner className="mt-0.5 size-4 shrink-0" />
+            ) : (
+              <span aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full bg-primary" />
+            )}
+            <div className="min-w-0">
+              <span className="font-semibold text-on-surface">{current.label}</span>
+              <span className="text-on-surface-variant"> — {current.detail}</span>
+              {current.canStall && (
+                <div className="mt-1.5 inline-flex items-start gap-1 rounded border border-amber-400/30 bg-amber-400/10 px-1.5 py-1 text-[11px] leading-snug text-amber-200">
                   <Clock className="mt-px size-3 shrink-0" />
                   <span>This can take a while — it runs automatically, so you can leave the app and come back.</span>
                 </div>
               )}
             </div>
-          </li>
-        ))}
-      </ol>
+          </div>
+        ) : allDone ? (
+          <div className="flex items-center gap-2 text-sm font-medium text-secondary">
+            <Check className="size-4" /> All set — your mail backend is live.
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }

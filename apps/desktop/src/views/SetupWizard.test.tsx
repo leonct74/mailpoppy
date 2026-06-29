@@ -93,10 +93,13 @@ describe("SetupWizard · Step 0 readiness gate", () => {
     render(<SetupWizard />);
     await screen.findByText(/No usable AWS credentials/i);
 
-    // The panel must not show the backend as live...
+    // The stepper must not show the backend as live...
     expect(screen.queryByText(/Your backend is live/i)).not.toBeInTheDocument();
-    // ...the "Create your backend" phase is still shown as to-do.
-    expect(screen.getByText(/A one-time setup/i)).toBeInTheDocument();
+    expect(screen.queryByText(/All set/i)).not.toBeInTheDocument();
+    // ...the "Backend" step is still listed (as a to-do) in the stepper, and the
+    // current step is connecting AWS, not deploying.
+    expect(screen.getByText("Backend")).toBeInTheDocument();
+    expect(screen.getByText(/Enter your AWS keys to begin/i)).toBeInTheDocument();
   });
 
   it("flags a denied service and points at the identity to fix", async () => {
@@ -345,10 +348,10 @@ describe("SetupWizard · resume from reality", () => {
     await waitFor(() =>
       expect((screen.getByPlaceholderText("yourdomain.com") as HTMLInputElement).value).toBe("resumed.com"),
     );
-    // …the persistent progress map is always present…
+    // …the persistent progress stepper is always present…
     expect(screen.getByText(/Your setup progress/i)).toBeInTheDocument();
-    // …the domain reads as verified in the map…
-    expect(await screen.findByText(/ready to send and receive/i)).toBeInTheDocument();
+    // …the stepper has advanced past verification onto the mailbox step…
+    expect(await screen.findByText(/add an email address and password/i)).toBeInTheDocument();
     // …and the mailbox form is unlocked because we resumed past verification.
     expect(screen.getByLabelText("Mailbox email")).toBeInTheDocument();
   });
