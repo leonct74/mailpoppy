@@ -446,7 +446,7 @@ export function SetupWizard({
       // A 404 here just means the backend stack isn't deployed yet — the
       // expected state on first launch, not an error. Show the deploy hint
       // instead of an alarming red banner.
-      if (/\b404\b/.test(msg) && /No deployed Mailpoppy backend/i.test(msg)) {
+      if (/\b404\b/.test(msg) && /No deployed MailPoppy backend/i.test(msg)) {
         setMbNoBackend(true);
         setLiveDeployed(false);
       } else {

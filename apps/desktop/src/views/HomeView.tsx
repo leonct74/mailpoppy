@@ -29,7 +29,7 @@ import { getMailFromStatus as defaultGetMailFrom } from "../lib/mailFrom";
 import { getDomainIdentityStatus as defaultGetDomainStatus, type DomainIdentityStatus } from "../lib/provision";
 import { Card, Button, Spinner, cn } from "../ui";
 
-// Home — a multi-domain overview. A Mailpoppy admin typically runs several
+// Home — a multi-domain overview. A MailPoppy admin typically runs several
 // domains, each with several mailboxes, so this is the at-a-glance control
 // surface: account posture (region + SES sending) up top, then one card per
 // domain with its health badges and mailbox count. Read-only in this phase —
@@ -53,7 +53,7 @@ function Pill({ tone, children }: { tone: Tone; children: ReactNode }) {
 
 const isNoBackend = (e: unknown) => {
   const m = String(e);
-  return /\b404\b/.test(m) && /No deployed Mailpoppy backend/i.test(m);
+  return /\b404\b/.test(m) && /No deployed MailPoppy backend/i.test(m);
 };
 
 const domainOf = (email: string) => email.split("@")[1]?.toLowerCase() ?? "";
@@ -174,7 +174,7 @@ export function HomeView({
     return (
       <Card className="mx-auto max-w-2xl text-center">
         <Sparkles className="mx-auto size-8 text-primary" />
-        <h2 className="mt-3 text-xl font-semibold text-on-surface">Welcome to Mailpoppy</h2>
+        <h2 className="mt-3 text-xl font-semibold text-on-surface">Welcome to MailPoppy</h2>
         <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-on-surface-variant">
           You don't have any email infrastructure yet. Head to <b className="text-on-surface">Setup</b> to deploy your
           backend and add your first domain — your domains and mailboxes will then show up here.
@@ -429,7 +429,7 @@ function LeftoverInfrastructureCard({
           <h3 className="text-lg font-semibold text-on-surface">Remove leftover infrastructure</h3>
           {!open && (
             <p className="mt-1 text-sm text-on-surface-variant">
-              No domains remain, but the Mailpoppy backend is still deployed in your AWS account. Delete the leftover
+              No domains remain, but the MailPoppy backend is still deployed in your AWS account. Delete the leftover
               resources so they don't linger.
             </p>
           )}
@@ -450,7 +450,7 @@ function LeftoverInfrastructureCard({
       {open && (
         <div className="border-t border-error/10 p-6 pt-5">
           <p className="text-sm text-on-surface-variant">
-            You have no domains, but the Mailpoppy backend (stack{" "}
+            You have no domains, but the MailPoppy backend (stack{" "}
             <code className="font-mono text-tertiary">{stackName}</code>
             {region ? (
               <>

@@ -32,14 +32,14 @@ const NAV: { id: Tab; label: string; icon: LucideIcon; blurb: string }[] = [
   { id: "inbox", label: "Inbox", icon: Inbox, blurb: "Read and send mail" },
   { id: "migrate", label: "Migrate", icon: ArrowLeftRight, blurb: "Bring your old mail across via IMAP" },
   { id: "health", label: "Sending health", icon: HeartPulse, blurb: "Is each domain's mail reaching inboxes?" },
-  { id: "account", label: "Account", icon: SlidersHorizontal, blurb: "Shared settings & the AWS resources Mailpoppy manages" },
+  { id: "account", label: "Account", icon: SlidersHorizontal, blurb: "Shared settings & the AWS resources MailPoppy manages" },
 ];
 
 /** Setup drill-in target: a new domain ({}) or re-running an existing one. */
 type SetupTarget = { domain?: string };
 
 const CREDENTIALS_TOOLTIP =
-  "Mailpoppy reads your AWS credentials from your machine's own configuration (~/.aws profile, SSO, or environment) using AWS's official SDK — the same way the AWS CLI does — and uses them only on this computer. They are never copied, uploaded, or stored: not on Mailpoppy's servers, not in any cloud.";
+  "MailPoppy reads your AWS credentials from your machine's own configuration (~/.aws profile, SSO, or environment) using AWS's official SDK — the same way the AWS CLI does — and uses them only on this computer. They are never copied, uploaded, or stored: not on MailPoppy's servers, not in any cloud.";
 
 /**
  * Mailbox tab state machine:

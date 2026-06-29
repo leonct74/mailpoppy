@@ -5,13 +5,13 @@ import { DeliverabilityGuide } from "./DeliverabilityGuide";
 afterEach(() => cleanup());
 
 describe("DeliverabilityGuide", () => {
-  it("reassures that new-domain spam placement is normal and not Mailpoppy's fault", () => {
+  it("reassures that new-domain spam placement is normal and not MailPoppy's fault", () => {
     render(<DeliverabilityGuide />);
     expect(screen.getByText(/New domains often land in spam at first/i)).toBeInTheDocument();
-    expect(screen.getByText(/isn't something Mailpoppy is doing wrong/i)).toBeInTheDocument();
+    expect(screen.getByText(/isn't something MailPoppy is doing wrong/i)).toBeInTheDocument();
   });
 
-  it("credits the auth setup Mailpoppy already does (DKIM/SPF/DMARC/MAIL FROM)", () => {
+  it("credits the auth setup MailPoppy already does (DKIM/SPF/DMARC/MAIL FROM)", () => {
     render(<DeliverabilityGuide />);
     const groundwork = screen.getByText(/technical groundwork is already done/i);
     expect(groundwork).toBeInTheDocument();

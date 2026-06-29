@@ -2,7 +2,7 @@ import iconUrl from "../assets/mailpoppy-icon.png";
 import { cn } from "./cn";
 
 /**
- * The Mailpoppy brand lockup. The icon and the wordmark are deliberately
+ * The MailPoppy brand lockup. The icon and the wordmark are deliberately
  * separate pieces (not one glued-together image): the "M" icon sits on its
  * own rounded tile, and "MailPoppy" is rendered as live text so it stays
  * crisp and legible on the dark theme — "Mail" in the foreground colour,
@@ -23,7 +23,7 @@ export function Logo({
     <div className={cn("flex items-center gap-2.5", className)}>
       <img
         src={iconUrl}
-        alt={showWordmark ? "" : "Mailpoppy"}
+        alt={showWordmark ? "" : "MailPoppy"}
         aria-hidden={showWordmark || undefined}
         className={cn("size-9 shrink-0 rounded-lg ring-1 ring-black/10", iconClassName)}
       />

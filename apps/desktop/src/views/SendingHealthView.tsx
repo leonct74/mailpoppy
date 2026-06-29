@@ -274,14 +274,14 @@ export function SendingHealthView({ stackName = resolveStackName(), load = defau
           )}
 
           <p className="text-xs text-on-surface-variant">
-            Per-domain figures are Mailpoppy's own running count and cover roughly the last{" "}
+            Per-domain figures are MailPoppy's own running count and cover roughly the last{" "}
             {domains[0]?.windowDays ?? 14} days — they started counting when this feature was switched on, so a brand-new
             install will fill in over time. <AlertTriangle className="inline size-3 -translate-y-px" /> A domain showing{" "}
             <span className={toneText.action}>Needs attention</span> is the one to act on first.
           </p>
           <p className="text-xs text-on-surface-variant">
             <ShieldCheck className="inline size-3 -translate-y-px" /> <b className="text-on-surface">DMARC reports</b> appear
-            on a domain once inbox providers start emailing back their daily summaries about it — Mailpoppy already asks for
+            on a domain once inbox providers start emailing back their daily summaries about it — MailPoppy already asks for
             these automatically, and they typically begin arriving within a day or two of a domain sending real mail. They
             tell you how much mail claiming to be from each domain actually passed authentication.
           </p>

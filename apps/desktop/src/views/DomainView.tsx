@@ -36,7 +36,7 @@ import { MailboxImport } from "./MailboxImport";
 import { Card, Button, Spinner, cn } from "../ui";
 
 // Domain workspace — the per-domain drill-in reached from a Home card. A
-// Mailpoppy admin runs several domains on ONE shared backend, so this view
+// MailPoppy admin runs several domains on ONE shared backend, so this view
 // scopes everything genuinely per-domain: its SES/DKIM/MAIL FROM health, the
 // mailboxes on this domain, adding a mailbox, opening its inbox, importing old
 // mail, and this domain's mail rules + retention (each scoped to `policy#<domain>`
@@ -60,7 +60,7 @@ function Pill({ tone, children }: { tone: Tone; children: ReactNode }) {
 
 const isNoBackend = (e: unknown) => {
   const m = String(e);
-  return /\b404\b/.test(m) && /No deployed Mailpoppy backend/i.test(m);
+  return /\b404\b/.test(m) && /No deployed MailPoppy backend/i.test(m);
 };
 
 const domainOf = (email: string) => email.split("@")[1]?.toLowerCase() ?? "";

@@ -167,7 +167,7 @@ export function MailFromSetup({ domain, region = "eu-west-1", load, setup, onSta
           {(alignment === "not-configured" || alignment === "failed") && (
             <div className="mt-2.5">
               <p className="mb-1 text-sm text-on-surface-variant">
-                Mailpoppy will point SES at <code className="font-mono text-on-surface">{mailFromDomain}</code> and add these
+                MailPoppy will point SES at <code className="font-mono text-on-surface">{mailFromDomain}</code> and add these
                 DNS records:
               </p>
               <RecordsTable records={previewRecords} />

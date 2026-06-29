@@ -1,4 +1,4 @@
-// The values the desktop app needs to talk to a deployed Mailpoppy backend.
+// The values the desktop app needs to talk to a deployed MailPoppy backend.
 // They are CloudFormation stack Outputs (see infra/lib/mail-stack.ts):
 //   ApiBaseUrl, UserPoolId, UserPoolClientId, DeployRegion.
 // Persisted locally so the admin enters them once.

@@ -1,5 +1,5 @@
 // Desktop client for the sidecar's teardown endpoint. Removes everything
-// Mailpoppy deployed for a domain (stack + RETAINed data + deploy bucket + SES
+// MailPoppy deployed for a domain (stack + RETAINed data + deploy bucket + SES
 // identity + DNS). Long-running: the sidecar waits for CloudFormation to finish.
 import { sidecar } from "./sidecar";
 

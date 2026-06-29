@@ -147,7 +147,7 @@ describe("SetupWizard · Mailboxes", () => {
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;
       if (path.startsWith("/mailbox/list")) {
-        if (!deployed) throw new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
+        if (!deployed) throw new Error("sidecar 404: No deployed MailPoppy backend was found yet.");
         return { ...BACKEND, mailboxes: [] };
       }
       if (path.startsWith("/aws/preflight")) return { accountId: "123456789012", zoneId: "Z123", region: "eu-west-1" };
@@ -215,7 +215,7 @@ describe("SetupWizard · Mailboxes", () => {
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;
       if (path.startsWith("/mailbox/list")) {
-        if (!deployed) throw new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
+        if (!deployed) throw new Error("sidecar 404: No deployed MailPoppy backend was found yet.");
         return { ...BACKEND, mailboxes: [] };
       }
       if (path.startsWith("/aws/preflight")) return { accountId: "123456789012", zoneId: "Z123", region: "eu-west-1" };
@@ -258,7 +258,7 @@ describe("SetupWizard · Mailboxes", () => {
   it("confirms deploy via an in-app dialog, and cancelling does not deploy", async () => {
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;
-      if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
+      if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed MailPoppy backend was found yet.");
       if (path.startsWith("/aws/preflight")) return { accountId: "123456789012", zoneId: "Z123", region: "eu-west-1" };
       if (path === "/deploy/backend") throw new Error("deploy must not be called after cancel");
       throw new Error(`unexpected sidecar path ${path}`);
@@ -314,7 +314,7 @@ describe("SetupWizard · Mailboxes", () => {
   it("treats a not-yet-deployed backend as the expected first-run state, not a red error", async () => {
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;
-      if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
+      if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed MailPoppy backend was found yet.");
       throw new Error(`unexpected ${path}`);
     });
 
@@ -359,7 +359,7 @@ describe("SetupWizard · resume from reality", () => {
   it("surfaces leftover DNS and lands on Set up email service when a domain exists but no backend is deployed", async () => {
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;
-      if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
+      if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed MailPoppy backend was found yet.");
       if (path.startsWith("/teardown/domains")) return { ok: true, domains: ["leftover.com"] };
       if (path.startsWith("/aws/preflight")) return { accountId: "123456789012", zoneId: "Z123", region: "eu-west-1" };
       if (path.startsWith("/provision/") && path.endsWith("/status")) throw new Error("sidecar 404: identity not found");
@@ -380,7 +380,7 @@ describe("SetupWizard · resume from reality", () => {
     // creating the backend doesn't need the zone, so the user must NOT be stranded.
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;
-      if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
+      if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed MailPoppy backend was found yet.");
       if (path.startsWith("/teardown/domains")) return { ok: true, domains: [] };
       if (path.startsWith("/aws/preflight"))
         throw new Error('sidecar 502: {"ok":false,"error":"No Route53 hosted zone found for nozone.com"}');
@@ -400,7 +400,7 @@ describe("SetupWizard · resume from reality", () => {
   it("resumes a deploy that is still running in the background after a restart", async () => {
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;
-      if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
+      if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed MailPoppy backend was found yet.");
       // The shared backend stack is mid-create — the deploy the user kicked off before
       // navigating away is still in flight server-side.
       if (path.endsWith("/status")) return { status: "CREATE_IN_PROGRESS", complete: false, failed: false, stackId: "s-inflight" };

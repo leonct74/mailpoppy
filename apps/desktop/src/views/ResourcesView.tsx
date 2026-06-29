@@ -11,7 +11,7 @@ import { resolveStackName } from "../lib/deploymentConfig";
 import { Card, Button, Spinner, cn, ExtLink } from "../ui";
 import { friendlyError } from "../lib/errors";
 
-// "What Mailpoppy did to your account" (DESIGN §14.1). Shows the authoritative
+// "What MailPoppy did to your account" (DESIGN §14.1). Shows the authoritative
 // CloudFormation inventory of the deployed stack — grouped by service, every
 // resource name with a console deep-link — plus the local provisioning ledger of
 // out-of-stack mutations (Route53 / SES identity / rule-set activation) as a
@@ -104,10 +104,10 @@ export function ResourcesView({
           <div>
             <h2 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-on-surface">
               <Sparkles className="size-5 text-primary" />
-              What Mailpoppy did to your account
+              What MailPoppy did to your account
             </h2>
             <p className="mt-1 max-w-2xl text-on-surface-variant">
-              Everything Mailpoppy created in your own AWS account — read live from CloudFormation, plus a local log of
+              Everything MailPoppy created in your own AWS account — read live from CloudFormation, plus a local log of
               DNS/SES changes. Verify any of it in your console.
             </p>
           </div>
@@ -139,7 +139,7 @@ export function ResourcesView({
 
       {inv && !inv.stackExists && (
         <Card className="bg-surface-container/60">
-          <strong className="text-on-surface">No Mailpoppy backend is deployed</strong> in{" "}
+          <strong className="text-on-surface">No MailPoppy backend is deployed</strong> in{" "}
           <code className="font-mono text-sm text-on-surface-variant">{inv.region}</code> (stack{" "}
           <code className="font-mono text-sm text-on-surface-variant">{inv.stackName}</code> not found). Nothing is running
           in your account from the backend stack.

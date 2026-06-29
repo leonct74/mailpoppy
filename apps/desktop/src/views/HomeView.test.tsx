@@ -108,7 +108,7 @@ describe("HomeView", () => {
   it("guides to Setup when no backend is deployed yet", async () => {
     const onGoToSetup = vi.fn();
     const noBackend = () =>
-      Promise.reject(new Error('sidecar 404: {"ok":false,"error":"No deployed Mailpoppy backend was found yet."}'));
+      Promise.reject(new Error('sidecar 404: {"ok":false,"error":"No deployed MailPoppy backend was found yet."}'));
     render(
       <HomeView
         onGoToSetup={onGoToSetup}

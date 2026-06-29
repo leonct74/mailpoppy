@@ -1,5 +1,5 @@
-// A plain-language summary of how Mailpoppy protects a domain's email — the
-// kind of thing an admin evaluating Mailpoppy against WorkMail / a hosted
+// A plain-language summary of how MailPoppy protects a domain's email — the
+// kind of thing an admin evaluating MailPoppy against WorkMail / a hosted
 // provider wants to see up front. Everything listed is implemented in the
 // deployed stack (see infra/lib/mail-stack.ts) except the clearly-marked
 // optional add-on.
@@ -16,7 +16,7 @@ const FEATURES: Feature[] = [
     icon: "🏠",
     title: "Your data never leaves your AWS account",
     detail:
-      "Mailpoppy deploys the entire mail backend into your own AWS account. Your messages and attachments live in your S3 bucket and DynamoDB — no third party (including us) can read them.",
+      "MailPoppy deploys the entire mail backend into your own AWS account. Your messages and attachments live in your S3 bucket and DynamoDB — no third party (including us) can read them.",
     status: "on",
   },
   {
@@ -96,7 +96,7 @@ export function SecurityInfo({ open, onClose }: { open: boolean; onClose: () => 
           </button>
         </div>
         <p className="mt-1.5 text-sm text-on-surface-variant">
-          Mailpoppy hosts your domain's email entirely inside your own AWS account. These protections are in place:
+          MailPoppy hosts your domain's email entirely inside your own AWS account. These protections are in place:
         </p>
         <ul className="mt-3 list-none p-0">
           {FEATURES.map((f) => (

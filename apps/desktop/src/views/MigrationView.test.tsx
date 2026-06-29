@@ -35,7 +35,7 @@ async function fill() {
 }
 
 describe("MigrationView", () => {
-  it("tests the connection and lists folders with their mapped Mailpoppy folder", async () => {
+  it("tests the connection and lists folders with their mapped MailPoppy folder", async () => {
     const test = vi.fn(async () => ({ ok: true as const, folders }));
     const run = vi.fn();
     render(<MigrationView test={test} run={run} loadMailboxes={loadMailboxes} />);

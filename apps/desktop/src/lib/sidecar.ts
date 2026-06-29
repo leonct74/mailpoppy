@@ -28,7 +28,7 @@ function networkMessage(path: string): string {
 }
 
 const HELPER_UNREACHABLE =
-  "Couldn't reach Mailpoppy's local helper. Please restart the app and try again.";
+  "Couldn't reach MailPoppy's local helper. Please restart the app and try again.";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

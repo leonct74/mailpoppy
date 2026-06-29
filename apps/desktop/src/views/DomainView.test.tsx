@@ -245,7 +245,7 @@ describe("DomainView", () => {
 
   it("shows a deploy hint when no backend exists yet", async () => {
     const noBackend = vi.fn(async () => {
-      throw new Error('sidecar 404: {"ok":false,"error":"No deployed Mailpoppy backend was found yet."}');
+      throw new Error('sidecar 404: {"ok":false,"error":"No deployed MailPoppy backend was found yet."}');
     });
     render(<DomainView domain="boxord.com" {...loaders({ listMailboxes: noBackend })} />);
     expect(await screen.findByText(/No backend is deployed yet/i)).toBeInTheDocument();

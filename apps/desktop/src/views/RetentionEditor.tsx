@@ -78,7 +78,7 @@ export function RetentionEditor({ stackName, domain, load, save }: RetentionEdit
     <section aria-label="Retention">
       <h2 className="text-lg font-semibold text-on-surface">Retention — how long mail is kept</h2>
       <p className="mt-1 text-sm text-on-surface-variant">
-        AWS never deletes mail on its own — Mailpoppy keeps it until you say otherwise. Some rules require a{" "}
+        AWS never deletes mail on its own — MailPoppy keeps it until you say otherwise. Some rules require a{" "}
         <i>minimum</i> retention, others a <i>maximum</i> — so this is your call.
         {domain ? (
           <>

@@ -23,7 +23,7 @@ import { friendlyError } from "../lib/errors";
 //      how to make an account + a *scoped* IAM user + keys), and
 //  (b) connect — two ways, in deliberate trust order:
 //      • RECOMMENDED: `aws configure --profile mailpoppy` (or SSO). The secret
-//        never enters Mailpoppy's UI — it lives in ~/.aws and only the open-source
+//        never enters MailPoppy's UI — it lives in ~/.aws and only the open-source
 //        sidecar reads it, via the SDK credential chain.
 //      • Convenience: paste the keys here. They're saved to ~/.aws/credentials and
 //        never uploaded, but unlike the CLI path they pass through the (closed) app.
@@ -122,16 +122,16 @@ export function AwsOnboarding({ onResult, onRecheck, cliInstalled, submit = defa
         <KeyRound className="size-4 text-primary" /> Connect your AWS account
       </h3>
       <p className="mt-1 text-sm text-on-surface-variant">
-        Mailpoppy runs entirely in <b className="text-on-surface">your own</b> AWS account, so your mail stays your
+        MailPoppy runs entirely in <b className="text-on-surface">your own</b> AWS account, so your mail stays your
         property. You only need to do this once.
       </p>
 
-      {/* Least-privilege guidance — bounds what Mailpoppy can ever do, regardless of how you connect */}
+      {/* Least-privilege guidance — bounds what MailPoppy can ever do, regardless of how you connect */}
       <div className="mt-4 flex items-start gap-2 rounded-lg border border-secondary/20 bg-secondary/5 p-3 text-sm text-on-surface-variant">
         <ShieldCheck className="mt-0.5 size-4 shrink-0 text-secondary" />
         <span>
           <b className="text-on-surface">Use a dedicated, least-privilege key — never your account root.</b> Create an
-          IAM user scoped to Mailpoppy&apos;s two policies — the{" "}
+          IAM user scoped to MailPoppy&apos;s two policies — the{" "}
           <ExtLink className={linkCls} href={POLICY_FILE}>
             provisioning policy <ExternalLink className="size-3" />
           </ExtLink>{" "}
@@ -139,7 +139,7 @@ export function AwsOnboarding({ onResult, onRecheck, cliInstalled, submit = defa
           <ExtLink className={linkCls} href={DEPLOY_POLICY_FILE}>
             deploy policy <ExternalLink className="size-3" />
           </ExtLink>{" "}
-          (one-time backend creation). Together they cap what Mailpoppy can ever do in your account, and you can revoke
+          (one-time backend creation). Together they cap what MailPoppy can ever do in your account, and you can revoke
           them any time.
         </span>
       </div>
@@ -159,7 +159,7 @@ export function AwsOnboarding({ onResult, onRecheck, cliInstalled, submit = defa
           <ExtLink className={linkCls} href={IAM_CONSOLE}>
             AWS console → IAM → Users <ExternalLink className="size-3" />
           </ExtLink>
-          , add a user, attach both Mailpoppy policies —{" "}
+          , add a user, attach both MailPoppy policies —{" "}
           <ExtLink className={linkCls} href={POLICY_FILE}>
             provisioning
           </ExtLink>{" "}
@@ -173,7 +173,7 @@ export function AwsOnboarding({ onResult, onRecheck, cliInstalled, submit = defa
       </ol>
 
       {/* ── Step 3 — connect, using the access key from step 2. The CLI keeps the secret
-          out of Mailpoppy's window; the paste form below is the no-terminal alternative. ── */}
+          out of MailPoppy's window; the paste form below is the no-terminal alternative. ── */}
       <div className="mt-4 rounded-xl border border-primary/30 bg-primary-container/10 p-4">
         <div className="flex items-center gap-2">
           <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary-container/20 font-mono text-[11px] font-semibold text-primary">
@@ -190,7 +190,7 @@ export function AwsOnboarding({ onResult, onRecheck, cliInstalled, submit = defa
         <p className="mt-1 flex items-start gap-1.5 text-sm text-on-surface-variant">
           <Lock className="mt-0.5 size-3.5 shrink-0 text-secondary" />
           <span>
-            Your secret key <b className="text-on-surface">never enters Mailpoppy&apos;s window</b>. It stays in your
+            Your secret key <b className="text-on-surface">never enters MailPoppy&apos;s window</b>. It stays in your
             local <code className="font-mono">~/.aws</code> config and is read only by the open-source sidecar — exactly
             how the AWS CLI itself works.
           </span>
@@ -220,7 +220,7 @@ export function AwsOnboarding({ onResult, onRecheck, cliInstalled, submit = defa
           </button>
         </div>
         <p className="mt-2 text-sm text-on-surface-variant">
-          Paste your two keys at the prompts (Mailpoppy auto-detects the <code className="font-mono">mailpoppy</code>{" "}
+          Paste your two keys at the prompts (MailPoppy auto-detects the <code className="font-mono">mailpoppy</code>{" "}
           profile), then:
         </p>
 
@@ -229,7 +229,7 @@ export function AwsOnboarding({ onResult, onRecheck, cliInstalled, submit = defa
         </Button>
 
         <p className="mt-3 text-xs text-on-surface-variant/80">
-          Using AWS SSO? Run <code className="font-mono">aws sso login</code> and launch Mailpoppy with{" "}
+          Using AWS SSO? Run <code className="font-mono">aws sso login</code> and launch MailPoppy with{" "}
           <code className="font-mono">AWS_PROFILE</code> set to your profile.
         </p>
       </div>
@@ -259,9 +259,9 @@ export function AwsOnboarding({ onResult, onRecheck, cliInstalled, submit = defa
           <p className="flex items-start gap-1.5 rounded-lg border border-outline-variant/20 bg-surface-container-lowest p-3 text-xs text-on-surface-variant">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-tertiary" />
             <span>
-              Convenient, but the keys you paste <b className="text-on-surface">pass through Mailpoppy</b> before being
+              Convenient, but the keys you paste <b className="text-on-surface">pass through MailPoppy</b> before being
               saved to <code className="font-mono">~/.aws/credentials</code> on this computer. They&apos;re never
-              uploaded to us — but if you&apos;d rather Mailpoppy never touch your secret, use the CLI option above.
+              uploaded to us — but if you&apos;d rather MailPoppy never touch your secret, use the CLI option above.
             </span>
           </p>
 
@@ -329,7 +329,7 @@ export function AwsOnboarding({ onResult, onRecheck, cliInstalled, submit = defa
             <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-secondary" />
             Saved only on this computer, in the standard AWS location (
             <code className="font-mono">~/.aws/credentials</code>, owner-only permissions) — exactly where the AWS CLI
-            keeps them. Never uploaded or sent to Mailpoppy.
+            keeps them. Never uploaded or sent to MailPoppy.
           </p>
         </div>
       )}

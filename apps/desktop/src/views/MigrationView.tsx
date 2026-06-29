@@ -14,12 +14,12 @@ import { friendlyError } from "../lib/errors";
 // Phase 4 — "Bring your old mail across." Connects to the user's existing
 // WorkMail / IMAP account (credentials stay on this machine, in the sidecar),
 // previews the folders, and imports the selected ones into the deployed
-// Mailpoppy backend. Imported mail appears in the normal Inbox afterwards.
+// MailPoppy backend. Imported mail appears in the normal Inbox afterwards.
 
 /**
  * Themed mailbox picker (native <select> can't be styled to match the dark UI).
  * A styled trigger + a dark popover listbox, with mailboxes grouped by domain —
- * a Mailpoppy admin typically runs many mailboxes across several domains.
+ * a MailPoppy admin typically runs many mailboxes across several domains.
  */
 function MailboxSelect({
   value,
@@ -229,7 +229,7 @@ export function MigrationView({
   const [dryRun, setDryRun] = useState(false);
 
   // Destination is chosen from the mailboxes that actually exist in the deployed
-  // backend. A Mailpoppy admin typically runs many mailboxes across several
+  // backend. A MailPoppy admin typically runs many mailboxes across several
   // domains, so a picker (not a free-text field) makes the target unmistakable
   // and prevents importing into a typo'd address no one could ever sign in to.
   const [mailboxes, setMailboxes] = useState<Mailbox[] | null>(null);
@@ -263,7 +263,7 @@ export function MigrationView({
         setMailboxes([]);
         const msg = String(e);
         setMbNotice(
-          /\b404\b/.test(msg) && /No deployed Mailpoppy backend/i.test(msg)
+          /\b404\b/.test(msg) && /No deployed MailPoppy backend/i.test(msg)
             ? "No backend is deployed yet. Run Setup (deploy a backend, then create a mailbox) before importing mail."
             : `Couldn't load your mailboxes: ${friendlyError(e)}`,
         );
@@ -358,7 +358,7 @@ export function MigrationView({
         <p className="mt-2 max-w-2xl text-lg text-on-surface-variant">
           Works with <strong className="text-on-surface">any mailbox that supports IMAP</strong> — AWS WorkMail,
           Yahoo, Fastmail, iCloud, your web host's mailbox, and more. Import all your existing mail into your new
-          Mailpoppy mailbox before the old account is shut down. Your credentials stay on this machine — sent only to
+          MailPoppy mailbox before the old account is shut down. Your credentials stay on this machine — sent only to
           the local helper, never to us.
         </p>
       </header>
@@ -405,7 +405,7 @@ export function MigrationView({
           <Field
             label="Password"
             className="md:col-span-6"
-            hint="The password for the OLD account you're importing from — not your new Mailpoppy mailbox. Some providers (e.g. Yahoo, iCloud, Fastmail) require an app-specific password — and IMAP enabled in the account's settings — rather than your normal login password when 2-factor sign-in is on."
+            hint="The password for the OLD account you're importing from — not your new MailPoppy mailbox. Some providers (e.g. Yahoo, iCloud, Fastmail) require an app-specific password — and IMAP enabled in the account's settings — rather than your normal login password when 2-factor sign-in is on."
           >
             <TextInput
               aria-label="IMAP password"
@@ -426,7 +426,7 @@ export function MigrationView({
             className="md:col-span-12"
             hint={
               <>
-                Imported mail lands in this Mailpoppy mailbox. Don't see the one you want? Create it in the{" "}
+                Imported mail lands in this MailPoppy mailbox. Don't see the one you want? Create it in the{" "}
                 <strong className="text-on-surface">Setup</strong> tab first.
               </>
             }
@@ -505,7 +505,7 @@ export function MigrationView({
                 <tr>
                   <Th>Import</Th>
                   <Th>IMAP folder</Th>
-                  <Th>→ Mailpoppy folder</Th>
+                  <Th>→ MailPoppy folder</Th>
                   <Th>Messages</Th>
                 </tr>
               </thead>
@@ -544,7 +544,7 @@ export function MigrationView({
             <thead>
               <tr>
                 <Th>IMAP folder</Th>
-                <Th>→ Mailpoppy folder</Th>
+                <Th>→ MailPoppy folder</Th>
                 <Th>{summary.dryRun ? "Would import" : "Imported"}</Th>
                 <Th>Skipped</Th>
               </tr>

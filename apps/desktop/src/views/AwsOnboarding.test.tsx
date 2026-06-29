@@ -39,10 +39,10 @@ describe("AwsOnboarding", () => {
     expect(hrefs.some((h) => h.endsWith("/mailpoppy-deploy-policy.json"))).toBe(true);
   });
 
-  it("does not imply the user pays Mailpoppy for AWS usage", () => {
+  it("does not imply the user pays MailPoppy for AWS usage", () => {
     render(<AwsOnboarding onResult={vi.fn()} onRecheck={vi.fn()} />);
-    // Cost is billed by AWS, not us — wording must not read as paying Mailpoppy.
-    expect(screen.queryByText(/Mailpoppy's own\s+usage/i)).not.toBeInTheDocument();
+    // Cost is billed by AWS, not us — wording must not read as paying MailPoppy.
+    expect(screen.queryByText(/MailPoppy's own\s+usage/i)).not.toBeInTheDocument();
     expect(screen.getByText(/billed by\s+AWS/i)).toBeInTheDocument();
     expect(screen.getByText(/You pay AWS directly; never us\./i)).toBeInTheDocument();
   });
@@ -68,7 +68,7 @@ describe("AwsOnboarding", () => {
     expect(screen.queryByLabelText("Access Key ID")).not.toBeInTheDocument();
     openPaste();
     expect(screen.getByLabelText("Access Key ID")).toBeInTheDocument();
-    expect(screen.getByText(/pass through Mailpoppy/i)).toBeInTheDocument();
+    expect(screen.getByText(/pass through MailPoppy/i)).toBeInTheDocument();
   });
 
   it("disables Connect until both keys are entered, then submits trimmed values", async () => {

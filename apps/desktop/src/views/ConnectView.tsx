@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { DeploymentConfig } from "../lib/deploymentConfig";
 import { Card, Button, cn } from "../ui";
 
-// Enter the four CloudFormation Outputs of a deployed Mailpoppy backend. The
+// Enter the four CloudFormation Outputs of a deployed MailPoppy backend. The
 // admin gets these from the Setup wizard's deploy step (or the AWS console).
 
 const fieldCls =
@@ -35,7 +35,7 @@ export function ConnectView({
   return (
     <Card className="max-w-xl">
       <h3 className="text-lg font-semibold text-on-surface">Connect to your deployment</h3>
-      <p className="mt-1 text-sm text-on-surface-variant">Paste the outputs from your Mailpoppy CloudFormation stack.</p>
+      <p className="mt-1 text-sm text-on-surface-variant">Paste the outputs from your MailPoppy CloudFormation stack.</p>
 
       <div className="mt-4 flex flex-col gap-3">
         <div>

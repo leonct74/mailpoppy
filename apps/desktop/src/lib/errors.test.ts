@@ -17,8 +17,8 @@ describe("friendlyError", () => {
   });
 
   it("surfaces a plain-text sidecar body without the status prefix", () => {
-    const e = new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
-    expect(friendlyError(e)).toBe("No deployed Mailpoppy backend was found yet.");
+    const e = new Error("sidecar 404: No deployed MailPoppy backend was found yet.");
+    expect(friendlyError(e)).toBe("No deployed MailPoppy backend was found yet.");
   });
 
   it("falls back to a generic phrase for an empty-bodied status", () => {

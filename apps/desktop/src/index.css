@@ -6,7 +6,7 @@
 @source not "../stitch";
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Mailpoppy design tokens — "Midnight" dark theme (from the Stitch design,
+   MailPoppy design tokens — "Midnight" dark theme (from the Stitch design,
    palette "Etheric Cloud"). Tailwind v4 exposes every --color-* as utilities
    (bg-surface, text-on-surface-variant, border-outline-variant, …) so the
    Stitch markup maps over almost verbatim.

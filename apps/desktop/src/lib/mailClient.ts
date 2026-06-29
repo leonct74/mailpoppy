@@ -77,8 +77,8 @@ function seed(): MessageMeta[] {
   return [
     meta({
       messageId: "demo-1",
-      subject: "Welcome to Mailpoppy 🌸",
-      from: { name: "Mailpoppy", address: "hello@mailpoppy.app" },
+      subject: "Welcome to MailPoppy 🌸",
+      from: { name: "MailPoppy", address: "hello@mailpoppy.app" },
       date: "2026-06-02T08:30:00.000Z",
       snippet: "Your mail now lives in your own AWS account. Here's how it works…",
       folder: "inbox",
@@ -115,7 +115,7 @@ function seed(): MessageMeta[] {
     }),
     meta({
       messageId: "demo-5",
-      subject: "Re: Welcome to Mailpoppy 🌸",
+      subject: "Re: Welcome to MailPoppy 🌸",
       from: { address: MAILBOX },
       to: [{ address: "hello@mailpoppy.app" }],
       date: "2026-06-02T09:05:00.000Z",

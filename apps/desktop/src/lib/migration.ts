@@ -1,5 +1,5 @@
 // Desktop client for the sidecar's Phase 4 migration endpoints (WorkMail / any
-// IMAP → the deployed Mailpoppy backend). The actual IMAP fetch + S3/DynamoDB
+// IMAP → the deployed MailPoppy backend). The actual IMAP fetch + S3/DynamoDB
 // writes happen in the sidecar (admin plane); this is just the typed transport.
 import { sidecar } from "./sidecar";
 

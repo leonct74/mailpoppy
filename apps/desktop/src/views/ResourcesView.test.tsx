@@ -54,7 +54,7 @@ describe("ResourcesView", () => {
     };
     render(<ResourcesView load={vi.fn(async () => empty)} />);
 
-    expect(await screen.findByText(/No Mailpoppy backend is deployed/)).toBeInTheDocument();
+    expect(await screen.findByText(/No MailPoppy backend is deployed/)).toBeInTheDocument();
   });
 
   it("surfaces a read error", async () => {
