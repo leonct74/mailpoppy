@@ -1,8 +1,12 @@
 // Turn an error (usually thrown by the sidecar client) into a short, calm,
 // user-facing sentence. The sidecar() helper throws `sidecar <status>: <body>`,
-// where <body> is normally JSON like {"ok":false,"error":"…"} — we surface the
-// inner message, never the raw envelope or a bare HTTP status. Network/helper
-// failures are already friendly (see sidecar.ts) and pass through unchanged.
+// where <body> is normally JSON. Two shapes exist: the sidecar's GLOBAL error
+// handler returns {ok:false, error:<err.name>, message:<human text>} — the readable
+// description is in `message`, with only the error *name* (e.g. "Error") in `error`
+// — while explicit route catches return {ok:false, error:<human text>} with the
+// message directly in `error`. We surface the human text, never the raw envelope,
+// a bare HTTP status, or a useless "Error". Network/helper failures are already
+// friendly (see sidecar.ts) and pass through unchanged.
 export function friendlyError(e: unknown, fallback = "Something went wrong. Please try again."): string {
   const raw = e instanceof Error ? e.message : typeof e === "string" ? e : "";
   if (!raw) return fallback;
@@ -13,8 +17,11 @@ export function friendlyError(e: unknown, fallback = "Something went wrong. Plea
   const [, status, body = ""] = m;
   let detail = body.trim();
   try {
-    const parsed = JSON.parse(detail) as { error?: unknown };
-    if (typeof parsed.error === "string" && parsed.error.trim()) detail = parsed.error.trim();
+    const parsed = JSON.parse(detail) as { error?: unknown; message?: unknown };
+    const pick = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : "");
+    // Prefer `message` (the global handler's human text); fall back to `error`
+    // (explicit catches). This is what stops a bare "Error" reaching the user.
+    detail = pick(parsed.message) || pick(parsed.error) || detail;
   } catch {
     /* body wasn't JSON — keep the text */
   }

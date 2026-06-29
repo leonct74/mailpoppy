@@ -7,6 +7,15 @@ describe("friendlyError", () => {
     expect(friendlyError(e)).toBe("Stack delete failed: bucket not empty");
   });
 
+  it("prefers .message over the err-name .error (the global handler's envelope)", () => {
+    // The sidecar's setErrorHandler returns {error: <err.name>, message: <human text>}.
+    // Reading .error would surface a useless bare "Error" — .message is the real reason.
+    const e = new Error(
+      'sidecar 500: {"ok":false,"code":"NoZone","error":"Error","message":"No Route53 hosted zone found for nozone.com"}',
+    );
+    expect(friendlyError(e)).toBe("No Route53 hosted zone found for nozone.com");
+  });
+
   it("surfaces a plain-text sidecar body without the status prefix", () => {
     const e = new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
     expect(friendlyError(e)).toBe("No deployed Mailpoppy backend was found yet.");
