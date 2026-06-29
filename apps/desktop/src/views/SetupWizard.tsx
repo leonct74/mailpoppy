@@ -519,11 +519,15 @@ export function SetupWizard({
 
       setStep((cur) => (cur === "start" ? r.step : cur));
 
-      // Resume convenience: when we drop the user back at the domain form for an
-      // ALREADY-deployed backend, run the AWS/DNS check for them so they land straight
-      // on the real next action (set up mail / publish DNS) — not a bare "Continue"
-      // button they have to discover. Once only, and only on resume (never while typing).
-      if (deployed && r.domain && r.step === "start" && !autoPreflightedRef.current) {
+      // Resume convenience: whenever we resume with a KNOWN domain — a re-run pinned
+      // to a domain, or leftover DNS from a prior setup — run the AWS/DNS check for the
+      // user so they land straight on the real next action instead of a bare "Continue"
+      // button they have to discover. With the backend already deployed that's "Set up
+      // domain mail"; without it (a half-finished setup) it's "Deploy backend", so a
+      // resumed-but-undeployed domain isn't stranded at "Create your backend" with no
+      // trigger. Once only, and only on resume — the r.domain guard leaves a brand-new
+      // setup (nothing typed yet) untouched so it never preflights an empty domain.
+      if (r.domain && r.step === "start" && !autoPreflightedRef.current) {
         autoPreflightedRef.current = true;
         void runPreflight(r.domain);
       }

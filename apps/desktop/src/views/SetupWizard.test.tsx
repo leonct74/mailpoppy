@@ -353,11 +353,13 @@ describe("SetupWizard · resume from reality", () => {
     expect(screen.getByLabelText("Mailbox email")).toBeInTheDocument();
   });
 
-  it("surfaces leftover DNS when a domain exists but no backend is deployed", async () => {
+  it("surfaces leftover DNS and lands on Deploy backend when a domain exists but no backend is deployed", async () => {
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;
       if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
       if (path.startsWith("/teardown/domains")) return { ok: true, domains: ["leftover.com"] };
+      if (path.startsWith("/aws/preflight")) return { accountId: "123456789012", zoneId: "Z123", region: "eu-west-1" };
+      if (path.startsWith("/provision/") && path.endsWith("/status")) throw new Error("sidecar 404: identity not found");
       throw new Error(`unexpected sidecar path ${path}`);
     });
 
@@ -365,6 +367,9 @@ describe("SetupWizard · resume from reality", () => {
 
     expect(await screen.findByText(/leftover mail DNS/i)).toBeInTheDocument();
     expect((screen.getByPlaceholderText("yourdomain.com") as HTMLInputElement).value).toBe("leftover.com");
+    // The resume auto-preflights so the user isn't stranded at "Create your backend"
+    // with no trigger — the Deploy backend action is reachable, not a bare "Continue".
+    expect(await screen.findByRole("button", { name: /Deploy backend/i })).toBeInTheDocument();
   });
 
   it("resumes a deploy that is still running in the background after a restart", async () => {
