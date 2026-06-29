@@ -372,6 +372,28 @@ describe("SetupWizard · resume from reality", () => {
     expect(await screen.findByRole("button", { name: /Deploy backend/i })).toBeInTheDocument();
   });
 
+  it("still offers Deploy backend when the pre-check fails (no Route53 hosted zone yet)", async () => {
+    // Resume a pinned domain whose hosted zone is missing: preflight throws, but
+    // creating the backend doesn't need the zone, so the user must NOT be stranded.
+    mockSidecar.mockImplementation(async (path: string) => {
+      if (path === "/aws/readiness") return READY;
+      if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
+      if (path.startsWith("/teardown/domains")) return { ok: true, domains: [] };
+      if (path.startsWith("/aws/preflight"))
+        throw new Error('sidecar 502: {"ok":false,"error":"No Route53 hosted zone found for nozone.com"}');
+      throw new Error(`unexpected sidecar path ${path}`);
+    });
+
+    render(<SetupWizard presetDomain="nozone.com" />);
+
+    // The deploy is reachable despite the failed pre-check…
+    expect(await screen.findByRole("button", { name: /Deploy backend/i })).toBeInTheDocument();
+    // …and the warning explains the zone is needed later (before the SES + DNS step), not now.
+    expect(screen.getByText(/couldn.t fully check nozone\.com/i)).toBeInTheDocument();
+    expect(screen.getByText(/domain mail \(SES \+ DNS\)/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Route53 hosted zone/i).length).toBeGreaterThan(0);
+  });
+
   it("resumes a deploy that is still running in the background after a restart", async () => {
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;

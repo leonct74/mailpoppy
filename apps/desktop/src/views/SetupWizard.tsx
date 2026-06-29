@@ -139,6 +139,10 @@ export function SetupWizard({
   // Fire the resume auto-preflight at most once, so reopening a deployed domain lands
   // the user on the real next action instead of a bare "check" button.
   const autoPreflightedRef = useRef(false);
+  // A soft warning when the read-only pre-check couldn't fully confirm the domain
+  // (most often: no Route53 hosted zone for it yet). It must NOT block creating the
+  // backend — the backend doesn't need the zone — so we surface it and let the user proceed.
+  const [preflightWarn, setPreflightWarn] = useState<string | null>(null);
   const [provision, setProvision] = useState<ProvisionResult | null>(null);
   const [status, setStatus] = useState<IdentityStatus | null>(null);
   const [messageId, setMessageId] = useState<string | null>(null);
@@ -212,12 +216,21 @@ export function SetupWizard({
   async function runPreflight(forDomain?: string) {
     const d = forDomain ?? domain;
     setError(null);
+    setPreflightWarn(null);
     setBusy(true);
     try {
       setPreflight(await sidecar<Preflight>(`/aws/preflight/${encodeURIComponent(d)}`));
       setStep("preflighted");
     } catch (e) {
-      fail(e);
+      // A failed pre-check must NOT strand the user at "Create your backend" with
+      // no trigger. Creating the backend needs only the domain — never the hosted
+      // zone (that's the later SES + DNS step) — so we still advance to
+      // "preflighted" and show the deploy action, surfacing a soft warning rather
+      // than a dead-end. Credentials are already validated at Step 0, so a failure
+      // here is almost always a missing/again-pending Route53 zone.
+      setPreflight(null);
+      setPreflightWarn(friendlyError(e));
+      setStep("preflighted");
     } finally {
       setBusy(false);
     }
@@ -749,6 +762,8 @@ export function SetupWizard({
           </Button>
         </div>
 
+        {/* Read-only confirmation of the account + zone, shown when the pre-check
+            succeeded. The deploy/provision actions below do NOT depend on this. */}
         {preflight && (
           <div className="mt-4 flex flex-col gap-2 text-sm text-on-surface">
             <div className="flex items-center gap-1.5 text-secondary">
@@ -757,41 +772,54 @@ export function SetupWizard({
             <div className="flex items-center gap-1.5 text-secondary">
               <ShieldCheck className="size-4" /> Hosted zone <C>{preflight.zoneId}</C>
             </div>
-            {/* First domain: deploy the shared backend stack. */}
-            {step === "preflighted" && !backendDeployed && (
-              <div className="mt-2">
-                <label className="mb-3 flex max-w-lg items-start gap-2 text-sm text-on-surface-variant">
-                  <input type="checkbox" checked={enableMalware} onChange={(e) => setEnableMalware(e.target.checked)} className="mt-1 size-4 accent-primary" />
-                  <span>
-                    <b className="text-on-surface">Scan attachments for malware</b> <span className="text-secondary">(recommended)</span> —
-                    adds AWS GuardDuty Malware Protection on your mail storage; infected files are blocked from download. Small
-                    AWS usage cost (a personal mailbox is usually within the free tier).
-                  </span>
-                </label>
-                <label className="mb-3 flex max-w-lg items-start gap-2 text-sm text-on-surface-variant">
-                  <input type="checkbox" checked={encryptAtRest} onChange={(e) => setEncryptAtRest(e.target.checked)} className="mt-1 size-4 accent-primary" />
-                  <span>
-                    <b className="text-on-surface">Encrypt mailboxes at rest</b> <span className="text-secondary">(recommended)</span> —
-                    body + attachments are sealed with each user&apos;s password, so even you (the AWS admin) can&apos;t read them.
-                    Turn this off only if some people will read mail in an older Mailpoppy app — older apps can&apos;t open
-                    encrypted mail. Subject &amp; sender stay visible.
-                  </span>
-                </label>
-                <Button onClick={onDeploy} disabled={busy}>
-                  <Rocket className="size-4" /> Deploy backend
-                </Button>
-              </div>
-            )}
+          </div>
+        )}
 
-            {/* Backend already exists (additional domain or re-run): skip deploy,
-                go straight to provisioning this domain's mail DNS. */}
-            {step === "preflighted" && backendDeployed && (
-              <div className="mt-2">
-                <Button onClick={provisionDomain} disabled={busy}>
-                  <Globe className="size-4" /> Set up domain mail (SES + DNS)
-                </Button>
-              </div>
-            )}
+        {/* The pre-check couldn't fully confirm the domain (most often: no Route53
+            hosted zone for it yet). That must NOT block creating the backend — the
+            backend doesn't need the zone — so explain it and let the user proceed. */}
+        {step === "preflighted" && preflightWarn && (
+          <Warn className="mt-4">
+            <b>We couldn&apos;t fully check {domain} yet:</b> {preflightWarn} You can still create the backend now — you&apos;ll
+            just need a <b>Route53 hosted zone</b> for {domain} before the <b>domain mail (SES + DNS)</b> step.
+          </Warn>
+        )}
+
+        {/* Create the backend stack. Reachable whenever the backend isn't live yet
+            and we've reached this step — deploying needs only the domain, never the
+            hosted zone, so a failed/again-pending pre-check never strands it here. */}
+        {step === "preflighted" && !backendDeployed && (
+          <div className="mt-4">
+            <label className="mb-3 flex max-w-lg items-start gap-2 text-sm text-on-surface-variant">
+              <input type="checkbox" checked={enableMalware} onChange={(e) => setEnableMalware(e.target.checked)} className="mt-1 size-4 accent-primary" />
+              <span>
+                <b className="text-on-surface">Scan attachments for malware</b> <span className="text-secondary">(recommended)</span> —
+                adds AWS GuardDuty Malware Protection on your mail storage; infected files are blocked from download. Small
+                AWS usage cost (a personal mailbox is usually within the free tier).
+              </span>
+            </label>
+            <label className="mb-3 flex max-w-lg items-start gap-2 text-sm text-on-surface-variant">
+              <input type="checkbox" checked={encryptAtRest} onChange={(e) => setEncryptAtRest(e.target.checked)} className="mt-1 size-4 accent-primary" />
+              <span>
+                <b className="text-on-surface">Encrypt mailboxes at rest</b> <span className="text-secondary">(recommended)</span> —
+                body + attachments are sealed with each user&apos;s password, so even you (the AWS admin) can&apos;t read them.
+                Turn this off only if some people will read mail in an older Mailpoppy app — older apps can&apos;t open
+                encrypted mail. Subject &amp; sender stay visible.
+              </span>
+            </label>
+            <Button onClick={onDeploy} disabled={busy}>
+              <Rocket className="size-4" /> Deploy backend
+            </Button>
+          </div>
+        )}
+
+        {/* Backend already exists (additional domain or re-run): skip deploy,
+            go straight to provisioning this domain's mail DNS. */}
+        {step === "preflighted" && backendDeployed && (
+          <div className="mt-4">
+            <Button onClick={provisionDomain} disabled={busy}>
+              <Globe className="size-4" /> Set up domain mail (SES + DNS)
+            </Button>
           </div>
         )}
 
