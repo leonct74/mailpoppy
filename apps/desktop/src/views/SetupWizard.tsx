@@ -45,6 +45,15 @@ interface IdentityStatus {
 // the two never drift — see ../lib/setupProgress.
 type Step = SetupStep;
 const SERVICES = ["route53", "ses", "sesv2", "s3"] as const;
+// Plain-language names for the AWS services MailPoppy needs access to — the raw
+// service ids (route53/ses/sesv2/s3) are AWS jargon, so they're shown only as a
+// hover title for anyone who wants the technical name.
+const SERVICE_LABEL: Record<(typeof SERVICES)[number], { name: string; does: string }> = {
+  route53: { name: "Your domain's DNS", does: "read and update your domain's DNS records" },
+  ses: { name: "Sending email", does: "send email from your domain" },
+  sesv2: { name: "Email settings", does: "manage your domain's email settings" },
+  s3: { name: "Mail storage", does: "store your mail" },
+};
 
 /** Remember the typed-but-not-yet-submitted domain so a remount/HMR/restart
  *  doesn't lose it before there's anything in AWS to resume from. */
@@ -238,7 +247,7 @@ export function SetupWizard({
   // Step 2 — deploy the full backend stack via CloudFormation (no terminal/cdk).
   function onDeploy() {
     askConfirm(
-      `Deploy the Mailpoppy backend for ${domain} into your AWS account? This creates a CloudFormation stack (S3, DynamoDB, Lambdas, API, Cognito) — real resources in your account.`,
+      `Set up your email service for ${domain} in your AWS account? This creates the things your email needs to run — real AWS resources that you own — and takes about 1–3 minutes.`,
       runDeploy,
     );
   }
@@ -335,7 +344,7 @@ export function SetupWizard({
 
   function provisionDomain() {
     askConfirm(
-      `Set up mail DNS for ${domain}? This verifies the domain in SES and publishes DKIM/MX/DMARC records.`,
+      `Set up email for ${domain}? This adds the DNS records that let your domain send and receive mail, in your AWS account.`,
       runProvision,
     );
   }
@@ -628,8 +637,8 @@ export function SetupWizard({
         </h2>
         <p className="mt-1 max-w-2xl text-on-surface-variant">
           {backendDeployed
-            ? "Verify the domain in SES and publish its DNS records (DKIM/MX/DMARC) — all in your own AWS account. Your credentials never leave this machine."
-            : "Provision the SES, Route53, Lambda and Cognito resources for your first domain — all in your own AWS account. Your credentials never leave this machine."}
+            ? "Add the DNS records that let this domain send and receive email — all inside your own AWS account, so your mail stays yours. Nothing leaves this computer."
+            : "Set up everything your email needs — the service that runs it, and your domain's DNS records — all inside your own AWS account, so your mail stays yours. Nothing leaves this computer."}
         </p>
       </div>
 
@@ -647,10 +656,10 @@ export function SetupWizard({
           </Card>
 
       {/* ---- Step 0: AWS environment ---- */}
-      <StepCard step="Step 0" title="AWS environment">
+      <StepCard step="Step 0" title="Your AWS account">
         {checking && (
           <div className="flex items-center gap-2 text-sm text-on-surface-variant">
-            <Spinner /> Starting Mailpoppy and checking your AWS environment…{" "}
+            <Spinner /> Getting ready and checking your AWS account…{" "}
             <span className="text-on-surface-variant/60">(this can take a few seconds)</span>
           </div>
         )}
@@ -665,32 +674,35 @@ export function SetupWizard({
             {/* Credentials */}
             <div className="flex items-center justify-between gap-3 rounded-lg border border-outline-variant/10 bg-surface-container-lowest p-3">
               <span className="flex items-center gap-2 text-on-surface-variant">
-                <KeyRound className="size-4" /> Credentials
+                <KeyRound className="size-4" /> Connection
               </span>
               {readiness.credentials.ok ? (
                 <span className="flex items-center gap-2">
-                  <OkBadge>Found</OkBadge>
-                  <span className="font-mono text-xs text-on-surface-variant">
-                    {readiness.credentials.arn}
-                    {readiness.credentials.account ? ` (account ${readiness.credentials.account})` : ""}
-                  </span>
+                  <OkBadge>Connected</OkBadge>
+                  {readiness.credentials.account && (
+                    <span className="font-mono text-xs text-on-surface-variant" title={readiness.credentials.arn}>
+                      account {readiness.credentials.account}
+                    </span>
+                  )}
                 </span>
               ) : (
                 <span className="text-tertiary">
-                  ⛔ No usable AWS credentials{readiness.credentials.error ? `: ${readiness.credentials.error}` : ""}
+                  ⛔ We couldn&apos;t reach your AWS account yet
+                  {readiness.credentials.error ? ` — ${readiness.credentials.error}` : ""}
                 </span>
               )}
             </div>
-            {/* Permissions */}
+            {/* What MailPoppy can do — plain-language capability names, raw service id on hover. */}
             {readiness.credentials.ok && (
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-on-surface-variant">Permissions:</span>
+                <span className="text-on-surface-variant">What MailPoppy can do:</span>
                 {SERVICES.map((k) => (
                   <span
                     key={k}
-                    className={cn("inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-mono text-xs", permTone(readiness.permissions[k]))}
+                    title={`AWS ${k} — ${SERVICE_LABEL[k].does}`}
+                    className={cn("inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs", permTone(readiness.permissions[k]))}
                   >
-                    {permIcon(readiness.permissions[k])} {k}
+                    {permIcon(readiness.permissions[k])} {SERVICE_LABEL[k].name}
                   </span>
                 ))}
               </div>
@@ -709,15 +721,23 @@ export function SetupWizard({
             {/* Credentials resolve but a service permission is missing. */}
             {!ready && readiness.credentials.ok && (
               <Warn>
-                <b>Almost there — a permission is missing:</b>
+                <b>Almost there — MailPoppy is missing some access:</b>
                 <ul className="ml-4 mt-1.5 list-disc space-y-2">
                   {SERVICES.filter((k) => readiness.permissions[k] !== "ok").map((k) => (
                     <li key={k}>
-                      <b>{k}</b>: {readiness.permissions[k] === "denied" ? "access denied — this identity lacks permission" : "could not verify"}.
-                      Attach <b>AdministratorAccess</b> (or the Mailpoppy provisioning policy) to <C>{readiness.credentials.arn}</C>.
+                      <b>{SERVICE_LABEL[k].name}</b> — MailPoppy{" "}
+                      {readiness.permissions[k] === "denied" ? "isn't allowed to" : "couldn't check whether it can"}{" "}
+                      {SERVICE_LABEL[k].does}.
                     </li>
                   ))}
                 </ul>
+                <p className="mt-2">
+                  The quickest fix is to give this AWS user full access — attach the{" "}
+                  <b>AdministratorAccess</b> policy in AWS — then re-check.{" "}
+                  <span className="text-on-surface-variant/70" title={readiness.credentials.arn}>
+                    (Applies to the AWS user you connected.)
+                  </span>
+                </p>
                 <Button variant="secondary" size="sm" className="mt-3" onClick={() => void loadReadiness()} disabled={checking}>
                   <RefreshCw className="size-3.5" /> Re-check
                 </Button>
@@ -725,7 +745,7 @@ export function SetupWizard({
             )}
             {ready && (
               <div className="flex items-center gap-2 font-medium text-secondary">
-                <ShieldCheck className="size-4" /> Environment ready — you can set up a domain.
+                <ShieldCheck className="size-4" /> Your AWS account is connected and ready — let&apos;s set up your domain.
               </div>
             )}
           </div>
@@ -734,11 +754,11 @@ export function SetupWizard({
 
       {/* ---- Steps 1–4 (gated on readiness) ---- */}
       <StepCard step="Steps 1–4" title="Set up a domain">
-        {!ready && <p className="mb-3 text-sm text-on-surface-variant">Complete Step 0 first.</p>}
+        {!ready && <p className="mb-3 text-sm text-on-surface-variant">Connect your AWS account above first.</p>}
         {ready && leftover && (
           <Warn className="mb-3">
-            We found leftover mail DNS for <b>{domain}</b> from an earlier setup, but no backend is deployed. Continue below
-            to deploy it — the existing records are reused, so you won&apos;t get duplicates.
+            We found DNS records for <b>{domain}</b> from an earlier setup, but your email service isn&apos;t running yet.
+            Set it up below — the existing records are reused, so you won&apos;t get duplicates.
           </Warn>
         )}
 
@@ -759,16 +779,20 @@ export function SetupWizard({
           </Button>
         </div>
 
-        {/* Read-only confirmation of the account + zone, shown when the pre-check
-            succeeded. The deploy/provision actions below do NOT depend on this. */}
+        {/* Plain confirmation up front; the raw ids live in a "Technical details"
+            disclosure for anyone who wants them. The actions below don't depend on it. */}
         {preflight && (
-          <div className="mt-4 flex flex-col gap-2 text-sm text-on-surface">
+          <div className="mt-4 text-sm">
             <div className="flex items-center gap-1.5 text-secondary">
-              <ShieldCheck className="size-4" /> Account <C>{preflight.accountId}</C> · region <C>{preflight.region}</C>
+              <ShieldCheck className="size-4" /> Found your AWS account and your domain&apos;s DNS — ready to set up email.
             </div>
-            <div className="flex items-center gap-1.5 text-secondary">
-              <ShieldCheck className="size-4" /> Hosted zone <C>{preflight.zoneId}</C>
-            </div>
+            <details className="mt-1.5 text-xs text-on-surface-variant/80">
+              <summary className="cursor-pointer select-none hover:text-on-surface-variant">Technical details</summary>
+              <div className="mt-1.5 flex flex-col gap-1 font-mono">
+                <span>account {preflight.accountId} · region {preflight.region}</span>
+                <span>DNS zone {preflight.zoneId}</span>
+              </div>
+            </details>
           </div>
         )}
 
@@ -777,8 +801,9 @@ export function SetupWizard({
             backend doesn't need the zone — so explain it and let the user proceed. */}
         {step === "preflighted" && preflightWarn && (
           <Warn className="mt-4">
-            <b>We couldn&apos;t fully check {domain} yet:</b> {preflightWarn} You can still create the backend now — you&apos;ll
-            just need a <b>Route53 hosted zone</b> for {domain} before the <b>domain mail (SES + DNS)</b> step.
+            <b>We couldn&apos;t finish checking {domain} yet:</b> {preflightWarn} You can still set up your email service
+            now — but before the next step (your domain&apos;s email), {domain} needs its{" "}
+            <b>DNS hosted in this AWS account</b> (in Route&nbsp;53). Sort that out and come back.
           </Warn>
         )}
 
@@ -790,22 +815,22 @@ export function SetupWizard({
             <label className="mb-3 flex max-w-lg items-start gap-2 text-sm text-on-surface-variant">
               <input type="checkbox" checked={enableMalware} onChange={(e) => setEnableMalware(e.target.checked)} className="mt-1 size-4 accent-primary" />
               <span>
-                <b className="text-on-surface">Scan attachments for malware</b> <span className="text-secondary">(recommended)</span> —
-                adds AWS GuardDuty Malware Protection on your mail storage; infected files are blocked from download. Small
-                AWS usage cost (a personal mailbox is usually within the free tier).
+                <b className="text-on-surface">Scan attachments for viruses</b> <span className="text-secondary">(recommended)</span> —
+                checks files for malware before anyone can download them. There&apos;s a small AWS cost, but it&apos;s usually
+                free for a personal mailbox.
               </span>
             </label>
             <label className="mb-3 flex max-w-lg items-start gap-2 text-sm text-on-surface-variant">
               <input type="checkbox" checked={encryptAtRest} onChange={(e) => setEncryptAtRest(e.target.checked)} className="mt-1 size-4 accent-primary" />
               <span>
-                <b className="text-on-surface">Encrypt mailboxes at rest</b> <span className="text-secondary">(recommended)</span> —
-                body + attachments are sealed with each user&apos;s password, so even you (the AWS admin) can&apos;t read them.
-                Turn this off only if some people will read mail in an older Mailpoppy app — older apps can&apos;t open
-                encrypted mail. Subject &amp; sender stay visible.
+                <b className="text-on-surface">Lock each mailbox with its owner&apos;s password</b>{" "}
+                <span className="text-secondary">(recommended)</span> — so even you, the account owner, can&apos;t read
+                someone&apos;s email. Only turn this off if some people will read their mail in an older MailPoppy app that
+                can&apos;t open locked mail. The subject and sender stay visible either way.
               </span>
             </label>
             <Button onClick={onDeploy} disabled={busy}>
-              <Rocket className="size-4" /> Deploy backend
+              <Rocket className="size-4" /> Set up email service
             </Button>
           </div>
         )}
@@ -815,16 +840,16 @@ export function SetupWizard({
         {step === "preflighted" && backendDeployed && (
           <div className="mt-4">
             <Button onClick={provisionDomain} disabled={busy}>
-              <Globe className="size-4" /> Set up domain mail (SES + DNS)
+              <Globe className="size-4" /> Set up email for this domain
             </Button>
           </div>
         )}
 
         {step === "deploying" && (
           <div className="mt-4 flex items-center gap-2 text-sm text-on-surface-variant">
-            <Spinner /> Setting up your backend… <C>{deploy?.status ?? "starting"}</C>{" "}
+            <Spinner /> Setting up your email service…{" "}
             <span className="text-on-surface-variant/60">
-              (this usually takes 1–3 minutes — it keeps running in the background, so you can leave this screen and come back)
+              (this usually takes 1–3 minutes, and keeps going in the background — you can leave this screen and come back)
             </span>
           </div>
         )}
@@ -832,12 +857,11 @@ export function SetupWizard({
         {(step === "deployed" || step === "provisioning" || step === "verifying" || step === "verified" || step === "sending" || step === "sent") &&
           deploy?.outputs?.ApiBaseUrl && (
             <div className="mt-4 text-sm text-on-surface">
-              <span className="text-secondary">✅ Backend deployed</span> · API <C>{deploy.outputs.ApiBaseUrl}</C> · the Inbox
-              tab is now connected.
+              <span className="text-secondary">✅ Your email service is running.</span> The Inbox tab is now connected.
               {step === "deployed" && (
                 <div className="mt-3">
                   <Button onClick={provisionDomain} disabled={busy}>
-                    <Globe className="size-4" /> Set up domain mail (SES + DNS)
+                    <Globe className="size-4" /> Set up email for this domain
                   </Button>
                 </div>
               )}
@@ -846,7 +870,7 @@ export function SetupWizard({
 
         {provision?.ok && (
           <div className="mt-4 text-sm text-secondary">
-            ✅ Domain mail set up · {provision.dkimTokens.length} DKIM records + MX/DMARC published.
+            ✅ Your domain&apos;s email is set up — the DNS records are published.
           </div>
         )}
 
@@ -854,9 +878,9 @@ export function SetupWizard({
           <div className="mt-4 flex items-start gap-2 text-sm text-on-surface-variant">
             <Spinner className="mt-0.5 shrink-0" />
             <span>
-              Verifying your domain (DKIM) — this usually takes <b className="text-on-surface">a few minutes</b>, occasionally
-              up to an hour while your DNS changes spread across the internet. Mailpoppy re-checks every few seconds, so you can
-              leave this open and come back. <span className="text-on-surface-variant/60">Status: {status?.dkim ?? "pending"}.</span>
+              Checking your domain is ready — this usually takes <b className="text-on-surface">a few minutes</b>, occasionally
+              up to an hour while your DNS changes spread across the internet. MailPoppy re-checks every few seconds, so you can
+              leave this open and come back.
             </span>
           </div>
         )}
@@ -864,11 +888,11 @@ export function SetupWizard({
         {(step === "verified" || step === "sending" || step === "sent") && (
           <div className="mt-4 text-sm text-on-surface">
             <div className="flex items-center gap-1.5 text-secondary">
-              <ShieldCheck className="size-4" /> DKIM verified — ready to send.
+              <ShieldCheck className="size-4" /> Your domain is verified — ready to send and receive.
             </div>
             <p className="my-2 text-sm text-on-surface-variant">
               Send a test to a <b className="text-on-surface">personal inbox you can open</b> — e.g. your Gmail or Outlook
-              address (not an address on this domain). Check it lands in the inbox (not spam) with SPF/DKIM/DMARC = PASS.
+              address (not an address on this domain) — and check it lands in your inbox, not spam.
             </p>
             <div className="flex flex-wrap items-end gap-3">
               <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
@@ -883,7 +907,7 @@ export function SetupWizard({
                 />
               </label>
               <Button onClick={sendTest} disabled={busy || !recipient}>
-                <Mail className="size-4" /> {step === "sent" ? "Send another test" : "4. Send deliverability test"}
+                <Mail className="size-4" /> {step === "sent" ? "Send another test" : "Send a test email"}
               </Button>
             </div>
           </div>
@@ -897,11 +921,14 @@ export function SetupWizard({
 
         {step === "sent" && (
           <div className="mt-4 text-sm text-on-surface">
-            🎉 Sent (message <C>{messageId}</C>). Check <b>{recipient}</b> — it should be in the inbox (not spam). Open{" "}
-            <b>Show original</b> to confirm SPF/DKIM/DMARC = PASS.
+            🎉 Sent! Check <b>{recipient}</b> — it should land in your inbox, not spam.
             <p className="mt-2 text-xs text-on-surface-variant">
-              Landed in spam instead? That's normal for a brand-new domain — not a Mailpoppy fault. See{" "}
+              Landed in spam instead? That&apos;s normal for a brand-new domain — not a MailPoppy fault. See{" "}
               <b>Sending health</b> for why it happens and how to improve where your mail lands.
+            </p>
+            <p className="mt-1 text-xs text-on-surface-variant/70">
+              Technical check (optional): open <b>Show original</b> in your email and confirm SPF, DKIM and DMARC all say
+              PASS. <span className="font-mono">message {messageId}</span>
             </p>
           </div>
         )}
@@ -924,8 +951,8 @@ export function SetupWizard({
         <Card>
           <h2 className="text-lg font-semibold text-on-surface">Mailboxes</h2>
           <p className="mt-1 text-sm text-on-surface-variant">
-            A mailbox is a user that can sign in to the Inbox. Mailboxes live in your deployed backend (Cognito), so the
-            backend stack must be deployed first.
+            A mailbox is an email address someone can sign in to and use in the Inbox. You can add mailboxes once your
+            email service is running.
           </p>
 
           {!canAddMailbox ? (
@@ -941,26 +968,27 @@ export function SetupWizard({
               <span>
                 {step === "deploying" ? (
                   <>
-                    Setting up your backend now — this usually takes <b className="text-on-surface">1–3 minutes</b>. Your first
-                    mailbox unlocks here automatically when it&apos;s ready; you can keep this window open.
+                    Setting up your email service now — this usually takes <b className="text-on-surface">1–3 minutes</b>. Your
+                    first mailbox unlocks here automatically when it&apos;s ready; you can keep this window open.
                   </>
                 ) : step === "provisioning" ? (
-                  <>Publishing your domain&apos;s DNS records — just a moment…</>
+                  <>Adding your domain&apos;s DNS records — just a moment…</>
                 ) : step === "verifying" ? (
                   <>
-                    Verifying your domain — usually <b className="text-on-surface">a few minutes</b>, occasionally up to an hour
-                    while DNS updates worldwide. Mailpoppy checks automatically; you can leave this open and come back.
+                    Checking your domain is ready — usually <b className="text-on-surface">a few minutes</b>, occasionally up to
+                    an hour while your DNS updates worldwide. MailPoppy checks automatically; you can leave this open and come
+                    back.
                   </>
                 ) : mbNoBackend ? (
                   <>
-                    Your turn: set up your backend in <b className="text-on-surface">Steps 1–4</b> above — your mailboxes live
-                    there. When you start the deploy it runs for about <b className="text-on-surface">1–3 minutes</b> with live
-                    progress shown right here, and this unlocks the moment it finishes.
+                    Your turn: set up your email service in the step above — that&apos;s where your mailboxes live. It runs for
+                    about <b className="text-on-surface">1–3 minutes</b> with live progress shown right here, and this unlocks
+                    the moment it finishes.
                   </>
                 ) : (
                   <>
-                    Finish this domain&apos;s <b className="text-on-surface">SES + DNS setup</b> above (verification takes a few
-                    minutes). A mailbox on an unverified domain can&apos;t send or receive mail yet.
+                    Finish setting up your domain&apos;s email above (the check takes a few minutes). A mailbox on a domain
+                    that isn&apos;t ready yet can&apos;t send or receive mail.
                   </>
                 )}
               </span>
@@ -1048,12 +1076,15 @@ export function SetupWizard({
 
           {mailboxes && mailboxes.length > 0 && (
             <div className="mt-4 text-sm">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3">
                 <strong className="text-on-surface">Existing mailboxes ({mailboxes.length})</strong>
                 {mbBackend && (
-                  <span className="font-mono text-xs text-on-surface-variant">
-                    backend <C>{stackName}</C> · pool <C>{mbBackend.userPoolId}</C> · {mbBackend.region}
-                  </span>
+                  <details className="text-xs text-on-surface-variant/80">
+                    <summary className="cursor-pointer select-none hover:text-on-surface-variant">Technical details</summary>
+                    <div className="mt-1 whitespace-nowrap font-mono">
+                      stack {stackName} · pool {mbBackend.userPoolId} · {mbBackend.region}
+                    </div>
+                  </details>
                 )}
               </div>
               <ul className="mt-2 flex flex-col gap-2">

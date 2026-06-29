@@ -12,8 +12,8 @@ import type { PhaseView, PhaseKey } from "../lib/setupProgress";
 // Short labels for the rail (the full phrasing lives in the current-step line).
 const SHORT_LABEL: Record<PhaseKey, string> = {
   connect: "AWS account",
-  deploy: "Backend",
-  domain: "Domain mail",
+  deploy: "Email service",
+  domain: "Your domain",
   verify: "Verify",
   mailbox: "Mailbox",
 };

@@ -115,17 +115,17 @@ export function setupPhases(i: PhaseInput): PhaseView[] {
 
   const deploy: PhaseView =
     step === "deploying"
-      ? { key: "deploy", label: "Create your backend", status: "current", busy: true, detail: "Setting it up now — usually 1–3 minutes." }
+      ? { key: "deploy", label: "Set up your email service", status: "current", busy: true, detail: "Setting it up now — usually 1–3 minutes." }
       : deployed
-        ? { key: "deploy", label: "Create your backend", status: "done", busy: false, detail: "Your backend is live." }
-        : { key: "deploy", label: "Create your backend", status: ready ? "current" : "upcoming", busy: false, detail: "A one-time setup, about 1–3 minutes." };
+        ? { key: "deploy", label: "Set up your email service", status: "done", busy: false, detail: "Your email service is running." }
+        : { key: "deploy", label: "Set up your email service", status: ready ? "current" : "upcoming", busy: false, detail: "A one-time setup, about 1–3 minutes." };
 
   const domain: PhaseView =
     step === "provisioning"
-      ? { key: "domain", label: "Set up your domain's mail", status: "current", busy: true, detail: "Publishing DNS records — just a moment…" }
+      ? { key: "domain", label: "Set up your domain's email", status: "current", busy: true, detail: "Adding your domain's DNS records — just a moment…" }
       : provisioned
-        ? { key: "domain", label: "Set up your domain's mail", status: "done", busy: false, detail: "DNS records published." }
-        : { key: "domain", label: "Set up your domain's mail", status: deployed ? "current" : "upcoming", busy: false, detail: "Publishes DKIM, MX and DMARC so you can send + receive." };
+        ? { key: "domain", label: "Set up your domain's email", status: "done", busy: false, detail: "DNS records added." }
+        : { key: "domain", label: "Set up your domain's email", status: deployed ? "current" : "upcoming", busy: false, detail: "Adds the DNS records that let your domain send and receive email." };
 
   const verify: PhaseView =
     step === "verifying"

@@ -58,7 +58,7 @@ describe("SetupWizard · Step 0 readiness gate", () => {
 
     render(<SetupWizard />);
 
-    expect(await screen.findByText(/No usable AWS credentials/i)).toBeInTheDocument();
+    expect(await screen.findByText(/couldn.t reach your AWS account/i)).toBeInTheDocument();
     // The guided "connect your AWS account" panel appears — account sign-up help
     // plus the recommended CLI path (the key-paste form is a downranked disclosure).
     // (the progress map also lists "Connect your AWS account" — target the panel heading)
@@ -91,14 +91,14 @@ describe("SetupWizard · Step 0 readiness gate", () => {
     });
 
     render(<SetupWizard />);
-    await screen.findByText(/No usable AWS credentials/i);
+    await screen.findByText(/couldn.t reach your AWS account/i);
 
     // The stepper must not show the backend as live...
-    expect(screen.queryByText(/Your backend is live/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Your email service is running/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/All set/i)).not.toBeInTheDocument();
     // ...the "Backend" step is still listed (as a to-do) in the stepper, and the
     // current step is connecting AWS, not deploying.
-    expect(screen.getByText("Backend")).toBeInTheDocument();
+    expect(screen.getByText("Email service")).toBeInTheDocument();
     expect(screen.getByText(/Enter your AWS keys to begin/i)).toBeInTheDocument();
   });
 
@@ -113,8 +113,8 @@ describe("SetupWizard · Step 0 readiness gate", () => {
 
     render(<SetupWizard />);
 
-    expect(await screen.findByText(/permission is missing/i)).toBeInTheDocument();
-    expect(screen.getByText(/access denied/i)).toBeInTheDocument();
+    expect(await screen.findByText(/missing some access/i)).toBeInTheDocument();
+    expect(screen.getByText(/isn.t allowed to/i)).toBeInTheDocument();
     expect(screen.getByText(/AdministratorAccess/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText("yourdomain.com")).toBeDisabled();
   });
@@ -124,14 +124,14 @@ describe("SetupWizard · Step 0 readiness gate", () => {
 
     render(<SetupWizard />);
 
-    expect(await screen.findByText(/Environment ready/i)).toBeInTheDocument();
+    expect(await screen.findByText(/connected and ready/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText("yourdomain.com")).not.toBeDisabled();
   });
 
   it("lower-cases the domain input so DNS lookups don't fail on capitalization", async () => {
     route({ readiness: READY });
     render(<SetupWizard />);
-    await screen.findByText(/Environment ready/i);
+    await screen.findByText(/connected and ready/i);
 
     const input = screen.getByPlaceholderText("yourdomain.com") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "Ollydigital.com" } });
@@ -142,7 +142,7 @@ describe("SetupWizard · Step 0 readiness gate", () => {
 describe("SetupWizard · Mailboxes", () => {
   it("blocks mailbox creation until the domain's SES + DNS verify, then creates + saves config", async () => {
     // Realistic: no backend exists until the user deploys one (so resume-from-reality
-    // sees a true fresh start, and "Deploy backend" is the offered action).
+    // sees a true fresh start, and "Set up email service" is the offered action).
     let deployed = false;
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;
@@ -155,7 +155,7 @@ describe("SetupWizard · Mailboxes", () => {
         deployed = true;
         return { ok: true, stackName: "MailpoppyMailStack", operation: "CREATE", bucket: "b", region: "eu-west-1" };
       }
-      // Provision status (DKIM verified). Checked before the generic deploy /status.
+      // Provision status (ready to send and receive). Checked before the generic deploy /status.
       if (path.includes("/provision/") && path.endsWith("/status")) return { dkim: "SUCCESS", verifiedForSending: true };
       if (path.endsWith("/status")) {
         return {
@@ -171,27 +171,27 @@ describe("SetupWizard · Mailboxes", () => {
     });
 
     render(<SetupWizard />);
-    await screen.findByText(/Environment ready/i);
+    await screen.findByText(/connected and ready/i);
 
     // Deploy the backend for a brand-new domain (its SES/DNS isn't verified yet).
     fireEvent.change(screen.getByPlaceholderText("yourdomain.com"), { target: { value: "yourdomain.com" } });
     fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
-    await screen.findByText(/Hosted zone/i);
-    fireEvent.click(screen.getByRole("button", { name: /Deploy backend/i }));
+    await screen.findByText(/ready to set up email/i);
+    fireEvent.click(screen.getByRole("button", { name: /Set up email service/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Yes, continue/i }));
-    await screen.findByText(/Backend deployed/i);
+    await screen.findByText(/email service is running/i);
 
     // Backend exists but the domain isn't verified → Mailboxes is a locked
     // upcoming step: no form fields and no Create button, so it can't read as a
     // broken dead-end.
-    expect(await screen.findByText(/can't send or receive mail yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/can.t send or receive mail/i)).toBeInTheDocument();
     expect(screen.queryByLabelText("Mailbox email")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create mailbox" })).not.toBeInTheDocument();
 
     // Provision + verify the domain → the form UNLOCKS.
-    fireEvent.click(screen.getByRole("button", { name: /Set up domain mail/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Set up email for this domain/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Yes, continue/i }));
-    await screen.findByText(/DKIM verified/i);
+    await screen.findByText(/ready to send and receive/i);
 
     // The real form is now present — fill it and create.
     fireEvent.change(await screen.findByLabelText("Mailbox email"), { target: { value: "You@YourDomain.com" } });
@@ -240,18 +240,18 @@ describe("SetupWizard · Mailboxes", () => {
     });
 
     render(<SetupWizard />);
-    await screen.findByText(/Environment ready/i);
+    await screen.findByText(/connected and ready/i);
 
     fireEvent.change(screen.getByPlaceholderText("yourdomain.com"), { target: { value: "ollydigital.com" } });
     fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
-    await screen.findByText(/Hosted zone/i);
+    await screen.findByText(/ready to set up email/i);
 
-    fireEvent.click(screen.getByRole("button", { name: /Deploy backend/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Set up email service/i }));
     // Confirm via the in-app dialog (native window.confirm is unreliable in the
     // Tauri webview, so we render our own).
     fireEvent.click(await screen.findByRole("button", { name: /Yes, continue/i }));
 
-    expect(await screen.findByText(/Backend deployed/i)).toBeInTheDocument();
+    expect(await screen.findByText(/email service is running/i)).toBeInTheDocument();
     await waitFor(() => expect(localStorage.getItem("mailpoppy.deployment")).toContain("api.example.com"));
   });
 
@@ -265,12 +265,12 @@ describe("SetupWizard · Mailboxes", () => {
     });
 
     render(<SetupWizard />);
-    await screen.findByText(/Environment ready/i);
+    await screen.findByText(/connected and ready/i);
     fireEvent.change(screen.getByPlaceholderText("yourdomain.com"), { target: { value: "ollydigital.com" } });
     fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
-    await screen.findByText(/Hosted zone/i);
+    await screen.findByText(/ready to set up email/i);
 
-    fireEvent.click(screen.getByRole("button", { name: /Deploy backend/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Set up email service/i }));
     // The dialog is our own element, not a native prompt.
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Cancel/i }));
@@ -296,7 +296,7 @@ describe("SetupWizard · Mailboxes", () => {
     });
 
     render(<SetupWizard presetDomain="second.com" />);
-    await screen.findByText(/Environment ready/i);
+    await screen.findByText(/connected and ready/i);
 
     // The domain is preset and locked (can't be edited for a re-run).
     const input = screen.getByPlaceholderText("yourdomain.com") as HTMLInputElement;
@@ -304,11 +304,11 @@ describe("SetupWizard · Mailboxes", () => {
     expect(input).toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
-    await screen.findByText(/Hosted zone/i);
+    await screen.findByText(/ready to set up email/i);
 
     // No deploy step — the backend exists — so the SES/DNS provision button is shown instead.
-    expect(screen.queryByRole("button", { name: /Deploy backend/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Set up domain mail/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Set up email service/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Set up email for this domain/i })).toBeInTheDocument();
   });
 
   it("treats a not-yet-deployed backend as the expected first-run state, not a red error", async () => {
@@ -319,10 +319,10 @@ describe("SetupWizard · Mailboxes", () => {
     });
 
     render(<SetupWizard />);
-    await screen.findByText(/Environment ready/i);
+    await screen.findByText(/connected and ready/i);
 
     // Friendly deploy hint, not the raw sidecar error.
-    expect(await screen.findByText(/your mailboxes live\s+there/i)).toBeInTheDocument();
+    expect(await screen.findByText(/your mailboxes live/i)).toBeInTheDocument();
     expect(screen.queryByText(/sidecar 404/i)).not.toBeInTheDocument();
     // Locked upcoming step: no dead form — the Create button isn't rendered at all
     // until the backend exists and the domain verifies.
@@ -356,7 +356,7 @@ describe("SetupWizard · resume from reality", () => {
     expect(screen.getByLabelText("Mailbox email")).toBeInTheDocument();
   });
 
-  it("surfaces leftover DNS and lands on Deploy backend when a domain exists but no backend is deployed", async () => {
+  it("surfaces leftover DNS and lands on Set up email service when a domain exists but no backend is deployed", async () => {
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;
       if (path.startsWith("/mailbox/list")) throw new Error("sidecar 404: No deployed Mailpoppy backend was found yet.");
@@ -368,14 +368,14 @@ describe("SetupWizard · resume from reality", () => {
 
     render(<SetupWizard />);
 
-    expect(await screen.findByText(/leftover mail DNS/i)).toBeInTheDocument();
+    expect(await screen.findByText(/from an earlier setup/i)).toBeInTheDocument();
     expect((screen.getByPlaceholderText("yourdomain.com") as HTMLInputElement).value).toBe("leftover.com");
     // The resume auto-preflights so the user isn't stranded at "Create your backend"
-    // with no trigger — the Deploy backend action is reachable, not a bare "Continue".
-    expect(await screen.findByRole("button", { name: /Deploy backend/i })).toBeInTheDocument();
+    // with no trigger — the Set up email service action is reachable, not a bare "Continue".
+    expect(await screen.findByRole("button", { name: /Set up email service/i })).toBeInTheDocument();
   });
 
-  it("still offers Deploy backend when the pre-check fails (no Route53 hosted zone yet)", async () => {
+  it("still offers Set up email service when the pre-check fails (no Route53 hosted zone yet)", async () => {
     // Resume a pinned domain whose hosted zone is missing: preflight throws, but
     // creating the backend doesn't need the zone, so the user must NOT be stranded.
     mockSidecar.mockImplementation(async (path: string) => {
@@ -390,10 +390,10 @@ describe("SetupWizard · resume from reality", () => {
     render(<SetupWizard presetDomain="nozone.com" />);
 
     // The deploy is reachable despite the failed pre-check…
-    expect(await screen.findByRole("button", { name: /Deploy backend/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Set up email service/i })).toBeInTheDocument();
     // …and the warning explains the zone is needed later (before the SES + DNS step), not now.
-    expect(screen.getByText(/couldn.t fully check nozone\.com/i)).toBeInTheDocument();
-    expect(screen.getByText(/domain mail \(SES \+ DNS\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/couldn.t finish checking nozone\.com/i)).toBeInTheDocument();
+    expect(screen.getByText(/your domain.s email/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Route53 hosted zone/i).length).toBeGreaterThan(0);
   });
 
@@ -410,7 +410,7 @@ describe("SetupWizard · resume from reality", () => {
     render(<SetupWizard />);
 
     // We land back on the LIVE deploy progress — not a blank form or a dead spinner.
-    // (The "keeps running in the background" line is unique to the active deploy view.)
-    expect(await screen.findByText(/keeps running in the background/i)).toBeInTheDocument();
+    // (The "keeps going in the background" line is unique to the active deploy view.)
+    expect(await screen.findByText(/keeps going in the background/i)).toBeInTheDocument();
   });
 });
