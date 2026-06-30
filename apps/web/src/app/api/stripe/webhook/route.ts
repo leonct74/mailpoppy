@@ -60,9 +60,50 @@ export async function POST(req: NextRequest) {
         await applyReconciledState(db, accountId, state);
         break;
       }
+      case "checkout.session.completed": {
+        // First-domain activation: the new subscription has no per-item metadata yet (Checkout
+        // can't set it). Stamp accountId on the subscription + domain on its first item, record
+        // the ids, then reconcile so the gate sees the domain as active.
+        const session = event.data.object as Stripe.Checkout.Session;
+        const accountId = session.metadata?.accountId;
+        const domain = session.metadata?.domain;
+        const subId =
+          typeof session.subscription === "string" ? session.subscription : session.subscription?.id;
+        if (!accountId || !domain || !subId) break;
+
+        const sub = await stripe.subscriptions.retrieve(subId);
+        if (sub.metadata?.accountId !== accountId) {
+          await stripe.subscriptions.update(subId, { metadata: { ...sub.metadata, accountId } });
+        }
+        const firstItem = sub.items.data[0];
+        if (firstItem && firstItem.metadata?.domain !== domain) {
+          await stripe.subscriptionItems.update(firstItem.id, { metadata: { domain } });
+        }
+
+        const db = getDb();
+        if (db) {
+          await db
+            .collection("accounts")
+            .doc(accountId)
+            .set({ stripeSubscriptionId: subId, updatedAt: Date.now() }, { merge: true });
+          if (firstItem) {
+            await db
+              .collection("domains")
+              .doc(domain)
+              .set({ stripeSubscriptionItemId: firstItem.id, updatedAt: Date.now() }, { merge: true });
+          }
+          const fresh = await stripe.subscriptions.retrieve(subId);
+          await applyReconciledState(
+            db,
+            accountId,
+            reconcileSubscription(fresh as unknown as StripeSubscriptionLike),
+          );
+        }
+        break;
+      }
       default:
-        // Other events (checkout.session.completed, invoice.*) carry no state we don't already
-        // get from the subscription events above. Acknowledge so Stripe stops retrying.
+        // Other events (invoice.*, etc.) carry no state we don't already get above. Acknowledge
+        // so Stripe stops retrying.
         break;
     }
   } catch (e) {
