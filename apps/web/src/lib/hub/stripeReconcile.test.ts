@@ -22,12 +22,28 @@ describe("mapStripeStatus", () => {
 });
 
 describe("reconcileSubscription", () => {
-  it("converts current_period_end from unix seconds to epoch ms", () => {
+  it("reads the period end from the items (modern dahlia/basil shape) in seconds → ms", () => {
+    const r = reconcileSubscription({
+      status: "active",
+      items: { data: [{ metadata: { domain: "a.com" }, current_period_end: 1_800_000_000 }] },
+    });
+    expect(r.currentPeriodEnd).toBe(1_800_000_000_000);
+  });
+
+  it("takes the latest item period end when items disagree", () => {
+    const r = reconcileSubscription({
+      status: "active",
+      items: { data: [{ current_period_end: 1000 }, { current_period_end: 2000 }] },
+    });
+    expect(r.currentPeriodEnd).toBe(2_000_000);
+  });
+
+  it("falls back to the top-level current_period_end (older API versions)", () => {
     const r = reconcileSubscription({ status: "active", current_period_end: 1_800_000_000, items: { data: [] } });
     expect(r.currentPeriodEnd).toBe(1_800_000_000_000);
   });
 
-  it("is null when there is no period end", () => {
+  it("is null when there is no period end anywhere", () => {
     expect(reconcileSubscription({ status: "active" }).currentPeriodEnd).toBe(null);
   });
 

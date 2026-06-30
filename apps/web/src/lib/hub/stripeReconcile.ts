@@ -9,12 +9,15 @@
 import type { SubscriptionStatus } from "./types";
 
 export interface StripeItemLike {
+  // In the modern API line (2025 "basil" onwards, incl. 2026-06-24.dahlia) the billing period
+  // lives on each subscription ITEM, not the subscription. Unix SECONDS.
+  current_period_end?: number | null;
   metadata?: Record<string, string> | null;
   price?: { metadata?: Record<string, string> | null } | null;
 }
 export interface StripeSubscriptionLike {
   status: string;
-  current_period_end?: number | null; // unix SECONDS (Stripe's unit)
+  current_period_end?: number | null; // top-level: only present on OLDER (pre-basil) API versions
   items?: { data?: StripeItemLike[] } | null;
 }
 export interface ReconciledState {
@@ -49,16 +52,28 @@ function domainOf(item: StripeItemLike): string | null {
   return d ? d.trim().toLowerCase() : null;
 }
 
+/** The subscription's period end in unix SECONDS — from the items (modern API) with a
+ *  top-level fallback (older API). Takes the latest item end if items disagree. */
+function periodEndSeconds(sub: StripeSubscriptionLike): number | null {
+  let max: number | null = null;
+  for (const item of sub.items?.data ?? []) {
+    const e = item.current_period_end;
+    if (typeof e === "number") max = max == null ? e : Math.max(max, e);
+  }
+  if (max != null) return max;
+  return typeof sub.current_period_end === "number" ? sub.current_period_end : null;
+}
+
 export function reconcileSubscription(sub: StripeSubscriptionLike): ReconciledState {
-  const cpe = sub.current_period_end;
   const domains = new Set<string>();
   for (const item of sub.items?.data ?? []) {
     const d = domainOf(item);
     if (d) domains.add(d);
   }
+  const endSec = periodEndSeconds(sub);
   return {
     subscriptionStatus: mapStripeStatus(sub.status),
-    currentPeriodEnd: typeof cpe === "number" ? cpe * 1000 : null,
+    currentPeriodEnd: endSec == null ? null : endSec * 1000,
     activeDomains: [...domains],
   };
 }
