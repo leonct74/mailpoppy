@@ -391,8 +391,8 @@ export function DomainView({
         </Card>
       )}
 
-      {/* Make this domain available in the mobile + web apps (registers it with the Hub). */}
-      <MobileAppAccess domain={domain} />
+      {/* Activate the mobile app for this domain — opens the website's pricing/checkout funnel. */}
+      <MobileAppAccess domain={domain} deployment={backend} />
 
       {/* Mailboxes on this domain. */}
       <Card>
