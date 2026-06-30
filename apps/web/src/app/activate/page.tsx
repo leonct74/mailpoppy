@@ -55,6 +55,22 @@ function formatPrice(p: PriceInfo | null): string | null {
   return `${money} / ${every}`;
 }
 
+// Plain words for the billing cycle, derived from the real Stripe price so the terms can't drift.
+function billingCadence(p: PriceInfo | null): string {
+  if (!p?.interval) return "";
+  if (p.intervalCount > 1) return `every ${p.intervalCount} ${p.interval}s`;
+  return p.interval === "year" ? "yearly" : p.interval === "month" ? "monthly" : `per ${p.interval}`;
+}
+function periodNoun(p: PriceInfo | null): string {
+  if (!p?.interval) return "period";
+  return p.intervalCount > 1 ? `${p.intervalCount} ${p.interval}s` : p.interval; // "year" | "month"
+}
+function renewWord(p: PriceInfo | null): string {
+  if (!p?.interval) return "each period";
+  if (p.intervalCount > 1) return `every ${p.intervalCount} ${p.interval}s`;
+  return p.interval === "year" ? "each year" : p.interval === "month" ? "each month" : `each ${p.interval}`;
+}
+
 export default function ActivatePage() {
   const auth = getClientAuth();
   const [user, setUser] = useState<User | null>(null);
@@ -242,12 +258,22 @@ export default function ActivatePage() {
           <div className="text-text font-semibold">MailPoppy mobile &amp; web apps</div>
           <div className="text-heading text-xl font-bold">{priceLabel ?? "—"}</div>
         </div>
-        <div className="text-dim mt-1 text-sm">per domain{price?.interval ? "" : ""}</div>
-        <ul className="text-on-surface-variant mt-4 space-y-1.5 text-sm">
+        <div className="text-dim mt-1 text-sm">
+          per domain{billingCadence(price) ? `, billed ${billingCadence(price)}` : ""}
+        </div>
+        <ul className="text-on-surface-variant mt-4 space-y-2 text-sm">
           <li>• Everyone with a mailbox on this domain can sign in to the mobile &amp; web apps.</li>
-          <li>• Your mail keeps running in your own AWS account — we never see it.</li>
-          <li>• Billed per domain. Cancel anytime; access stays until the period ends.</li>
-          <li>• This is separate from your email — it just unlocks the apps for this domain.</li>
+          <li>
+            • <b className="text-on-surface">Billed {billingCadence(price) || "per period"}, per domain.</b> You pay
+            once for the whole {periodNoun(price)} up front, and it renews automatically {renewWord(price)} unless
+            you cancel.
+          </li>
+          <li>
+            • <b className="text-on-surface">Cancel anytime.</b> You keep access until the end of the{" "}
+            {periodNoun(price)} you&apos;ve already paid for — then it stops. No partial refunds for the unused part
+            of a {periodNoun(price)}.
+          </li>
+          <li>• Your mail keeps running in your own AWS account — we never see it. Separate from your email.</li>
         </ul>
       </div>
 
