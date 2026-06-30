@@ -100,9 +100,8 @@ export function MobileAppAccess({ domain }: { domain: string }) {
         <form onSubmit={onSubmit} className="mt-4 max-w-sm space-y-2">
           <p className="text-sm text-on-surface-variant">
             {mode === "signin"
-              ? "Sign in to your MailPoppy account to turn this on."
-              : "Create a free MailPoppy account to turn this on."}{" "}
-            It&apos;s separate from your email — just how you manage the apps and billing.
+              ? "Sign in to activate the MailPoppy apps for this domain."
+              : "Sign up to activate the MailPoppy apps for this domain."}
           </p>
           <Input
             type="email"
