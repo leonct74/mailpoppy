@@ -11,7 +11,6 @@ import {
   CheckCircleIcon,
   ClockIcon,
   ShieldIcon,
-  CloudIcon,
   AtSignIcon,
   EyeIcon,
 } from "@/components/webmail/icons";
@@ -339,10 +338,6 @@ function Footer() {
           <Link href="/migrate" className="hover:text-text transition-colors">Migrate</Link>
           <Link href="/privacy" className="hover:text-text transition-colors">Privacy</Link>
         </nav>
-        <div className="text-dim flex items-center gap-1.5 text-xs">
-          <CloudIcon size={13} />
-          Powered by AWS
-        </div>
       </div>
     </footer>
   );

@@ -467,10 +467,6 @@ function Footer() {
           <Link href="/privacy" className="hover:text-text transition-colors">Privacy</Link>
           <Link href="/app" className="hover:text-text transition-colors">Sign in</Link>
         </nav>
-        <div className="text-dim flex items-center gap-1.5 text-xs">
-          <CloudIcon size={13} />
-          Powered by AWS
-        </div>
       </div>
     </footer>
   );
