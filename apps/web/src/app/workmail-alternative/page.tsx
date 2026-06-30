@@ -465,7 +465,7 @@ function Footer() {
           <Link href="/" className="hover:text-text transition-colors">Home</Link>
           <Link href="/migrate" className="hover:text-text transition-colors">Migrate</Link>
           <Link href="/privacy" className="hover:text-text transition-colors">Privacy</Link>
-          <Link href="/app" className="hover:text-text transition-colors">Sign in</Link>
+          <Link href="/account" className="hover:text-text transition-colors">Sign in</Link>
         </nav>
       </div>
     </footer>

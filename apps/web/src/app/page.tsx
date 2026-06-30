@@ -138,7 +138,7 @@ function Header() {
           ))}
         </nav>
         <div className="flex-1" />
-        <Link href="/app" className="text-muted hover:text-text hidden text-sm font-semibold sm:inline">
+        <Link href="/account" className="text-muted hover:text-text hidden text-sm font-semibold sm:inline">
           Sign in
         </Link>
         <Link
@@ -951,7 +951,7 @@ function Footer() {
           <a href="#pricing" className="hover:text-text transition-colors">Pricing</a>
           <a href="#faq" className="hover:text-text transition-colors">FAQ</a>
           <Link href="/privacy" className="hover:text-text transition-colors">Privacy</Link>
-          <Link href="/app" className="hover:text-text transition-colors">Sign in</Link>
+          <Link href="/account" className="hover:text-text transition-colors">Sign in</Link>
         </nav>
       </div>
       <div className="text-dim px-5 pb-8 text-center text-xs">
