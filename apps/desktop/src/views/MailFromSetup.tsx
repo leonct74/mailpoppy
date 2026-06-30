@@ -75,6 +75,8 @@ export function MailFromSetup({ domain, region = "eu-west-1", load, setup, onSta
   const [err, setErr] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [rechecking, setRechecking] = useState(false);
+  const [recheckNote, setRecheckNote] = useState<string | null>(null);
 
   async function refresh() {
     setLoading(true);
@@ -106,6 +108,29 @@ export function MailFromSetup({ domain, region = "eu-west-1", load, setup, onSta
       setErr(friendlyError(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Manual "check again" for the pending banner. Unlike refresh() it does NOT toggle the
+  // full-panel `loading` (that hides the whole banner in a jarring flash). It just busies the
+  // button, and if SES still hasn't verified, leaves a readable note up for a few seconds so the
+  // result doesn't vanish before it can be read.
+  async function recheckStatus() {
+    setRechecking(true);
+    setErr(null);
+    setRecheckNote(null);
+    try {
+      const s = await loadStatus(domain);
+      setState(s);
+      onStateChange?.(s);
+      if (mailFromAlignment(s) === "pending") {
+        setRecheckNote("Still verifying — DNS can take a few minutes to propagate. Try again shortly.");
+        window.setTimeout(() => setRecheckNote(null), 3000);
+      }
+    } catch (e) {
+      setErr(friendlyError(e));
+    } finally {
+      setRechecking(false);
     }
   }
 
@@ -142,9 +167,15 @@ export function MailFromSetup({ domain, region = "eu-west-1", load, setup, onSta
               ⏳ <b>DNS written — SES is verifying</b> <code className="font-mono">{mailFromDomain}</code>. This can take a
               few minutes (DNS propagation). It keeps sending via the default Return-Path until verified, so nothing breaks.
               <div className="mt-2">
-                <Button size="sm" variant="secondary" onClick={() => void refresh()} disabled={busy}>
-                  Check verification status
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void recheckStatus()}
+                  disabled={rechecking || busy}
+                >
+                  {rechecking ? "Checking…" : "Check verification status"}
                 </Button>
+                {recheckNote && <p className="mt-2 text-xs text-on-surface-variant">{recheckNote}</p>}
               </div>
             </Banner>
           )}
