@@ -32,6 +32,7 @@ import { MailboxStorageRow } from "./MailboxStorageRow";
 import { PolicyEditor } from "./PolicyEditor";
 import { RetentionEditor } from "./RetentionEditor";
 import { MailFromSetup } from "./MailFromSetup";
+import { MobileAppAccess } from "./MobileAppAccess";
 import { MailboxImport } from "./MailboxImport";
 import { Card, Button, Spinner, cn } from "../ui";
 
@@ -389,6 +390,9 @@ export function DomainView({
           />
         </Card>
       )}
+
+      {/* Make this domain available in the mobile + web apps (registers it with the Hub). */}
+      <MobileAppAccess domain={domain} />
 
       {/* Mailboxes on this domain. */}
       <Card>
