@@ -25,9 +25,13 @@ export async function POST(req: NextRequest) {
   const db = getDb();
   if (!db) return NextResponse.json({ error: "unavailable" }, { status: 503 });
 
-  const body = (await req.json().catch(() => ({}))) as { domain?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { domain?: unknown; returnTo?: unknown };
   const domain = String(body.domain ?? "").trim().toLowerCase();
   if (!domain) return NextResponse.json({ error: "missing_domain" }, { status: 400 });
+  // Where Checkout sends the browser on success — restricted to an internal path so it can't be
+  // turned into an open redirect. Defaults to the dashboard.
+  const rt = String(body.returnTo ?? "");
+  const returnTo = /^\/[a-z0-9/_-]*$/i.test(rt) ? rt : "/account";
 
   // The admin must own this domain.
   const domSnap = await db.collection("domains").doc(domain).get();
@@ -76,8 +80,8 @@ export async function POST(req: NextRequest) {
     line_items: [{ price: priceId, quantity: 1 }],
     subscription_data: { metadata: { accountId: user.uid } },
     metadata: { accountId: user.uid, domain },
-    success_url: `${origin}/account?activated=${encodeURIComponent(domain)}`,
-    cancel_url: `${origin}/account`,
+    success_url: `${origin}${returnTo}?activated=${encodeURIComponent(domain)}`,
+    cancel_url: `${origin}${returnTo}`,
   });
   return NextResponse.json({ url: session.url });
 }
