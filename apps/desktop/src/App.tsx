@@ -14,7 +14,8 @@ import { CognitoAuth } from "./lib/auth";
 import { makeMailClient } from "./lib/mailClient";
 import { establishMailboxKeysForLogin, clearMailboxKeySession } from "./lib/mailboxKeys";
 import { cn, Logo, Spinner } from "./ui";
-import { restoreStartupRegion } from "./lib/region";
+import { restoreStartupRegion, savedRegion } from "./lib/region";
+import { autoDiscoverRegion } from "./lib/discovery";
 import {
   loadDeploymentConfig,
   saveDeploymentConfig,
@@ -165,11 +166,19 @@ export function App() {
   const [regionReady, setRegionReady] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    void restoreStartupRegion(loadDeploymentConfig()?.region)
-      .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) setRegionReady(true);
-      });
+    (async () => {
+      const cfgRegion = loadDeploymentConfig()?.region ?? null;
+      await restoreStartupRegion(cfgRegion).catch(() => undefined);
+      // No local hint at all (fresh install OR reinstall with wiped state): probe
+      // the user's AWS for an existing backend / domains and snap to that region,
+      // so a reinstall re-finds everything instead of booting into an empty default
+      // region. Skipped when the user already has a deployment or an explicit pick,
+      // so we never override a deliberate choice.
+      if (!cfgRegion && !savedRegion()) {
+        await autoDiscoverRegion().catch(() => undefined);
+      }
+      if (!cancelled) setRegionReady(true);
+    })();
     return () => {
       cancelled = true;
     };
@@ -265,7 +274,11 @@ export function App() {
                     <Spinner /> Loading…
                   </div>
                 ) : (
-                  <HomeView onGoToSetup={() => setSetupTarget({})} onOpenDomain={(d) => setSelectedDomain(d)} />
+                  <HomeView
+                    onGoToSetup={() => setSetupTarget({})}
+                    onOpenDomain={(d) => setSelectedDomain(d)}
+                    onSetupDomain={(d) => setSetupTarget({ domain: d })}
+                  />
                 )}
               </div>
             </div>

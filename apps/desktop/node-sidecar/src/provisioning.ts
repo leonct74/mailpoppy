@@ -95,6 +95,7 @@ import {
   type DomainDmarc,
   type SendingTotals,
   type SuppressedAddress,
+  SES_INBOUND_REGIONS,
 } from "@mailpoppy/core";
 import {
   CloudFormationClient,
@@ -402,6 +403,84 @@ async function stackStatus(ctx: AwsContext, stackName: string): Promise<string |
     if (/does not exist|ValidationError/i.test((e as Error).message ?? "")) return null;
     throw e;
   }
+}
+
+// The one backend stack name every install uses (see desktop deploymentConfig.ts).
+// Hard-coded across the routes; named here for the cross-region discovery probe.
+const MAILPOPPY_STACK_NAME = "MailpoppyMailStack";
+
+export interface SesDomainIdentity {
+  name: string;
+  /** SES says this domain is verified for sending (DKIM/identity confirmed). */
+  verified: boolean;
+  /** SES sending is enabled for the identity (not paused). */
+  sendingEnabled: boolean;
+}
+
+/**
+ * Read-only: every SES *domain* identity in the active region — INCLUDING domains
+ * created outside MailPoppy (verified directly in the SES console, by another tool,
+ * or before this app existed). The dashboard uses this so the admin sees what is
+ * already in their cloud and can adopt a domain instead of wondering why a domain
+ * they know they verified isn't listed. Email-ADDRESS identities are filtered out:
+ * those are single verified senders, not domains MailPoppy manages mail for.
+ */
+export async function listSesDomains(ctx: AwsContext): Promise<SesDomainIdentity[]> {
+  const { sesv2 } = clients(ctx);
+  const domains: SesDomainIdentity[] = [];
+  let token: string | undefined;
+  do {
+    const page = await sesv2.send(new ListEmailIdentitiesCommand({ PageSize: 100, NextToken: token }));
+    for (const id of page.EmailIdentities ?? []) {
+      if (id.IdentityType !== "DOMAIN" || !id.IdentityName) continue;
+      domains.push({
+        name: id.IdentityName.toLowerCase(),
+        verified: id.VerificationStatus === "SUCCESS",
+        sendingEnabled: id.SendingEnabled !== false,
+      });
+    }
+    token = page.NextToken;
+  } while (token);
+  domains.sort((a, b) => a.name.localeCompare(b.name));
+  return domains;
+}
+
+export interface RegionScan {
+  region: string;
+  /** Does the MailPoppy backend stack live in this region? */
+  stackExists: boolean;
+  stackStatus: string | null;
+  /** SES domain identities present in this region (managed or not). */
+  domains: SesDomainIdentity[];
+}
+
+/**
+ * Cross-region discovery over the SES inbound regions (the only places MailPoppy
+ * can receive mail). For each region, in parallel: does the backend stack exist,
+ * and which SES domains live there. This is the answer to "I reinstalled / cleared
+ * my local state — where did my stuff go?": the stack and ALL data live in the
+ * user's OWN AWS account, untouched by reinstalling, so we just have to find which
+ * region holds them. Also surfaces pre-existing domains so the admin can adopt them.
+ * Read-only; a region that errors (no perms, throttled) comes back empty rather than
+ * failing the whole scan.
+ */
+export async function discoverRegions(ctx: AwsContext): Promise<RegionScan[]> {
+  return Promise.all(
+    SES_INBOUND_REGIONS.map(async (region): Promise<RegionScan> => {
+      const rctx: AwsContext = { ...ctx, region };
+      const [statusR, domainsR] = await Promise.allSettled([
+        stackStatus(rctx, MAILPOPPY_STACK_NAME),
+        listSesDomains(rctx),
+      ]);
+      const status = statusR.status === "fulfilled" ? statusR.value : null;
+      return {
+        region,
+        stackExists: status !== null,
+        stackStatus: status,
+        domains: domainsR.status === "fulfilled" ? domainsR.value : [],
+      };
+    }),
+  );
 }
 
 export interface DeployResult {

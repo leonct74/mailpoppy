@@ -14,6 +14,7 @@ const ready = {
     ],
   }),
   listDomains: async () => ({ domains: ["boxord.com", "example.org"] }),
+  listCloudDomains: async () => ({ region: "eu-west-1", domains: [] }),
   getAccount: async () => ({
     productionAccessEnabled: false,
     sendingEnabled: true,
@@ -115,12 +116,65 @@ describe("HomeView", () => {
         listMailboxes={noBackend}
         listDomains={noBackend}
         getAccount={noBackend}
+        listCloudDomains={async () => ({ region: "eu-west-1", domains: [] })}
       />,
     );
 
     const btn = await screen.findByRole("button", { name: /Set up your first domain/ });
     fireEvent.click(btn);
     expect(onGoToSetup).toHaveBeenCalled();
+  });
+
+  it("surfaces SES domains already in the user's AWS that MailPoppy doesn't manage yet, and lets them be adopted", async () => {
+    const onSetupDomain = vi.fn();
+    render(
+      <HomeView
+        {...ready}
+        // The cloud has the two managed domains PLUS a legacy one set up outside MailPoppy.
+        listCloudDomains={async () => ({
+          region: "eu-west-1",
+          domains: [
+            { name: "boxord.com", verified: true, sendingEnabled: true },
+            { name: "example.org", verified: true, sendingEnabled: true },
+            { name: "legacy.com", verified: true, sendingEnabled: true },
+          ],
+        })}
+        onSetupDomain={onSetupDomain}
+      />,
+    );
+
+    // The unmanaged one is surfaced under "Also in your AWS"…
+    expect(await screen.findByText("Also in your AWS")).toBeInTheDocument();
+    expect(screen.getByText("legacy.com")).toBeInTheDocument();
+    // …while the already-managed ones are NOT duplicated into that section.
+    expect(screen.getAllByText("boxord.com").length).toBe(1);
+
+    // Adopting it hands off to the setup flow for that exact domain.
+    fireEvent.click(screen.getByRole("button", { name: /Set up with MailPoppy/i }));
+    expect(onSetupDomain).toHaveBeenCalledWith("legacy.com");
+  });
+
+  it("shows pre-existing cloud domains even when no MailPoppy backend is deployed yet", async () => {
+    const noBackend = () =>
+      Promise.reject(new Error('sidecar 404: {"ok":false,"error":"No deployed MailPoppy backend was found yet."}'));
+    render(
+      <HomeView
+        listMailboxes={noBackend}
+        listDomains={noBackend}
+        getAccount={noBackend}
+        listCloudDomains={async () => ({
+          region: "eu-west-1",
+          domains: [{ name: "boxord.com", verified: false, sendingEnabled: true }],
+        })}
+        onSetupDomain={vi.fn()}
+      />,
+    );
+
+    // The onboarding card is shown, AND the existing domain isn't hidden.
+    expect(await screen.findByText("Also in your AWS")).toBeInTheDocument();
+    expect(screen.getByText("boxord.com")).toBeInTheDocument();
+    expect(screen.getByText("not verified")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Set up with MailPoppy/i })).toBeInTheDocument();
   });
 
   it("surfaces a timeout (with Retry) instead of an infinite spinner when a backend call hangs", async () => {

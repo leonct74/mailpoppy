@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronUp,
   Trash2,
+  Cloud,
 } from "lucide-react";
 import type { SesAccountStatus, MailFromState } from "@mailpoppy/core";
 import { resolveStackName, loadDeploymentConfig, clearDeploymentConfig } from "../lib/deploymentConfig";
@@ -21,6 +22,7 @@ import {
   teardownEverything as defaultTeardown,
   type TeardownResult,
 } from "../lib/teardown";
+import { listCloudDomains as defaultListCloudDomains, type SesDomain } from "../lib/discovery";
 import { friendlyError } from "../lib/errors";
 import { withTimeout } from "../lib/withTimeout";
 import { listMailboxes as defaultListMailboxes, type Mailbox } from "../lib/mailbox";
@@ -63,8 +65,10 @@ export function HomeView({
   stackName = resolveStackName(),
   onGoToSetup,
   onOpenDomain,
+  onSetupDomain,
   listDomains = defaultListDomains,
   listMailboxes = defaultListMailboxes,
+  listCloudDomains = defaultListCloudDomains,
   getAccount = defaultGetAccount,
   getDomainStatus = defaultGetDomainStatus,
   getMailFrom = defaultGetMailFrom,
@@ -73,8 +77,11 @@ export function HomeView({
   stackName?: string;
   onGoToSetup?: () => void;
   onOpenDomain?: (domain: string) => void;
+  /** Adopt a domain already in the user's AWS into MailPoppy (runs the setup flow). */
+  onSetupDomain?: (domain: string) => void;
   listDomains?: (stackName: string) => Promise<{ domains: string[] }>;
   listMailboxes?: (stackName: string) => Promise<{ mailboxes: Mailbox[]; region?: string }>;
+  listCloudDomains?: () => Promise<{ region: string; domains: SesDomain[] }>;
   getAccount?: () => Promise<SesAccountStatus>;
   getDomainStatus?: (domain: string) => Promise<DomainIdentityStatus>;
   getMailFrom?: (domain: string) => Promise<MailFromState>;
@@ -90,6 +97,9 @@ export function HomeView({
   // "backend present" from an empty domain list. Gates the destructive teardown.
   const [backendDeployed, setBackendDeployed] = useState(false);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
+  // Every SES domain in the active region — managed by MailPoppy or not. Lets us
+  // show domains the user created outside the app (so nothing in their cloud hides).
+  const [cloudDomains, setCloudDomains] = useState<SesDomain[]>([]);
   const [account, setAccount] = useState<SesAccountStatus | null>(null);
   const [region, setRegion] = useState<string | null>(null);
   const [domStatus, setDomStatus] = useState<Record<string, DomainIdentityStatus | "error">>({});
@@ -112,6 +122,14 @@ export function HomeView({
     setBackendDeployed(false);
     setDomStatus({});
     setMailFrom({});
+    setCloudDomains([]);
+    // Pre-existing/managed SES domains in the active region — loaded INDEPENDENTLY
+    // of the main overview so a slow probe never delays it. Shown even when there's
+    // no backend yet (the user's "I have a domain you're not showing me" case); the
+    // "Also in your AWS" section just fills in when this resolves.
+    listCloudDomains()
+      .then((r) => !cancelled && setCloudDomains(r.domains))
+      .catch(() => !cancelled && setCloudDomains([]));
     (async () => {
       const [mbRes, domRes, acctRes] = await Promise.allSettled([
         withTimeout(listMailboxes(stackName), "mailboxes"),
@@ -168,7 +186,7 @@ export function HomeView({
     return () => {
       cancelled = true;
     };
-  }, [stackName, reloadKey, listMailboxes, listDomains, getAccount, getDomainStatus, getMailFrom]);
+  }, [stackName, reloadKey, listMailboxes, listDomains, listCloudDomains, getAccount, getDomainStatus, getMailFrom]);
 
   // ---- Loading ----
   if (phase === "loading") {
@@ -179,22 +197,26 @@ export function HomeView({
     );
   }
 
-  // ---- No backend yet → onboarding hand-off ----
+  // ---- No backend yet → onboarding hand-off (still surface domains already in
+  // the user's AWS, so a domain they set up elsewhere isn't invisible here) ----
   if (phase === "no-backend") {
     return (
-      <Card className="mx-auto max-w-2xl text-center">
-        <Sparkles className="mx-auto size-8 text-primary" />
-        <h2 className="mt-3 text-xl font-semibold text-on-surface">Welcome to MailPoppy</h2>
-        <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-on-surface-variant">
-          You don't have any email infrastructure yet. Head to <b className="text-on-surface">Setup</b> to deploy your
-          backend and add your first domain — your domains and mailboxes will then show up here.
-        </p>
-        {onGoToSetup && (
-          <Button className="mx-auto mt-5" onClick={onGoToSetup}>
-            <Plus className="size-4" /> Set up your first domain
-          </Button>
-        )}
-      </Card>
+      <div className="mx-auto flex max-w-2xl flex-col gap-4">
+        <Card className="text-center">
+          <Sparkles className="mx-auto size-8 text-primary" />
+          <h2 className="mt-3 text-xl font-semibold text-on-surface">Welcome to MailPoppy</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-on-surface-variant">
+            You don't have any MailPoppy email infrastructure yet. Head to <b className="text-on-surface">Setup</b> to
+            deploy your backend and add your first domain — your domains and mailboxes will then show up here.
+          </p>
+          {onGoToSetup && (
+            <Button className="mx-auto mt-5" onClick={onGoToSetup}>
+              <Plus className="size-4" /> Set up your first domain
+            </Button>
+          )}
+        </Card>
+        <CloudDomainsCard domains={cloudDomains} onSetupDomain={onSetupDomain} />
+      </div>
     );
   }
 
@@ -228,6 +250,11 @@ export function HomeView({
       ? ({ tone: "ok", label: "Production access" } as const)
       : ({ tone: "warn", label: "Sandbox" } as const)
     : null;
+
+  // SES domains in this region that MailPoppy isn't managing yet (e.g. verified
+  // before the user adopted MailPoppy) — surfaced so they can adopt them.
+  const managedSet = new Set(domains);
+  const unmanaged = cloudDomains.filter((c) => !managedSet.has(c.name));
 
   return (
     <div className="flex flex-col gap-6">
@@ -379,7 +406,58 @@ export function HomeView({
           })}
         </div>
       )}
+
+      {/* Domains already in the user's AWS that MailPoppy doesn't manage yet. */}
+      <CloudDomainsCard domains={unmanaged} onSetupDomain={onSetupDomain} />
     </div>
+  );
+}
+
+// Domains that exist as SES identities in the user's AWS but that MailPoppy isn't
+// handling mail for yet (verified directly in SES, by another tool, or before the
+// user adopted MailPoppy). Surfaced so the whole cloud is visible — and so adopting
+// one is framed honestly as a non-destructive UPDATE, not a fresh teardown/rebuild,
+// which is the worry that otherwise stops people from clicking.
+function CloudDomainsCard({
+  domains,
+  onSetupDomain,
+}: {
+  domains: SesDomain[];
+  onSetupDomain?: (domain: string) => void;
+}) {
+  if (domains.length === 0) return null;
+  return (
+    <Card>
+      <div className="flex items-center gap-2">
+        <Cloud className="size-4 text-primary" />
+        <h3 className="font-semibold text-on-surface">Also in your AWS</h3>
+      </div>
+      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-on-surface-variant">
+        These domains are already in your AWS account, but MailPoppy isn't handling their mail yet. Setting one up just
+        adds mail delivery on top of what's already there — it's an <b className="text-on-surface">update, not a
+        rebuild</b>. Your existing verification is reused, nothing is deleted, and anything else using the domain keeps
+        working.
+      </p>
+      <ul className="mt-4 flex flex-col gap-2">
+        {domains.map((d) => (
+          <li
+            key={d.name}
+            className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-outline-variant/15 bg-surface-container-highest/30 px-4 py-3"
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <Globe className="size-4 shrink-0 text-on-surface-variant" />
+              <span className="truncate font-mono text-sm text-on-surface">{d.name}</span>
+              {d.verified ? <Pill tone="ok">verified</Pill> : <Pill tone="warn">not verified</Pill>}
+            </div>
+            {onSetupDomain && (
+              <Button variant="secondary" onClick={() => onSetupDomain(d.name)}>
+                <Plus className="size-4" /> Set up with MailPoppy
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 

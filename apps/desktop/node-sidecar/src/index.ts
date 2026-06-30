@@ -299,6 +299,32 @@ app.get("/aws/inventory/:stackName", async (req) => {
   return { stackName, region: c.region, stackExists: stack.stackExists, resources: stack.resources, ledger };
 });
 
+// Read-only cross-region discovery: in which SES-inbound region does the backend
+// stack live, and what SES domains exist in each. This is how the app re-finds
+// everything after a reinstall / cleared local state — the stack and all data live
+// in the user's OWN AWS, so we just locate the region holding them — and how it
+// surfaces pre-existing domains the user created outside the app. Re-detect the
+// profile first (same as readiness) so a freshly-added `mailpoppy` profile is used.
+app.get("/aws/discover", async () => {
+  if (!currentProfile) currentProfile = resolveProfile();
+  const c = ctx();
+  const regions = await prov.discoverRegions(c);
+  const stackRegion = regions.find((r) => r.stackExists)?.region ?? null;
+  // If no stack anywhere, fall back to the single region that actually holds SES
+  // domains, so a pre-existing-domains-only account still snaps to the right place.
+  const withDomains = regions.filter((r) => r.domains.length > 0);
+  const domainRegion = withDomains.length === 1 ? (withDomains[0]?.region ?? null) : null;
+  return { currentRegion: c.region, stackRegion, domainRegion, regions };
+});
+
+// Read-only: every SES domain identity in the ACTIVE region, INCLUDING domains not
+// created by MailPoppy. The dashboard merges this with the managed domains so the
+// admin sees their whole cloud, not only what this app provisioned.
+app.get("/aws/ses-domains", async () => {
+  if (!currentProfile) currentProfile = resolveProfile();
+  return { region: currentRegion, domains: await prov.listSesDomains(ctx()) };
+});
+
 app.get("/provision/:domain/status", async (req) => {
   const domain = (req.params as { domain: string }).domain;
   return prov.getIdentityStatus(ctx(), domain);
