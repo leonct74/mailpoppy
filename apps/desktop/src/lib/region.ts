@@ -13,12 +13,22 @@ export function getRegion(): Promise<RegionConfig> {
   return sidecar("/config/region");
 }
 
-export function setRegion(region: string): Promise<{ ok: true; region: string }> {
-  return sidecar("/config/region", {
+/** Fired on `window` after the active region changes, so open views (e.g. Home's domain list)
+ *  re-query in the new region instead of showing stale results from the old one. */
+export const REGION_CHANGED_EVENT = "mailpoppy:region-changed";
+
+export async function setRegion(region: string): Promise<{ ok: true; region: string }> {
+  const res = (await sidecar("/config/region", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ region }),
-  });
+  })) as { ok: true; region: string };
+  try {
+    window.dispatchEvent(new CustomEvent(REGION_CHANGED_EVENT, { detail: res.region }));
+  } catch {
+    /* no DOM (e.g. unit tests) — callers still get the result */
+  }
+  return res;
 }
 
 const KEY = "mailpoppy.region";

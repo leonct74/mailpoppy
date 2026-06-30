@@ -26,6 +26,7 @@ import { withTimeout } from "../lib/withTimeout";
 import { listMailboxes as defaultListMailboxes, type Mailbox } from "../lib/mailbox";
 import { getSesAccount as defaultGetAccount } from "../lib/sesAccount";
 import { getMailFromStatus as defaultGetMailFrom } from "../lib/mailFrom";
+import { REGION_CHANGED_EVENT } from "../lib/region";
 import { getDomainIdentityStatus as defaultGetDomainStatus, type DomainIdentityStatus } from "../lib/provision";
 import { Card, Button, Spinner, cn } from "../ui";
 
@@ -94,6 +95,15 @@ export function HomeView({
   const [domStatus, setDomStatus] = useState<Record<string, DomainIdentityStatus | "error">>({});
   const [mailFrom, setMailFrom] = useState<Record<string, MailFromState | "error">>({});
   const [reloadKey, setReloadKey] = useState(0);
+
+  // Re-list when the active region changes (the picker sets the sidecar's region elsewhere) —
+  // otherwise Home keeps showing whatever it loaded in the previous region, so a domain that
+  // lives in the newly-selected region looks missing until a manual reload.
+  useEffect(() => {
+    const onRegionChanged = () => setReloadKey((k) => k + 1);
+    window.addEventListener(REGION_CHANGED_EVENT, onRegionChanged);
+    return () => window.removeEventListener(REGION_CHANGED_EVENT, onRegionChanged);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
