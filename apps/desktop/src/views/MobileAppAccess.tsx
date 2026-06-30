@@ -6,6 +6,7 @@ import { loadDeploymentConfig } from "../lib/deploymentConfig";
 import {
   onHubAuth,
   hubSignIn,
+  hubSignUp,
   hubSignOut,
   registerDomain,
   deregisterDomain,
@@ -24,6 +25,7 @@ export function MobileAppAccess({ domain }: { domain: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [registered, setRegistered] = useState(false);
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
 
   useEffect(() => onHubAuth((u) => {
     setUser(u);
@@ -32,12 +34,13 @@ export function MobileAppAccess({ domain }: { domain: string }) {
 
   const config = loadDeploymentConfig();
 
-  async function onSignIn(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await hubSignIn(email, password);
+      if (mode === "signin") await hubSignIn(email, password);
+      else await hubSignUp(email, password);
     } catch (err) {
       setError(authMessage(err));
     } finally {
@@ -94,18 +97,17 @@ export function MobileAppAccess({ domain }: { domain: string }) {
       </p>
 
       {!user ? (
-        <form onSubmit={onSignIn} className="mt-4 max-w-sm space-y-2">
+        <form onSubmit={onSubmit} className="mt-4 max-w-sm space-y-2">
           <p className="text-sm text-on-surface-variant">
-            Sign in with your MailPoppy account — the same one you use at{" "}
-            <ExtLink href={HUB_ACCOUNT_URL} className="text-primary hover:underline">
-              mailpoppy.com/account
-            </ExtLink>
-            .
+            {mode === "signin"
+              ? "Sign in to your MailPoppy account to turn this on."
+              : "Create a free MailPoppy account to turn this on."}{" "}
+            It&apos;s separate from your email — just how you manage the apps and billing.
           </p>
           <Input
             type="email"
             required
-            placeholder="you@yourdomain.com"
+            placeholder="you@example.com"
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -113,15 +115,33 @@ export function MobileAppAccess({ domain }: { domain: string }) {
           <Input
             type="password"
             required
-            placeholder="Password"
-            autoComplete="current-password"
+            placeholder={mode === "signin" ? "Password" : "Choose a password (6+ characters)"}
+            autoComplete={mode === "signin" ? "current-password" : "new-password"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
           {error && <p className="text-sm text-error">{error}</p>}
           <Button type="submit" disabled={busy}>
-            {busy ? "Signing in…" : "Sign in"}
+            {busy
+              ? mode === "signin"
+                ? "Signing in…"
+                : "Creating…"
+              : mode === "signin"
+                ? "Sign in"
+                : "Create account"}
           </Button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode(mode === "signin" ? "signup" : "signin");
+              setError(null);
+            }}
+            className="block text-xs text-on-surface-variant hover:text-on-surface hover:underline"
+          >
+            {mode === "signin"
+              ? "Don't have a MailPoppy account yet? Create one"
+              : "Already have a MailPoppy account? Sign in"}
+          </button>
         </form>
       ) : registered ? (
         <div className="mt-4 space-y-3">
@@ -169,6 +189,10 @@ function authMessage(e: unknown): string {
     case "auth/wrong-password":
     case "auth/user-not-found":
       return "That email or password doesn't match.";
+    case "auth/email-already-in-use":
+      return "That email already has a MailPoppy account — switch to Sign in.";
+    case "auth/weak-password":
+      return "Choose a password with at least 6 characters.";
     case "auth/invalid-email":
       return "That doesn't look like a valid email address.";
     case "auth/too-many-requests":

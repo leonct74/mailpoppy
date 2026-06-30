@@ -14,6 +14,7 @@ import {
 import {
   getAuth,
   signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   signOut as fbSignOut,
   onAuthStateChanged,
   type Auth,
@@ -72,6 +73,12 @@ export async function hubSignIn(email: string, password: string): Promise<void> 
   const auth = await ensureAuth();
   if (!auth) throw new Error("Couldn't reach the MailPoppy account service. Check your connection.");
   await signInWithEmailAndPassword(auth, email.trim(), password);
+}
+
+export async function hubSignUp(email: string, password: string): Promise<void> {
+  const auth = await ensureAuth();
+  if (!auth) throw new Error("Couldn't reach the MailPoppy account service. Check your connection.");
+  await createUserWithEmailAndPassword(auth, email.trim(), password);
 }
 
 export async function hubSignOut(): Promise<void> {
