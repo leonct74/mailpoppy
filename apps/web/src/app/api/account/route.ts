@@ -17,33 +17,43 @@ export async function GET(req: NextRequest) {
   const db = getDb();
   if (!db) return NextResponse.json({ error: "unavailable" }, { status: 503 });
 
-  // Bootstrap the account doc on first sign-in (no subscription yet).
-  const ref = db.collection("accounts").doc(user.uid);
-  const snap = await ref.get();
-  let account: AccountRecord;
-  if (!snap.exists) {
-    account = {
-      email: user.email ?? "",
-      stripeCustomerId: null,
-      stripeSubscriptionId: null,
-      subscriptionStatus: "none",
-      currentPeriodEnd: null,
-    };
-    await ref.set({ ...account, createdAt: Date.now(), updatedAt: Date.now() });
-  } else {
-    account = snap.data() as AccountRecord;
+  try {
+    // Bootstrap the account doc on first sign-in (no subscription yet).
+    const ref = db.collection("accounts").doc(user.uid);
+    const snap = await ref.get();
+    let account: AccountRecord;
+    if (!snap.exists) {
+      account = {
+        email: user.email ?? "",
+        stripeCustomerId: null,
+        stripeSubscriptionId: null,
+        subscriptionStatus: "none",
+        currentPeriodEnd: null,
+      };
+      await ref.set({ ...account, createdAt: Date.now(), updatedAt: Date.now() });
+    } else {
+      account = snap.data() as AccountRecord;
+    }
+
+    const ownedSnap = await db.collection("domains").where("accountId", "==", user.uid).get();
+    const domains = ownedSnap.docs.map((d) => {
+      const r = d.data() as DomainRecord;
+      return { domain: d.id, mobileActive: !!r.mobileActive, verified: !!r.verified };
+    });
+
+    return NextResponse.json({
+      email: account.email || user.email,
+      subscriptionStatus: account.subscriptionStatus ?? "none",
+      currentPeriodEnd: account.currentPeriodEnd ?? null,
+      domains,
+    });
+  } catch (e) {
+    // Surfaces the real cause (e.g. Firestore database not created / no access) instead of an
+    // opaque 500. Logged to Cloud Logging AND returned so the dashboard can show it.
+    console.error("[hub] GET /api/account failed:", e);
+    return NextResponse.json(
+      { error: "account_failed", detail: e instanceof Error ? e.message : String(e) },
+      { status: 500 },
+    );
   }
-
-  const ownedSnap = await db.collection("domains").where("accountId", "==", user.uid).get();
-  const domains = ownedSnap.docs.map((d) => {
-    const r = d.data() as DomainRecord;
-    return { domain: d.id, mobileActive: !!r.mobileActive, verified: !!r.verified };
-  });
-
-  return NextResponse.json({
-    email: account.email || user.email,
-    subscriptionStatus: account.subscriptionStatus ?? "none",
-    currentPeriodEnd: account.currentPeriodEnd ?? null,
-    domains,
-  });
 }
