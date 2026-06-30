@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
         if (!db) break;
         const state =
           event.type === "customer.subscription.deleted"
-            ? { subscriptionStatus: "canceled" as const, currentPeriodEnd: null, activeDomains: [] }
+            ? { subscriptionStatus: "canceled" as const, currentPeriodEnd: null, cancelAt: null, activeDomains: [] }
             : reconcileSubscription(sub as unknown as StripeSubscriptionLike);
         await applyReconciledState(db, accountId, state);
         break;

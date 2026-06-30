@@ -75,6 +75,32 @@ describe("reconcileSubscription", () => {
     expect(r.activeDomains).toEqual([]);
   });
 
+  it("reports cancelAt (ms) when scheduled to cancel at period end", () => {
+    const r = reconcileSubscription({
+      status: "active",
+      cancel_at_period_end: true,
+      cancel_at: 1_800_000_000,
+      items: { data: [{ metadata: { domain: "a.com" } }] },
+    });
+    expect(r.cancelAt).toBe(1_800_000_000_000);
+    // Access stays on (still active) until then.
+    expect(r.subscriptionStatus).toBe("active");
+    expect(r.activeDomains).toEqual(["a.com"]);
+  });
+
+  it("falls back to the period end when cancel_at_period_end is set without an explicit date", () => {
+    const r = reconcileSubscription({
+      status: "active",
+      cancel_at_period_end: true,
+      items: { data: [{ current_period_end: 1700 }] },
+    });
+    expect(r.cancelAt).toBe(1_700_000);
+  });
+
+  it("cancelAt is null when not scheduled to cancel", () => {
+    expect(reconcileSubscription({ status: "active", current_period_end: 1700 }).cancelAt).toBe(null);
+  });
+
   it("the A/B-not-C subscription: two domain items → exactly those two active", () => {
     const r = reconcileSubscription({
       status: "active",

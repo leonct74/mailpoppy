@@ -21,6 +21,9 @@ export interface AccountRecord {
   stripeSubscriptionId: string | null;
   subscriptionStatus: SubscriptionStatus;
   currentPeriodEnd: number | null; // epoch ms (Firestore Timestamp normalised to millis)
+  /** When set, the subscription is scheduled to cancel at this epoch-ms (cancel_at_period_end):
+   *  access continues until then, after which the gate blocks. null = not scheduled to cancel. */
+  cancelAt?: number | null;
 }
 
 /** A directory entry: which deployment serves a given email domain. */

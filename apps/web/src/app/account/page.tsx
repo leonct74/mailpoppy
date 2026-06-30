@@ -23,6 +23,7 @@ interface AccountData {
   email: string;
   subscriptionStatus: string;
   currentPeriodEnd: number | null;
+  cancelAt: number | null;
   domains: DomainRow[];
 }
 
@@ -253,6 +254,22 @@ export default function AccountPage() {
           seconds and refresh.
         </p>
       )}
+      {data?.cancelAt && (
+        <div className="border-hairline bg-surface mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 text-sm">
+          <span className="text-text">
+            Your subscription will cancel on <b>{new Date(data.cancelAt).toLocaleDateString()}</b> — access stays
+            on until then.
+          </span>
+          <button
+            onClick={() => act("/api/account/resume")}
+            disabled={busy === "portal"}
+            className="border-hairline text-text hover:bg-surface-variant shrink-0 rounded-lg border px-3 py-1.5 disabled:opacity-60"
+          >
+            {busy === "portal" ? "…" : "Keep my subscription"}
+          </button>
+        </div>
+      )}
+
       {error && <p className="text-danger mt-4 text-sm">{error}</p>}
 
       <div className="mt-6 space-y-2">

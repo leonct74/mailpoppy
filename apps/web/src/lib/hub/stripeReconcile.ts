@@ -18,11 +18,14 @@ export interface StripeItemLike {
 export interface StripeSubscriptionLike {
   status: string;
   current_period_end?: number | null; // top-level: only present on OLDER (pre-basil) API versions
+  cancel_at_period_end?: boolean | null; // user cancelled, but keeps access until the period ends
+  cancel_at?: number | null; // unix SECONDS — when the scheduled cancellation takes effect
   items?: { data?: StripeItemLike[] } | null;
 }
 export interface ReconciledState {
   subscriptionStatus: SubscriptionStatus;
   currentPeriodEnd: number | null; // epoch MS (what AccountRecord stores)
+  cancelAt: number | null; // epoch MS the subscription will end (cancel_at_period_end), else null
   activeDomains: string[]; // lowercased, deduped — the domains with a funding line item
 }
 
@@ -71,9 +74,13 @@ export function reconcileSubscription(sub: StripeSubscriptionLike): ReconciledSt
     if (d) domains.add(d);
   }
   const endSec = periodEndSeconds(sub);
+  // Scheduled cancellation (user cancelled but keeps access until the paid period ends). Prefer
+  // Stripe's explicit cancel_at; fall back to the period end when the flag is set without a date.
+  const cancelAtSec = sub.cancel_at_period_end ? (sub.cancel_at ?? endSec) : null;
   return {
     subscriptionStatus: mapStripeStatus(sub.status),
     currentPeriodEnd: endSec == null ? null : endSec * 1000,
+    cancelAt: typeof cancelAtSec === "number" ? cancelAtSec * 1000 : null,
     activeDomains: [...domains],
   };
 }

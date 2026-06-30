@@ -24,6 +24,7 @@ export async function applyReconciledState(
       {
         subscriptionStatus: state.subscriptionStatus,
         currentPeriodEnd: state.currentPeriodEnd,
+        cancelAt: state.cancelAt,
         updatedAt: now,
       },
       { merge: true },

@@ -45,6 +45,7 @@ export async function GET(req: NextRequest) {
       email: account.email || user.email,
       subscriptionStatus: account.subscriptionStatus ?? "none",
       currentPeriodEnd: account.currentPeriodEnd ?? null,
+      cancelAt: account.cancelAt ?? null,
       domains,
     });
   } catch (e) {

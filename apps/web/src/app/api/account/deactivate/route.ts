@@ -1,6 +1,9 @@
-// POST /api/account/deactivate { domain } — turn mobile access off for one domain. Removes that
-// domain's line item from the subscription; if it was the last item, cancels the whole
-// subscription. Sets mobileActive=false immediately (the subscription.* webhook also reconciles).
+// POST /api/account/deactivate { domain } — stop a domain's mobile access.
+//  • If it's the only/last funded domain, the whole subscription is scheduled to cancel at the END
+//    of the paid period (cancel_at_period_end). Access CONTINUES until then; the gate blocks once
+//    Stripe finalises the cancellation and the account goes 'canceled'. No mid-term forfeit.
+//  • If other domains stay funded, this domain's line item is removed now (Stripe prorates a
+//    credit toward the remaining domains) and its mobileActive is switched off.
 import { NextResponse, type NextRequest } from "next/server";
 import { verifyRequest } from "@/lib/hub/firebaseAdmin";
 import { getDb } from "@/lib/hub/firestore";
@@ -29,25 +32,39 @@ export async function POST(req: NextRequest) {
   }
 
   const itemId = (domSnap.data() as DomainRecord).stripeSubscriptionItemId ?? null;
-  const acct = (await db.collection("accounts").doc(user.uid).get()).data() as AccountRecord | undefined;
+  const acctRef = db.collection("accounts").doc(user.uid);
+  const acct = (await acctRef.get()).data() as AccountRecord | undefined;
   const subId = acct?.stripeSubscriptionId ?? null;
 
-  if (itemId && subId) {
-    try {
-      const sub = await stripe.subscriptions.retrieve(subId);
-      if (sub.items.data.length <= 1) {
-        await stripe.subscriptions.cancel(subId); // last domain → cancel the subscription
-      } else {
-        await stripe.subscriptionItems.del(itemId);
-      }
-    } catch (e) {
-      console.warn("[hub] deactivate: stripe update failed:", e);
-    }
+  if (!itemId || !subId) {
+    await domSnap.ref.set(
+      { mobileActive: false, stripeSubscriptionItemId: null, updatedAt: Date.now() },
+      { merge: true },
+    );
+    return NextResponse.json({ ok: true });
   }
 
-  await domSnap.ref.set(
-    { mobileActive: false, stripeSubscriptionItemId: null, updatedAt: Date.now() },
-    { merge: true },
-  );
-  return NextResponse.json({ ok: true });
+  try {
+    const sub = await stripe.subscriptions.retrieve(subId);
+    if (sub.items.data.length <= 1) {
+      // Whole subscription → cancel at period end. Keep mobileActive (access stays live) until then.
+      const updated = await stripe.subscriptions.update(subId, { cancel_at_period_end: true });
+      const cancelAt = typeof updated.cancel_at === "number" ? updated.cancel_at * 1000 : null;
+      await acctRef.set({ cancelAt, updatedAt: Date.now() }, { merge: true });
+      return NextResponse.json({ ok: true, scheduledCancel: true, cancelAt });
+    }
+    // One of several domains → drop this item now; Stripe prorates a credit.
+    await stripe.subscriptionItems.del(itemId);
+    await domSnap.ref.set(
+      { mobileActive: false, stripeSubscriptionItemId: null, updatedAt: Date.now() },
+      { merge: true },
+    );
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    console.error("[hub] deactivate failed:", e);
+    return NextResponse.json(
+      { error: "deactivate_failed", detail: e instanceof Error ? e.message : String(e) },
+      { status: 500 },
+    );
+  }
 }
