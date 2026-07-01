@@ -1005,6 +1005,22 @@ export function SetupWizard({
             </div>
           ) : (
             <>
+              {/* Friendly heads-up for an adopted/live domain: until a mailbox exists,
+                  incoming mail to that address is turned away. Only while there's no
+                  mailbox on this domain yet (the exact window the bounce can happen);
+                  plain language, framed as "do it soon", never alarming. */}
+              {domainMailboxes.length === 0 && (
+                <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-primary/20 bg-primary-container/10 p-3.5 text-sm text-on-surface-variant">
+                  <Mail className="mt-0.5 size-4 shrink-0 text-primary" />
+                  <span>
+                    <b className="text-on-surface">Do people already send email to {domain}?</b> If an address
+                    here already gets messages — like <span className="font-mono">hello@{domain}</span> — add a
+                    mailbox for it soon. Until it has one, new messages to that address can&apos;t come in: the
+                    person who wrote gets a note saying it couldn&apos;t be delivered. As soon as you add the
+                    mailbox, email to it starts arriving normally.
+                  </span>
+                </div>
+              )}
               <div className="mt-4 flex flex-wrap items-end gap-3">
                 <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
                   Email address
