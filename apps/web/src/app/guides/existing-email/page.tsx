@@ -163,7 +163,11 @@ export default function ExistingEmailGuide() {
             <Callout icon={<MailIcon size={18} />} title="They don't need a mailbox — and they keep working">
               An address your systems only <i>send</i> from — an order-confirmation <code className="text-text font-mono text-xs">no-reply@</code>,
               for example — doesn't receive anything, so it doesn't need a mailbox and won't show up in your mailbox
-              list. It carries on sending exactly as before.
+              list. It carries on sending exactly as before. For setting one of these up from scratch, see the{" "}
+              <Link href="/guides/transactional-email" className="text-primary font-semibold hover:underline">
+                transactional &amp; no-reply email guide
+              </Link>
+              .
             </Callout>
             <Callout icon={<MailOpenIcon size={18} />} title="Just remember: replies to it will bounce">
               If someone <i>replies</i> to a send-only address that has no mailbox, that reply is turned away. For a

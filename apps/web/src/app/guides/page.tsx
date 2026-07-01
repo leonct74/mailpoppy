@@ -3,11 +3,11 @@ import Link from "next/link";
 import type { ComponentType } from "react";
 import { DocTopBar, DocFooter } from "@/components/webmail/DocChrome";
 import { SITE_URL, SITE_NAME } from "@/lib/site";
-import { ArrowRightIcon, GlobeIcon, MailIcon, ServerIcon } from "@/components/webmail/icons";
+import { ArrowRightIcon, GlobeIcon, MailIcon, SendIcon, ServerIcon } from "@/components/webmail/icons";
 
 const TITLE = "MailPoppy guides — set up email on your domain, step by step";
 const DESCRIPTION =
-  "Plain-language guides for setting up email with MailPoppy: starting fresh on a brand-new domain, or moving a domain that already sends and receives email — with exactly what changes and how to switch without losing mail.";
+  "Plain-language guides for setting up email with MailPoppy: starting fresh on a brand-new domain, moving a domain that already sends and receives email, or sending transactional / no-reply mail (no mailbox needed) — with exactly what to expect.";
 
 export const metadata: Metadata = {
   title: TITLE,
@@ -46,6 +46,13 @@ const GUIDES: {
     body: "Your domain already sends or receives mail somewhere else. Here's exactly what changes when you switch to MailPoppy, and the safe order to do it in so no message goes missing.",
   },
   {
+    href: "/guides/transactional-email",
+    icon: SendIcon,
+    tag: "Send-only",
+    title: "Transactional & no-reply email",
+    body: "You only need to send — order confirmations, password resets, alerts from a no-reply. No mailbox needed: setting your domain up is enough to send from any address on it.",
+  },
+  {
     href: "/migrate",
     icon: ServerIcon,
     tag: "Bring your history",
@@ -66,8 +73,8 @@ export default function GuidesIndex() {
             Set up email your way
           </h1>
           <p className="text-muted mx-auto mt-5 max-w-2xl text-lg leading-relaxed">
-            Two short, plain-language walkthroughs — no cloud experience needed. Pick the one that matches your
-            domain. If you already run email on it, read that guide first so you know exactly what to expect.
+            Short, plain-language walkthroughs — no cloud experience needed. Pick the one that matches what you need.
+            If you already run email on your domain, read that guide first so you know exactly what to expect.
           </p>
         </div>
       </section>
