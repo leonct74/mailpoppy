@@ -72,4 +72,22 @@ describe("isDomainEntitled", () => {
     expect(isDomainEntitled({ mobileActive: true }, active, NOW)).toBe(true); // B
     expect(isDomainEntitled({ mobileActive: false }, active, NOW)).toBe(false); // C
   });
+
+  it("admin comp (manualEntitlement) bypasses the paywall entirely", () => {
+    // Entitled with no account, no activation, even a canceled account.
+    expect(isDomainEntitled({ manualEntitlement: true }, null, NOW)).toBe(true);
+    expect(isDomainEntitled({ manualEntitlement: true, mobileActive: false }, null, NOW)).toBe(true);
+    expect(
+      isDomainEntitled(
+        { manualEntitlement: true },
+        { subscriptionStatus: "canceled", currentPeriodEnd: null },
+        NOW,
+      ),
+    ).toBe(true);
+  });
+
+  it("manualEntitlement false falls back to the normal gate", () => {
+    expect(isDomainEntitled({ manualEntitlement: false, mobileActive: false }, active, NOW)).toBe(false);
+    expect(isDomainEntitled({ manualEntitlement: false, mobileActive: true }, active, NOW)).toBe(true);
+  });
 });

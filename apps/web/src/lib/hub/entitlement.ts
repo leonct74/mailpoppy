@@ -38,13 +38,16 @@ export function accountInGoodStanding(
   }
 }
 
-/** Is THIS domain's client access entitled right now? (activated AND account in good standing) */
+/** Is THIS domain's client access entitled right now? An admin comp (`manualEntitlement`)
+ *  bypasses the paywall entirely; otherwise it must be activated AND its account in good
+ *  standing. */
 export function isDomainEntitled(
-  domain: { mobileActive?: boolean } | null | undefined,
+  domain: { mobileActive?: boolean; manualEntitlement?: boolean } | null | undefined,
   account: AccountStanding | null | undefined,
   nowMs: number,
   graceDays: number = GRACE_DAYS_DEFAULT,
 ): boolean {
+  if (domain?.manualEntitlement) return true; // admin comp — no Stripe/account required
   if (!domain?.mobileActive) return false;
   return accountInGoodStanding(account, nowMs, graceDays);
 }

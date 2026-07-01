@@ -38,6 +38,11 @@ export interface DomainRecord {
   mobileActive?: boolean;
   /** The Stripe subscription line item that funds this domain's client access. */
   stripeSubscriptionItemId?: string | null;
+  /** ADMIN COMP: when true, this domain is entitled REGARDLESS of Stripe/account standing —
+   *  the paywall is bypassed. For MailPoppy's own operators to grant access (testing, comps,
+   *  partners) without a subscription. Set via the admin API (POST /api/admin/domains). Kept
+   *  separate from `mobileActive` so Stripe reconciliation never clobbers a comp. */
+  manualEntitlement?: boolean;
 }
 
 export type ResolveResult =

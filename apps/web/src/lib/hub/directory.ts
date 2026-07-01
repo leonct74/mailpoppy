@@ -68,6 +68,9 @@ export async function resolveDomain(input: string): Promise<ResolveResult> {
     const rec = snap.data() as DomainRecord;
     if (!rec?.deployment?.apiBaseUrl) return { ok: false, reason: "unknown_domain" };
 
+    // Admin comp bypasses the paywall (and needs no account lookup).
+    if (rec.manualEntitlement === true) return { ok: true, deployment: rec.deployment };
+
     // The gate: the domain must be activated AND its account in good standing.
     const account = await readAccount(db, rec.accountId);
     if (!isDomainEntitled(rec, account, Date.now())) {
