@@ -20,14 +20,16 @@ export const dynamic = "force-dynamic";
 
 const DOMAIN_RE = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/;
 
-/** Constant-time bearer check against HUB_ADMIN_TOKEN. Returns a Response on failure, else null. */
+/** Constant-time bearer check against HUB_ADMIN_TOKEN. Returns a Response on failure, else null.
+ *  Both sides are trimmed: secret stores + CLIs love to append a trailing newline, and that
+ *  invisible byte shouldn't lock the operator out. */
 function authFail(req: NextRequest): NextResponse | null {
-  const expected = process.env.HUB_ADMIN_TOKEN;
+  const expected = process.env.HUB_ADMIN_TOKEN?.trim();
   if (!expected) {
     return NextResponse.json({ error: "admin_disabled" }, { status: 503 });
   }
-  const m = (req.headers.get("authorization") ?? "").match(/^Bearer (.+)$/i);
-  const provided = m?.[1] ?? "";
+  const m = (req.headers.get("authorization") ?? "").match(/^Bearer\s+(.+)$/i);
+  const provided = (m?.[1] ?? "").trim();
   const a = Buffer.from(provided);
   const b = Buffer.from(expected);
   if (a.length !== b.length || !timingSafeEqual(a, b)) {
