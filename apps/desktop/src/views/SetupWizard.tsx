@@ -68,6 +68,9 @@ function readDomainDraft(): string {
 
 const noAutoCap = { autoCapitalize: "off", autoCorrect: "off", spellCheck: false, autoComplete: "off" } as const;
 
+/** The domain part of an email address, lower-cased (mirrors DomainView/HomeView). */
+const domainOf = (email: string) => email.split("@")[1]?.toLowerCase() ?? "";
+
 const inputCls =
   "rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-outline-variant transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50";
 
@@ -420,13 +423,20 @@ export function SetupWizard({
   // rather than a dead disabled form that reads as a broken dead-end.
   const canAddMailbox = !mbNoBackend && ["verified", "sending", "sent"].includes(step);
 
+  // Every mailbox lives in the one backend user pool, but THIS is a per-domain setup
+  // view: it must only ever show and count the mailboxes on the domain being set up —
+  // never another domain's (e.g. don't surface youord.com's mailbox while setting up
+  // boxord.com). Account-wide mailbox management lives in each domain's own view.
+  const domainMailboxes = (mailboxes ?? []).filter((m) => domainOf(m.email) === domain.toLowerCase());
+
   // The always-visible progress map (right rail). The "backend is live" claim
   // MUST come from live truth (a confirmed listMailboxes), never the localStorage
   // hint — otherwise a torn-down backend whose credentials are gone (so
   // listMailboxes can't even run, leaving liveDeployed === null) would still show
   // "your backend is live" from a stale flag. An in-session post-deploy step is
-  // covered separately inside setupPhases via the step value.
-  const phases = setupPhases({ ready, step, backendDeployed: liveDeployed === true, mailboxCount: mailboxes?.length ?? 0 });
+  // covered separately inside setupPhases via the step value. mailboxCount is scoped
+  // to THIS domain so "Create your first mailbox" reflects this domain, not the pool.
+  const phases = setupPhases({ ready, step, backendDeployed: liveDeployed === true, mailboxCount: domainMailboxes.length });
 
   // ---- Mailboxes ----
   async function loadMailboxes(): Promise<{ deployed: boolean; backend: BackendInfo | null; mailboxes: Mailbox[] }> {
@@ -1074,10 +1084,12 @@ export function SetupWizard({
             </>
           )}
 
-          {mailboxes && mailboxes.length > 0 && (
+          {domainMailboxes.length > 0 && (
             <div className="mt-4 text-sm">
               <div className="flex items-center justify-between gap-3">
-                <strong className="text-on-surface">Existing mailboxes ({mailboxes.length})</strong>
+                <strong className="text-on-surface">
+                  Mailboxes on {domain} ({domainMailboxes.length})
+                </strong>
                 {mbBackend && (
                   <details className="text-xs text-on-surface-variant/80">
                     <summary className="cursor-pointer select-none hover:text-on-surface-variant">Technical details</summary>
@@ -1088,7 +1100,7 @@ export function SetupWizard({
                 )}
               </div>
               <ul className="mt-2 flex flex-col gap-2">
-                {mailboxes.map((m) => (
+                {domainMailboxes.map((m) => (
                   <MailboxStorageRow
                     key={m.email}
                     email={m.email}
