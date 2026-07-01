@@ -14,6 +14,42 @@ export interface DeploymentConfig {
   apiBaseUrl: string;
 }
 
+export type ResolveErrorCode = "inactive_subscription" | "unknown_domain";
+
+/**
+ * A definitive verdict from the Hub that this domain can't sign in yet — surfaced to
+ * the user instead of silently falling back to the launch pool (which then failed at
+ * Cognito with a baffling "user pool doesn't exist"). Only thrown on a clear 403/404;
+ * network/parse failures still fall back to DEFAULT so the app stays resilient offline.
+ */
+export class ResolveError extends Error {
+  constructor(
+    readonly code: ResolveErrorCode,
+    readonly domain: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ResolveError";
+  }
+}
+
+function resolveErrorMessage(code: ResolveErrorCode, domain: string): string {
+  if (code === "inactive_subscription") {
+    // Deliberately does NOT name or link an external purchase page (Apple anti-steering
+    // 3.1.1). It states a plan is needed and who to ask — the admin who buys already
+    // knows where. A tappable "Manage plan" link can be added post-review if wanted.
+    return (
+      `The MailPoppy mobile app isn't turned on for @${domain} yet — this domain needs ` +
+      `an active plan. Ask whoever looks after email for ${domain} to switch it on, then ` +
+      `you can sign in here.`
+    );
+  }
+  return (
+    `We couldn't find MailPoppy set up for @${domain}. ` +
+    `Double-check the address, or ask whoever looks after your email.`
+  );
+}
+
 const DEFAULT: DeploymentConfig = {
   region: process.env.EXPO_PUBLIC_AWS_REGION ?? "eu-west-1",
   userPoolId: process.env.EXPO_PUBLIC_USER_POOL_ID ?? "eu-west-1_yV09AF6Ja",
@@ -75,9 +111,11 @@ export function clearActiveConfig(): void {
 
 /**
  * Resolve which backend serves this email's domain (Hub /api/resolve) and make it
- * active. Sends only the domain, never the full address. On any failure falls back to
- * DEFAULT so sign-in still works against the launch deployment. (Phase B surfaces
- * inactive-subscription as a hard error instead of falling back.)
+ * active. Sends only the domain, never the full address. A clear verdict from the Hub —
+ * 403 (no active plan) or 404 (domain not set up) — throws a {@link ResolveError} the
+ * sign-in screen turns into a plain-language, actionable message. Any OTHER failure
+ * (network, parse, 5xx) falls back to DEFAULT so the app still works offline / against
+ * the launch deployment.
  */
 export async function resolveConfig(email: string): Promise<DeploymentConfig> {
   const domain = email.split("@").pop()?.trim().toLowerCase();
@@ -93,9 +131,15 @@ export async function resolveConfig(email: string): Promise<DeploymentConfig> {
         setActiveConfig(c);
         return c;
       }
+    } else if (res.status === 403 || res.status === 404) {
+      // Definitive answer: don't fall back to the launch pool and fail later with a
+      // cryptic Cognito error — tell the user exactly what's wrong and what to do.
+      const code: ResolveErrorCode = res.status === 404 ? "unknown_domain" : "inactive_subscription";
+      throw new ResolveError(code, domain, resolveErrorMessage(code, domain));
     }
-  } catch {
-    /* network/parse — fall back */
+  } catch (e) {
+    if (e instanceof ResolveError) throw e; // definitive — surface it, don't swallow
+    /* network/parse/5xx — fall back */
   }
   setActiveConfig(DEFAULT);
   return DEFAULT;

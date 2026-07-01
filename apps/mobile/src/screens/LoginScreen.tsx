@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../AuthContext";
+import { ResolveError } from "../config";
 import { Logo } from "../components/Logo";
 import { PrivacyPolicy } from "../components/PrivacyPolicy";
 import { hasAcceptedPrivacy, setPrivacyAccepted } from "../privacyConsent";
@@ -367,6 +368,8 @@ function LinkButton({ label, onPress, disabled }: { label: string; onPress: () =
 
 /** Turn Cognito errors into something a non-technical user can act on. */
 function friendly(e: unknown): string {
+  // The Hub already phrased these for humans (no active plan / domain not set up).
+  if (e instanceof ResolveError) return e.message;
   const msg = e instanceof Error ? e.message : String(e);
   if (/UserNotFound|NotAuthorized|Incorrect username or password/i.test(msg))
     return "That email or password isn't right. Please try again.";
