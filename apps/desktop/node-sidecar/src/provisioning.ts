@@ -31,7 +31,6 @@ import {
   GetAccountCommand,
   PutAccountDetailsCommand,
   PutEmailIdentityMailFromAttributesCommand,
-  PutEmailIdentityDkimSigningAttributesCommand,
 } from "@aws-sdk/client-sesv2";
 import {
   SESClient,
@@ -193,19 +192,18 @@ export async function createIdentityGetDkimTokens(ctx: AwsContext, domain: strin
       // an adopted domain sits at "verifying" forever. A domain whose DKIM CNAMEs
       // were never published inside SES's verification window is marked FAILED, and
       // SES will NOT re-check it just because the records reappear: FAILED is
-      // terminal until Easy DKIM is re-initiated. So regenerate fresh tokens (which
-      // resets the status to PENDING) and publish THOSE (the caller writes the
-      // returned tokens' CNAMEs). We only do this for FAILED — a PENDING/NOT_STARTED
-      // identity is already progressing, so re-initiating it would pointlessly
-      // rotate its tokens on every retry/app-reopen and restart the clock. And we
-      // never touch a customer's own BYODKIM (EXTERNAL) signing config.
+      // terminal. Reset it to a clean slate by DELETING and RECREATING the identity,
+      // which starts Easy DKIM afresh with new tokens (status PENDING); the caller
+      // then publishes those tokens' CNAMEs. We do this with grants MailPoppy already
+      // holds (Delete/CreateEmailIdentity) rather than PutEmailIdentityDkimSigning-
+      // Attributes, so it needs no new permission and no re-consent. Safe because a
+      // FAILED identity is unverified and not sending — there's no verified config to
+      // lose. Only FAILED triggers this: PENDING/NOT_STARTED are already progressing
+      // (recreating would needlessly restart the clock on every retry/app-reopen), and
+      // a customer-managed EXTERNAL (BYODKIM) identity is left untouched.
       if (status === "FAILED" && origin !== "EXTERNAL") {
-        const reset = await sesv2.send(
-          new PutEmailIdentityDkimSigningAttributesCommand({
-            EmailIdentity: domain,
-            SigningAttributesOrigin: "AWS_SES",
-          }),
-        );
+        await sesv2.send(new DeleteEmailIdentityCommand({ EmailIdentity: domain }));
+        const recreated = await sesv2.send(new CreateEmailIdentityCommand({ EmailIdentity: domain }));
         // Record it as a managed EmailIdentity so this adopted domain is henceforth
         // recognised by discoverProvisionedDomains — teardown cleans it up, and a
         // later app-reopen resumes it to a now-winnable "verifying" rather than
@@ -217,10 +215,10 @@ export async function createIdentityGetDkimTokens(ctx: AwsContext, domain: strin
             resourceType: "EmailIdentity",
             name: domain,
             region: ctx.region,
-            detail: "adopted pre-existing domain; re-initiated Easy DKIM (was FAILED)",
+            detail: "adopted pre-existing domain; reset Easy DKIM (was FAILED) via delete+recreate",
           },
         ]);
-        return reset.DkimTokens ?? [];
+        return recreated.DkimAttributes?.Tokens ?? [];
       }
 
       // Otherwise reuse the identity's existing tokens: already SUCCESS (verified),
