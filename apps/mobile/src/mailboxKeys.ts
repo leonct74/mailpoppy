@@ -21,17 +21,49 @@ export interface EncryptedRef {
   encWrappedKey?: string;
 }
 
-let session: MailboxKeySession | null = null;
+// Several mailboxes can be added on this device (same domain), so we cache each
+// unlocked keypair in memory keyed by its address, and track which one is ACTIVE
+// (the mailbox currently being read). Switching mailboxes just re-points `active`
+// at the already-unlocked session — no password needed — so decryption keeps
+// working without re-signing-in. All are dropped on full sign-out; like the
+// single-mailbox app, a cold restart starts with none until each is re-established.
+const sessions = new Map<string, MailboxKeySession>();
+let active: MailboxKeySession | null = null;
 
-/** The unlocked keypair for the signed-in mailbox, or null when signed out. */
+const norm = (email: string) => email.trim().toLowerCase();
+
+/** The unlocked keypair for the ACTIVE mailbox, or null when locked/signed out. */
 export function getMailboxKeySession(): MailboxKeySession | null {
-  return session;
+  return active;
 }
 
-/** Drop the cached private key (call on sign-out). Best-effort zeroisation. */
+/** Make an already-added mailbox's key the active one (call on switch). If that
+ *  mailbox has no cached key (e.g. after a cold restart), the mailbox reads as
+ *  locked until it's re-established — same as the single-mailbox app. */
+export function setActiveMailboxKey(email: string): void {
+  active = sessions.get(norm(email)) ?? null;
+}
+
+/** Forget ONE mailbox's key (call when removing that mailbox). */
+export function forgetMailboxKey(email: string): void {
+  const s = sessions.get(norm(email));
+  if (s) {
+    s.privateKey.fill(0);
+    sessions.delete(norm(email));
+    if (active === s) active = null;
+  }
+}
+
+/** Drop EVERY cached private key (call on full sign-out). Best-effort zeroisation. */
+export function clearAllMailboxKeys(): void {
+  for (const s of sessions.values()) s.privateKey.fill(0);
+  sessions.clear();
+  active = null;
+}
+
+/** Back-compat alias — clears all cached keys. */
 export function clearMailboxKeySession(): void {
-  session?.privateKey.fill(0);
-  session = null;
+  clearAllMailboxKeys();
 }
 
 export interface EstablishOutcome {
@@ -51,10 +83,13 @@ export interface EstablishOutcome {
 export async function establishMailboxKeysForLogin(
   store: MailboxKeyStore,
   password: string,
+  email: string,
 ): Promise<EstablishOutcome> {
   const s = await getSodium();
   const r = await establishMailboxKeys(s, store, password);
-  session = { publicKey: r.publicKey, privateKey: r.privateKey };
+  const next: MailboxKeySession = { publicKey: r.publicKey, privateKey: r.privateKey };
+  sessions.set(norm(email), next);
+  active = next; // the mailbox we just signed into becomes the active one
   return { created: r.created, rekeyed: r.rekeyed, recoveryKey: r.recoveryKey };
 }
 
@@ -63,8 +98,8 @@ export async function establishMailboxKeysForLogin(
 /** Recover the per-message content key from a message's wrap, using the cached
  *  private key. Throws a user-facing error if the mailbox is locked (signed out). */
 async function contentKeyForMessage(s: Sodium, meta: EncryptedRef): Promise<Uint8Array> {
-  if (!session) throw new Error("Your mailbox is locked — sign in again to read this message.");
-  return unwrapContentKey(s, session.publicKey, session.privateKey, meta.encWrappedKey!);
+  if (!active) throw new Error("Your mailbox is locked — sign in again to read this message.");
+  return unwrapContentKey(s, active.publicKey, active.privateKey, meta.encWrappedKey!);
 }
 
 /** Decrypt an encrypted .eml back to its plaintext MIME source; a no-op for mail

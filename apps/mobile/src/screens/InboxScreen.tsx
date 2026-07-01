@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -27,7 +27,8 @@ import type { MessageMeta, Folder } from "@mailpoppy/core";
 import type { RootStackParamList } from "../navigation";
 import { FOLDERS, folderLabel } from "../folders";
 import { mail } from "../mailClient";
-import { Logo } from "../components/Logo";
+import { MailboxSwitcher } from "../components/MailboxSwitcher";
+import { useAuth } from "../AuthContext";
 import { colors, fonts, shortDate } from "../theme";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Inbox">;
@@ -45,6 +46,8 @@ if (Platform.OS === "android") {
 
 export function InboxScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
+  const { activeEmail } = useAuth();
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   const [folder, setFolder] = useState<Folder>("inbox");
   const [items, setItems] = useState<MessageMeta[]>([]);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -92,8 +95,18 @@ export function InboxScreen({ navigation }: Props) {
     useCallback(() => {
       void load("initial");
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [folder]),
+    }, [folder, activeEmail]),
   );
+
+  // Switching the active mailbox resets to a fresh inbox for it; the focus effect
+  // above (keyed on activeEmail) then loads that mailbox's messages.
+  useEffect(() => {
+    setQuery("");
+    setCursor(undefined);
+    setItems([]);
+    setFolder("inbox");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeEmail]);
 
   function switchFolder(f: Folder) {
     setFoldersOpen(false);
@@ -183,9 +196,21 @@ export function InboxScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
+      {/* Header — the active mailbox (tap to switch) + folders */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Logo size="sm" />
+        <TouchableOpacity
+          onPress={() => setSwitcherOpen(true)}
+          style={styles.mailboxChip}
+          hitSlop={8}
+          activeOpacity={0.7}
+          accessibilityLabel="Switch mailbox"
+        >
+          <Ionicons name="mail" size={16} color={colors.primary} />
+          <Text style={styles.mailboxChipText} numberOfLines={1}>
+            {activeEmail ?? "Mailbox"}
+          </Text>
+          <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
+        </TouchableOpacity>
         <TouchableOpacity
           onPress={() => setFoldersOpen(true)}
           style={styles.headerBtn}
@@ -315,6 +340,9 @@ export function InboxScreen({ navigation }: Props) {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Mailbox switcher */}
+      <MailboxSwitcher visible={switcherOpen} onClose={() => setSwitcherOpen(false)} />
     </View>
   );
 }
@@ -531,6 +559,18 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
   },
   headerBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center", borderRadius: 20 },
+  mailboxChip: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    marginRight: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    backgroundColor: colors.surfaceHigh,
+  },
+  mailboxChipText: { flex: 1, fontFamily: fonts.semibold, fontSize: 14, color: colors.text },
   searchWrap: { paddingHorizontal: 16, paddingBottom: 12, gap: 8 },
   search: {
     flexDirection: "row",

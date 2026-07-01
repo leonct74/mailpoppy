@@ -6,14 +6,17 @@ import { Ionicons } from "@expo/vector-icons";
 import type { RootStackParamList } from "../navigation";
 import { useAuth } from "../AuthContext";
 import { PrivacyPolicy } from "../components/PrivacyPolicy";
+import { MailboxSwitcher } from "../components/MailboxSwitcher";
 import { colors, fonts } from "../theme";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Settings">;
 
 export function SettingsScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
-  const { email, signOut } = useAuth();
+  const { email, signOut, accounts } = useAuth();
   const [policyOpen, setPolicyOpen] = useState(false);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const multiple = accounts.length > 1;
 
   return (
     <View style={styles.container}>
@@ -41,6 +44,15 @@ export function SettingsScreen({ navigation }: Props) {
           </View>
         </View>
 
+        {/* Mailboxes */}
+        <Text style={[styles.sectionLabel, styles.sectionGap]}>MAILBOXES</Text>
+        <TouchableOpacity style={styles.row} onPress={() => setSwitcherOpen(true)} activeOpacity={0.7}>
+          <Ionicons name="mail-outline" size={20} color={colors.textMuted} />
+          <Text style={styles.rowText}>{multiple ? "Switch or manage mailboxes" : "Add another mailbox"}</Text>
+          <Text style={styles.count}>{accounts.length}</Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+
         {/* Legal */}
         <Text style={[styles.sectionLabel, styles.sectionGap]}>LEGAL</Text>
         <TouchableOpacity style={styles.row} onPress={() => setPolicyOpen(true)} activeOpacity={0.7}>
@@ -51,7 +63,7 @@ export function SettingsScreen({ navigation }: Props) {
 
         <TouchableOpacity style={styles.signOut} onPress={signOut} activeOpacity={0.85}>
           <Ionicons name="log-out-outline" size={20} color={colors.danger} />
-          <Text style={styles.signOutText}>Sign out</Text>
+          <Text style={styles.signOutText}>{multiple ? "Sign out of all mailboxes" : "Sign out"}</Text>
         </TouchableOpacity>
 
         <View style={styles.footer}>
@@ -61,6 +73,7 @@ export function SettingsScreen({ navigation }: Props) {
       </View>
 
       <PrivacyPolicy visible={policyOpen} onClose={() => setPolicyOpen(false)} />
+      <MailboxSwitcher visible={switcherOpen} onClose={() => setSwitcherOpen(false)} />
     </View>
   );
 }
@@ -89,6 +102,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   rowText: { flex: 1, fontFamily: fonts.semibold, fontSize: 15, color: colors.text },
+  count: { fontFamily: fonts.semibold, fontSize: 13, color: colors.textMuted, marginRight: 2 },
   card: {
     flexDirection: "row",
     alignItems: "center",

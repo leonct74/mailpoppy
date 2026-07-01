@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, View } from "react-native";
 import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
@@ -26,38 +26,61 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 // Shared ref so we can navigate from a notification tap (outside any screen).
 const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
-/** Open the message a notification refers to. Its `data` carries messageId/folder;
- *  the title/body carry sender/subject, reused as the initial header text. */
-function openFromNotification(response: Notifications.NotificationResponse | null): boolean {
-  if (!response || !navigationRef.isReady()) return false;
-  const content = response.notification.request.content;
-  const data = content.data as { messageId?: string; folder?: string } | undefined;
-  if (!data?.messageId) return false;
-  navigationRef.navigate("Message", {
-    messageId: data.messageId,
-    folder: (data.folder as Folder) ?? "inbox",
-    subject: content.body ?? "",
-    from: content.title ?? "",
-  });
-  return true;
-}
-
 function Root() {
-  const { status } = useAuth();
+  const { status, switchTo, accounts, activeEmail } = useAuth();
   // A tap that arrived before the navigator was ready (cold start, or before
   // sign-in completes) is held here and replayed once we're signed in.
   const pending = useRef<Notifications.NotificationResponse | null>(null);
+  // Latest auth values for the notification handler (a callback that runs outside
+  // the render tree and can't read hooks directly).
+  const ctx = useRef({ switchTo, accounts, activeEmail });
+  ctx.current = { switchTo, accounts, activeEmail };
+
+  /** Open the message a notification refers to — FIRST switching to the mailbox it
+   *  was sent to (`data.mailbox`), so a tap lands directly on that message in the
+   *  right mailbox, never on the switcher. `data` carries messageId/folder/mailbox;
+   *  the title/body carry sender/subject, reused as the initial header text. */
+  const openFrom = useCallback(
+    async (response: Notifications.NotificationResponse | null): Promise<boolean> => {
+      if (!response || !navigationRef.isReady()) return false;
+      const content = response.notification.request.content;
+      const data = content.data as { messageId?: string; folder?: string; mailbox?: string } | undefined;
+      if (!data?.messageId) return false;
+      const target = typeof data.mailbox === "string" ? data.mailbox.trim().toLowerCase() : null;
+      const cur = ctx.current;
+      if (target && target !== cur.activeEmail && cur.accounts.some((a) => a.email === target)) {
+        try {
+          await cur.switchTo(target);
+        } catch {
+          /* fall through and still open the message */
+        }
+      }
+      navigationRef.navigate("Message", {
+        messageId: data.messageId,
+        folder: (data.folder as Folder) ?? "inbox",
+        subject: content.body ?? "",
+        from: content.title ?? "",
+      });
+      return true;
+    },
+    [],
+  );
 
   // Taps while the app is running or backgrounded, plus the cold-start tap.
   useEffect(() => {
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-      if (!openFromNotification(response)) pending.current = response;
+      void openFrom(response).then((ok) => {
+        if (!ok) pending.current = response;
+      });
     });
     void Notifications.getLastNotificationResponseAsync().then((response) => {
-      if (response && !openFromNotification(response)) pending.current = response;
+      if (!response) return;
+      void openFrom(response).then((ok) => {
+        if (!ok) pending.current = response;
+      });
     });
     return () => sub.remove();
-  }, []);
+  }, [openFrom]);
 
   // Once signed in and the navigator is mounted, replay any held tap.
   useEffect(() => {
@@ -65,10 +88,12 @@ function Root() {
     const replay = pending.current;
     // Defer a tick so the NavigationContainer has finished mounting.
     const t = setTimeout(() => {
-      if (openFromNotification(replay)) pending.current = null;
+      void openFrom(replay).then((ok) => {
+        if (ok) pending.current = null;
+      });
     }, 0);
     return () => clearTimeout(t);
-  }, [status]);
+  }, [status, openFrom]);
 
   if (status === "loading") {
     return (

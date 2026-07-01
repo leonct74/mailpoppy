@@ -8,7 +8,10 @@ import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
+import { MailpoppyClient } from "@mailpoppy/api-client";
 import { mail } from "./mailClient";
+import { getConfig } from "./config";
+import { auth } from "./auth";
 
 /** Android notification channel id — must match the inbound-processor's channelId. */
 export const MAIL_CHANNEL_ID = "mail";
@@ -50,30 +53,66 @@ async function ensurePermission(): Promise<boolean> {
   return requested.granted || requested.status === "granted";
 }
 
+const platform = (): "android" | "ios" => (Platform.OS === "android" ? "android" : "ios");
+
+/** Permission + this device's Expo push token, or null when push can't work here
+ *  (simulator, denied permission, or no EAS projectId). Never throws. */
+async function acquireToken(): Promise<string | null> {
+  if (!Device.isDevice) return null; // simulators/emulators don't get a push token
+  await ensureAndroidChannel();
+  if (!(await ensurePermission())) return null;
+  const projectId = resolveProjectId();
+  if (!projectId) {
+    // Expected until `eas init` writes extra.eas.projectId and a dev/EAS build is
+    // installed. Log once so it's discoverable, but never throw.
+    console.warn("[push] no EAS projectId — run `eas init`; skipping registration");
+    return null;
+  }
+  const { data } = await Notifications.getExpoPushTokenAsync({ projectId });
+  return data;
+}
+
 /**
- * Request permission, get this device's Expo push token, and register it with the
- * backend. Safe to call repeatedly (re-registering refreshes the token server-side
- * after any pruning). No-ops gracefully when push can't work in this environment.
+ * Register this device with the backend for the ACTIVE mailbox. Safe to call
+ * repeatedly (re-registering refreshes the token server-side after any pruning).
+ * No-ops gracefully when push can't work in this environment.
  */
 export async function registerForPush(): Promise<void> {
   try {
-    if (!Device.isDevice) return; // simulators/emulators don't get a push token
-    await ensureAndroidChannel();
-    if (!(await ensurePermission())) return;
-
-    const projectId = resolveProjectId();
-    if (!projectId) {
-      // Expected until `eas init` writes extra.eas.projectId and a dev/EAS build
-      // is installed. Log once so it's discoverable, but never throw.
-      console.warn("[push] no EAS projectId — run `eas init`; skipping registration");
-      return;
-    }
-
-    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
-    await mail.registerDevice(token, Platform.OS === "android" ? "android" : "ios");
+    const token = await acquireToken();
+    if (!token) return;
+    await mail.registerDevice(token, platform());
     registeredToken = token;
   } catch (e) {
     console.warn("[push] registration failed:", e);
+  }
+}
+
+/**
+ * Register this device for EVERY added mailbox, so notifications arrive for all of
+ * them — not only the active one. The backend keeps a device registry per mailbox,
+ * so we register the one device token under each. Each call uses a throwaway client
+ * bound to THAT mailbox's token (via getTokenFor) rather than flipping the global
+ * active session — so this never races the inbox the user is currently viewing.
+ * Best-effort throughout.
+ */
+export async function registerForPushAllMailboxes(usernames: string[]): Promise<void> {
+  if (usernames.length === 0) return;
+  try {
+    const token = await acquireToken();
+    if (!token) return;
+    registeredToken = token;
+    const apiBaseUrl = getConfig().apiBaseUrl;
+    for (const username of usernames) {
+      try {
+        const client = new MailpoppyClient({ apiBaseUrl, getToken: () => auth.getTokenFor(username) });
+        await client.registerDevice(token, platform());
+      } catch (e) {
+        console.warn("[push] register for a mailbox failed:", e);
+      }
+    }
+  } catch (e) {
+    console.warn("[push] multi registration failed:", e);
   }
 }
 
@@ -90,5 +129,19 @@ export async function unregisterForPush(): Promise<void> {
     await mail.unregisterDevice(token);
   } catch (e) {
     console.warn("[push] unregister failed:", e);
+  }
+}
+
+/** Unregister this device from ONE mailbox (when that mailbox is removed), leaving
+ *  the others registered. Uses a throwaway client bound to that mailbox's token, so
+ *  it never disturbs the active session. */
+export async function unregisterForMailbox(username: string): Promise<void> {
+  const token = registeredToken;
+  if (!token) return;
+  try {
+    const client = new MailpoppyClient({ apiBaseUrl: getConfig().apiBaseUrl, getToken: () => auth.getTokenFor(username) });
+    await client.unregisterDevice(token);
+  } catch (e) {
+    console.warn("[push] unregister mailbox failed:", e);
   }
 }
