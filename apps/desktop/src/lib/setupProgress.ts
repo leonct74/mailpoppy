@@ -55,11 +55,23 @@ export interface ResumeState {
 export function deriveResume(i: ResumeInput): ResumeState {
   const domain = (i.presetDomain || i.domains[0] || "").toLowerCase();
   if (i.backendDeployed) {
-    // Only resume into a domain's verify state when we actually have a status
-    // signal for it. Without one (no domain yet, or status unreachable), stay at
-    // "start" with the domain pre-filled and let the user drive — preflight will
-    // detect the backend and skip the deploy step. Never guess a step.
-    if (domain && i.dkim !== undefined) {
+    // Resume into a domain's verify state ONLY when MailPoppy actually provisioned
+    // it — i.e. it published that domain's DKIM CNAMEs / MX / DMARC to Route53 (so
+    // verification can eventually succeed). The evidence is membership in the
+    // provisioned-domains list, which unions the backend's mailboxes, our receipt
+    // rule's recipients, and the local provisioning ledger.
+    //
+    // A PRE-EXISTING domain the user created OUTSIDE MailPoppy (adopted via "Set up
+    // with MailPoppy") also has an SES identity, so a status read succeeds and
+    // `dkim !== undefined` — but its DKIM records were never written by us, so
+    // polling for verification would spin forever. Such a domain must go through
+    // the provision step first, so stay at "start": with the backend live, the
+    // wizard's auto-preflight leads straight to "Set up email for this domain",
+    // which publishes the records and THEN advances to verifying. Also stay at
+    // "start" when there's no status signal at all (no domain, or status
+    // unreachable) — never guess a step.
+    const provisionedByUs = i.domains.some((d) => d.toLowerCase() === domain);
+    if (domain && provisionedByUs && i.dkim !== undefined) {
       const verified = i.dkim === "SUCCESS" && i.verifiedForSending === true;
       return { domain, step: verified ? "verified" : "verifying", leftover: false };
     }

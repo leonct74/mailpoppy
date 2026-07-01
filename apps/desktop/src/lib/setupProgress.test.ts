@@ -18,6 +18,33 @@ describe("deriveResume (resume from real AWS state)", () => {
     ).toEqual({ domain: "acme.com", step: "verifying", leftover: false });
   });
 
+  it("does NOT resume an ADOPTED pre-existing domain to 'verifying' — its DKIM was never published by us, so polling would spin forever; route it through provision instead", () => {
+    // The domain has an SES identity (created outside MailPoppy), so a status read
+    // succeeds (dkim defined, not verified) — but it's absent from the provisioned
+    // list, so we must NOT jump to the unwinnable verify poll.
+    expect(
+      deriveResume({
+        backendDeployed: true,
+        domains: ["managed.com"],
+        presetDomain: "adopted.com",
+        dkim: "NOT_STARTED",
+        verifiedForSending: false,
+      }),
+    ).toEqual({ domain: "adopted.com", step: "start", leftover: false });
+  });
+
+  it("an adopted domain that is ALREADY verified elsewhere still isn't force-resumed to 'verified' (not in our provisioned list) — provision reconciles receiving", () => {
+    expect(
+      deriveResume({
+        backendDeployed: true,
+        domains: [],
+        presetDomain: "verified-elsewhere.com",
+        dkim: "SUCCESS",
+        verifiedForSending: true,
+      }),
+    ).toEqual({ domain: "verified-elsewhere.com", step: "start", leftover: false });
+  });
+
   it("flags a leftover when domain DNS exists but no backend is deployed", () => {
     expect(deriveResume({ backendDeployed: false, domains: ["mailpoppy.com"] })).toEqual({
       domain: "mailpoppy.com",
