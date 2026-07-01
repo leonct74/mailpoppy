@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import type { ComponentType } from "react";
 import { Logo } from "@/components/webmail/Logo";
+import { PricingAmount } from "@/components/PricingAmount";
 import { SITE_URL, SITE_NAME, SITE_DESCRIPTION, FAQS, REPO_URL, REPO_PUBLIC } from "@/lib/site";
 import {
   ShieldIcon,
@@ -839,33 +840,101 @@ function Comparison() {
 
 /* ─────────────────────────── Pricing ─────────────────────────── */
 
+const FREE_FEATURES = [
+  "The desktop app that sets everything up (Mac & Windows)",
+  "Runs entirely in your own AWS — your mail never leaves it",
+  "Your own domain, with unlimited mailboxes",
+  "Webmail in any browser",
+  "Send transactional & no-reply mail from your domain",
+  "Spam filtering, plus optional malware scanning",
+  "Import your existing email over IMAP",
+  "No lock-in — remove everything in one click",
+];
+
+const MOBILE_FEATURES = [
+  "The MailPoppy app for iPhone & Android",
+  "Push notifications the moment a message arrives",
+  "Read and reply on the go",
+  "Covers every mailbox on the domain — the ones you have now and any you add later",
+];
+
 function Pricing() {
   return (
     <Section id="pricing" tone="elevated">
       <SectionHeading
         eyebrow="Pricing"
-        title="You pay AWS at cost — not us, per seat"
-        subtitle="Because everything runs in your account, your only running cost is your AWS usage, which is typically a few dollars a month for a whole domain."
+        title="Free to own your email. A small fee to take it mobile."
+        subtitle="Everything you need to run professional email on your own domain is free — you pay only your own AWS usage. The mobile app is an optional add-on, priced once per domain and paid by the admin, that covers every mailbox under it."
       />
-      <div className="mx-auto mt-10 max-w-md">
-        <div className="border-hairline bg-surface rounded-3xl border p-8 text-center">
-          <span className="bg-primary/12 text-primary inline-block rounded-full px-3 py-1 text-xs font-semibold tracking-wide uppercase">
-            Coming soon
-          </span>
-          <p className="text-heading mt-5 text-2xl font-bold">Simple, one-time pricing</p>
-          <p className="text-muted mt-3 text-sm leading-relaxed">
-            MailPoppy&apos;s own pricing is on the way. No subscriptions to us, no per-mailbox tax — just the app that
-            sets it all up. In the meantime, you can look around the webmail today.
+      <div className="mx-auto mt-10 grid max-w-4xl items-start gap-6 md:grid-cols-2">
+        {/* Free tier */}
+        <div className="border-hairline bg-surface flex h-full flex-col rounded-3xl border p-8">
+          <span className="text-primary text-xs font-semibold tracking-wide uppercase">Free</span>
+          <h3 className="text-heading mt-2 text-xl font-bold">Own your email</h3>
+          <div className="mt-4 flex items-baseline gap-1">
+            <span className="text-heading text-4xl font-bold">$0</span>
+            <span className="text-muted text-sm font-medium">/ from MailPoppy</span>
+          </div>
+          <p className="text-muted mt-2 text-sm leading-relaxed">
+            You pay AWS at cost for your own usage — typically a few dollars a month for a whole domain. Nothing to us.
           </p>
+          <ul className="mt-6 flex flex-1 flex-col gap-3">
+            {FREE_FEATURES.map((f) => (
+              <li key={f} className="text-text flex items-start gap-2.5 text-sm leading-relaxed">
+                <span className="text-primary mt-0.5 shrink-0">
+                  <CheckCircleIcon size={18} />
+                </span>
+                {f}
+              </li>
+            ))}
+          </ul>
           <Link
             href="/app"
-            className="bg-primary text-primary-text mt-6 inline-flex items-center gap-2 rounded-2xl px-6 py-3 text-sm font-bold tracking-wide transition-opacity hover:opacity-90"
+            className="border-hairline bg-surface-container text-text hover:bg-surface-variant mt-8 inline-flex items-center justify-center gap-2 rounded-2xl border px-6 py-3 text-sm font-bold tracking-wide transition-colors"
           >
             Open MailPoppy
             <ArrowRightIcon size={16} />
           </Link>
         </div>
+
+        {/* Mobile add-on (highlighted) */}
+        <div className="border-primary/40 bg-surface-high relative flex h-full flex-col rounded-3xl border p-8">
+          <span className="bg-primary text-primary-text absolute -top-3 right-6 rounded-full px-3 py-1 text-[11px] font-bold tracking-wide uppercase">
+            Most popular
+          </span>
+          <span className="text-primary text-xs font-semibold tracking-wide uppercase">Mobile app · per domain</span>
+          <h3 className="text-heading mt-2 text-xl font-bold">Take it with you</h3>
+          <div className="mt-4">
+            <PricingAmount />
+            <span className="text-muted ml-1 text-sm font-medium">· per domain</span>
+          </div>
+          <p className="text-muted mt-2 text-sm leading-relaxed">
+            Paid by the admin, once per domain — so the people with mailboxes never see a bill. One price covers
+            everyone on the domain.
+          </p>
+          <p className="text-text mt-6 text-sm font-semibold">Everything in Free, plus:</p>
+          <ul className="mt-3 flex flex-1 flex-col gap-3">
+            {MOBILE_FEATURES.map((f) => (
+              <li key={f} className="text-text flex items-start gap-2.5 text-sm leading-relaxed">
+                <span className="text-primary mt-0.5 shrink-0">
+                  <CheckCircleIcon size={18} />
+                </span>
+                {f}
+              </li>
+            ))}
+          </ul>
+          <div className="mt-8">
+            <span className="bg-primary/12 text-primary inline-flex items-center gap-2 rounded-2xl px-6 py-3 text-sm font-bold tracking-wide">
+              <DevicesIcon size={16} />
+              Coming soon to the App Store &amp; Google Play
+            </span>
+          </div>
+        </div>
       </div>
+      <p className="text-dim mx-auto mt-6 max-w-2xl text-center text-xs leading-relaxed">
+        The mobile app is the only paid part. Owning and running your email — desktop app, webmail, unlimited
+        mailboxes — is always free; you pay only AWS for your own usage.
+      </p>
     </Section>
   );
 }

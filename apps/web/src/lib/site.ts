@@ -29,7 +29,7 @@ export const FAQS: { q: string; a: string }[] = [
   },
   {
     q: "What does it cost?",
-    a: "Because everything runs in your own AWS account, you pay AWS directly for what you use — typically a few dollars a month for an entire domain, with no per-mailbox subscription. MailPoppy's own pricing is coming soon.",
+    a: "Owning your email is free: the desktop app, the email backend it deploys, unlimited mailboxes and webmail in the browser. Your only running cost is your own AWS usage — typically a few dollars a month for a whole domain, with no per-mailbox fee. The one paid extra is the MailPoppy mobile app (iPhone and Android, with push notifications): it's priced once per domain and paid by the admin, so it covers every mailbox on that domain and the people using them never pay anything. Exact mobile pricing is coming soon.",
   },
   {
     q: "Can I use my own domain?",
