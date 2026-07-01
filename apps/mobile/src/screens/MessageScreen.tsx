@@ -5,6 +5,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -13,9 +14,10 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import type { RootStackParamList } from "../navigation";
 import { mail } from "../mailClient";
+import { useAuth } from "../AuthContext";
 import { parseEml, type ParsedEmail } from "../eml";
 import { saveOrShareAttachment, saveOrShareEncryptedAttachment } from "../attachments";
-import { decryptEml } from "../mailboxKeys";
+import { decryptEml, MailboxLockedError } from "../mailboxKeys";
 import { MessageBody } from "../components/MessageBody";
 import { folderLabel } from "../folders";
 import { colors, fonts } from "../theme";
@@ -26,10 +28,19 @@ type IconName = React.ComponentProps<typeof Ionicons>["name"];
 export function MessageScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
   const { messageId, folder, encrypted, encWrappedKey } = route.params;
+  const { activeEmail, signIn } = useAuth();
   const [email, setEmail] = useState<ParsedEmail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState<number | null>(null);
   const [moving, setMoving] = useState(false);
+  // The mailbox's encryption key isn't on this device (e.g. first read after an
+  // app update) → offer an in-place unlock instead of a dead-end error.
+  const [locked, setLocked] = useState(false);
+  const [pw, setPw] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0); // bump to refetch after an unlock
 
   useEffect(() => {
     let alive = true;
@@ -54,15 +65,46 @@ export function MessageScreen({ route, navigation }: Props) {
         // Decrypt before parsing — a no-op for mail stored in clear.
         const plain = await decryptEml(enc, eml);
         const parsed = await parseEml(plain);
-        if (alive) setEmail(parsed);
+        if (alive) {
+          setEmail(parsed);
+          setLocked(false);
+        }
       } catch (e) {
-        if (alive) setError(e instanceof Error ? e.message : String(e));
+        if (!alive) return;
+        if (e instanceof MailboxLockedError) setLocked(true);
+        else setError(e instanceof Error ? e.message : String(e));
       }
     })();
     return () => {
       alive = false;
     };
-  }, [messageId, encrypted, encWrappedKey, folder]);
+  }, [messageId, encrypted, encWrappedKey, folder, attempt]);
+
+  // Re-signing in validates the password with the server FIRST (never guessing at
+  // the key wrap), then re-establishes and keychain-persists this mailbox's key.
+  async function unlock() {
+    if (!activeEmail || !pw) return;
+    setUnlocking(true);
+    setUnlockError(null);
+    try {
+      const res = await signIn(activeEmail, pw);
+      if (res !== "signed-in") {
+        setUnlockError("This mailbox needs its first password set — sign in to it from the login screen.");
+        return;
+      }
+      setPw("");
+      setAttempt((n) => n + 1); // refetch; the key is in place now
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setUnlockError(
+        /NotAuthorized|Incorrect username or password/i.test(msg)
+          ? "That password isn't right. Please try again."
+          : msg,
+      );
+    } finally {
+      setUnlocking(false);
+    }
+  }
 
   function reply() {
     if (!email) return;
@@ -145,7 +187,54 @@ export function MessageScreen({ route, navigation }: Props) {
         </TouchableOpacity>
       </View>
 
-      {error ? (
+      {locked && !email ? (
+        <View style={styles.centered}>
+          <View style={styles.lockBadge}>
+            <Ionicons name="lock-closed" size={26} color={colors.primary} />
+          </View>
+          <Text style={styles.errorTitle}>This message is encrypted</Text>
+          <Text style={styles.errorText}>
+            Enter the password for {activeEmail ?? "this mailbox"} to unlock it on this device. You'll
+            only need to do this once.
+          </Text>
+          <View style={styles.unlockWrap}>
+            <TextInput
+              style={styles.unlockInput}
+              placeholder="Password"
+              placeholderTextColor={colors.textMuted}
+              secureTextEntry={!showPw}
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={pw}
+              onChangeText={setPw}
+              editable={!unlocking}
+              onSubmitEditing={() => void unlock()}
+            />
+            <TouchableOpacity
+              onPress={() => setShowPw((s) => !s)}
+              hitSlop={8}
+              style={styles.unlockEye}
+              accessibilityRole="button"
+              accessibilityLabel={showPw ? "Hide password" : "Show password"}
+            >
+              <Ionicons name={showPw ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+          {unlockError && <Text style={styles.unlockError}>{unlockError}</Text>}
+          <TouchableOpacity
+            style={[styles.unlockBtn, (!pw || unlocking) && styles.unlockBtnDisabled]}
+            onPress={() => void unlock()}
+            disabled={!pw || unlocking}
+            activeOpacity={0.85}
+          >
+            {unlocking ? (
+              <ActivityIndicator color={colors.primaryText} />
+            ) : (
+              <Text style={styles.unlockBtnText}>Unlock mailbox</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      ) : error ? (
         <View style={styles.centered}>
           <Text style={styles.errorTitle}>Couldn't open this message</Text>
           <Text style={styles.errorText}>{error}</Text>
@@ -329,6 +418,45 @@ const styles = StyleSheet.create({
   attachName: { flex: 1, fontFamily: fonts.medium, fontSize: 14, color: colors.text },
   errorTitle: { fontFamily: fonts.bold, fontSize: 17, color: colors.text },
   errorText: { fontFamily: fonts.regular, fontSize: 14, color: colors.textMuted, marginTop: 8, textAlign: "center" },
+  lockBadge: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.surfaceContainer,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+  unlockWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "stretch",
+    backgroundColor: colors.surfaceHigh,
+    borderRadius: 12,
+    paddingRight: 12,
+    marginTop: 20,
+  },
+  unlockInput: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    fontFamily: fonts.regular,
+    fontSize: 15,
+    color: colors.text,
+  },
+  unlockEye: { paddingLeft: 8, alignSelf: "stretch", justifyContent: "center" },
+  unlockError: { fontFamily: fonts.regular, fontSize: 13, color: colors.danger, marginTop: 10, textAlign: "center" },
+  unlockBtn: {
+    alignSelf: "stretch",
+    height: 50,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 12,
+  },
+  unlockBtnDisabled: { opacity: 0.5 },
+  unlockBtnText: { fontFamily: fonts.bold, fontSize: 15, color: colors.primaryText },
   actionBar: {
     flexDirection: "row",
     gap: 10,

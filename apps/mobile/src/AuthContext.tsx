@@ -16,6 +16,7 @@ import {
   clearAllMailboxKeys,
   setActiveMailboxKey,
   forgetMailboxKey,
+  restoreMailboxKeys,
 } from "./mailboxKeys";
 import {
   loadAccounts,
@@ -101,6 +102,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         auth.setActiveUsername(active.username);
         try {
           await auth.getToken();
+          // Reload every mailbox's encryption key from the keychain BEFORE any
+          // screen mounts, so a notification-tap cold start can decrypt right away.
+          await restoreMailboxKeys(persisted.accounts.map((a) => a.email));
           setActiveMailboxKey(active.email);
           apply(persisted);
           setStatus("signed-in");
@@ -120,6 +124,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (e && username) {
             const migrated = withMailbox({ accounts: [], activeEmail: null }, { email: e, username });
             auth.setActiveUsername(username);
+            await restoreMailboxKeys([e]);
+            setActiveMailboxKey(e);
             apply(migrated);
             setStatus("signed-in");
             void registerForPush();
@@ -234,11 +240,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(() => {
     const toSignOut = accounts.map((a) => a.username);
+    const emails = accounts.map((a) => a.email);
     // Unregister the active token while a JWT is still valid, THEN drop everything.
     void unregisterForPush().finally(() => {
       for (const u of toSignOut) auth.signOutUser(u);
       auth.signOut();
-      clearAllMailboxKeys();
+      clearAllMailboxKeys(emails); // wipes the keychain copies too
       void Notifications.setBadgeCountAsync(0).catch(() => {});
       resetContacts();
       apply({ accounts: [], activeEmail: null });

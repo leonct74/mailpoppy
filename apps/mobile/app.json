@@ -41,7 +41,8 @@
           "photosPermission": "Mailpoppy needs access to your photos so you can attach them to emails."
         }
       ],
-      "react-native-libsodium"
+      "react-native-libsodium",
+      "expo-secure-store"
     ],
     "experiments": {
       "onDemandFilesystem": false
