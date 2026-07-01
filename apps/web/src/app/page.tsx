@@ -853,7 +853,9 @@ const FREE_FEATURES = [
 
 const MOBILE_FEATURES = [
   "The MailPoppy app for iPhone & Android",
-  "Push notifications the moment a message arrives",
+  "Native push notifications the moment a message arrives",
+  "All your mailboxes in one app — switch between sales@, support@ and more without signing in and out",
+  "Tap a notification and land straight on that message, in the right mailbox",
   "Read and reply on the go",
   "Covers every mailbox on the domain — the ones you have now and any you add later",
 ];

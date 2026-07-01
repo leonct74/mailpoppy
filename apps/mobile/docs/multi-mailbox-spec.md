@@ -102,6 +102,14 @@ That means multi-mailbox notifications are a **purely client-side** feature. The
 
 De-registration on `removeMailbox` uses the existing per-mailbox `unregisterDevice`.
 
+**Direct-open already works today.** `App.tsx` `openFromNotification()` already reads the push `data`
+and navigates **straight to the message** (`addNotificationResponseReceivedListener` for live/
+background taps + `getLastNotificationResponseAsync` for cold start; it even holds a tap that lands
+before sign-in and replays it). So a tap NEVER dumps the user on a switcher to pick manually — it
+opens the exact email. For multi-mailbox the ONLY addition is: read `data.mailbox` (already in the
+payload) and `switchTo()` it before the existing `navigate("Message", …)`. This directly answers the
+"will a notification for mailbox B open B, or land me on the switcher?" question: **it opens B.**
+
 ## 7. Persistence & security
 
 - Persist the **accounts list** (emails only) in AsyncStorage; the actual tokens stay in
