@@ -946,6 +946,7 @@ function Footer() {
           <a href="#features" className="hover:text-text transition-colors">Features</a>
           <a href="#security" className="hover:text-text transition-colors">Security</a>
           <a href="#open" className="hover:text-text transition-colors">Open source</a>
+          <Link href="/guides" className="hover:text-text transition-colors">Guides</Link>
           <Link href="/workmail-alternative" className="hover:text-text transition-colors">WorkMail alternative</Link>
           <Link href="/migrate" className="hover:text-text transition-colors">Migrate</Link>
           <a href="#pricing" className="hover:text-text transition-colors">Pricing</a>

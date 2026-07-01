@@ -335,6 +335,7 @@ function Footer() {
         <nav className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
           <Link href="/#features" className="hover:text-text transition-colors">Features</Link>
           <Link href="/#open" className="hover:text-text transition-colors">Open source</Link>
+          <Link href="/guides" className="hover:text-text transition-colors">Guides</Link>
           <Link href="/migrate" className="hover:text-text transition-colors">Migrate</Link>
           <Link href="/privacy" className="hover:text-text transition-colors">Privacy</Link>
         </nav>
