@@ -31,6 +31,7 @@ import {
   GetAccountCommand,
   PutAccountDetailsCommand,
   PutEmailIdentityMailFromAttributesCommand,
+  PutEmailIdentityDkimSigningAttributesCommand,
 } from "@aws-sdk/client-sesv2";
 import {
   SESClient,
@@ -182,7 +183,49 @@ export async function createIdentityGetDkimTokens(ctx: AwsContext, domain: strin
     return out.DkimAttributes?.Tokens ?? [];
   } catch (e) {
     if ((e as { name?: string }).name === "AlreadyExistsException") {
+      // The identity already exists — the usual case when ADOPTING a pre-existing
+      // domain the user created outside MailPoppy.
       const out = await sesv2.send(new GetEmailIdentityCommand({ EmailIdentity: domain }));
+      const status = out.DkimAttributes?.Status;
+      const origin = out.DkimAttributes?.SigningAttributesOrigin;
+
+      // SES-managed Easy DKIM stuck in the *sticky* FAILED state — the usual reason
+      // an adopted domain sits at "verifying" forever. A domain whose DKIM CNAMEs
+      // were never published inside SES's verification window is marked FAILED, and
+      // SES will NOT re-check it just because the records reappear: FAILED is
+      // terminal until Easy DKIM is re-initiated. So regenerate fresh tokens (which
+      // resets the status to PENDING) and publish THOSE (the caller writes the
+      // returned tokens' CNAMEs). We only do this for FAILED — a PENDING/NOT_STARTED
+      // identity is already progressing, so re-initiating it would pointlessly
+      // rotate its tokens on every retry/app-reopen and restart the clock. And we
+      // never touch a customer's own BYODKIM (EXTERNAL) signing config.
+      if (status === "FAILED" && origin !== "EXTERNAL") {
+        const reset = await sesv2.send(
+          new PutEmailIdentityDkimSigningAttributesCommand({
+            EmailIdentity: domain,
+            SigningAttributesOrigin: "AWS_SES",
+          }),
+        );
+        // Record it as a managed EmailIdentity so this adopted domain is henceforth
+        // recognised by discoverProvisionedDomains — teardown cleans it up, and a
+        // later app-reopen resumes it to a now-winnable "verifying" rather than
+        // routing back through the provision step.
+        await record([
+          {
+            action: "created",
+            service: "SES",
+            resourceType: "EmailIdentity",
+            name: domain,
+            region: ctx.region,
+            detail: "adopted pre-existing domain; re-initiated Easy DKIM (was FAILED)",
+          },
+        ]);
+        return reset.DkimTokens ?? [];
+      }
+
+      // Otherwise reuse the identity's existing tokens: already SUCCESS (verified),
+      // PENDING / NOT_STARTED (SES is already checking — don't disturb), or a
+      // customer-managed EXTERNAL (BYODKIM) identity we must not reconfigure.
       return out.DkimAttributes?.Tokens ?? [];
     }
     throw e;
