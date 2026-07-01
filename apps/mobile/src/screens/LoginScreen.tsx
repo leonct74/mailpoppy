@@ -308,8 +308,11 @@ function Consent({
 function Field({
   label,
   icon,
+  secureTextEntry,
   ...input
 }: { label: string; icon: IconName } & React.ComponentProps<typeof TextInput>) {
+  // Password fields get a show/hide eye so the user can check what they typed.
+  const [hidden, setHidden] = useState(true);
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label.toUpperCase()}</Text>
@@ -319,8 +322,20 @@ function Field({
           style={styles.input}
           placeholderTextColor="rgba(229,189,182,0.45)"
           autoCorrect={false}
+          secureTextEntry={secureTextEntry ? hidden : false}
           {...input}
         />
+        {secureTextEntry && (
+          <TouchableOpacity
+            onPress={() => setHidden((h) => !h)}
+            hitSlop={8}
+            style={styles.eyeBtn}
+            accessibilityRole="button"
+            accessibilityLabel={hidden ? "Show password" : "Hide password"}
+          >
+            <Ionicons name={hidden ? "eye-outline" : "eye-off-outline"} size={20} color={colors.textMuted} />
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -439,6 +454,7 @@ const styles = StyleSheet.create({
   },
   inputIcon: { marginRight: 10 },
   input: { flex: 1, fontFamily: fonts.regular, fontSize: 16, color: colors.text, padding: 0 },
+  eyeBtn: { paddingLeft: 10, height: "100%", justifyContent: "center" },
   button: {
     flexDirection: "row",
     gap: 8,

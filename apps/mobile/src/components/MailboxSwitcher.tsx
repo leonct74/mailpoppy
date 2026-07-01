@@ -4,7 +4,9 @@ import { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -23,6 +25,7 @@ export function MailboxSwitcher({ visible, onClose }: { visible: boolean; onClos
   const [adding, setAdding] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,6 +33,7 @@ export function MailboxSwitcher({ visible, onClose }: { visible: boolean; onClos
     setAdding(false);
     setEmail("");
     setPassword("");
+    setShowPw(false);
     setError(null);
     setBusy(false);
   }
@@ -80,6 +84,9 @@ export function MailboxSwitcher({ visible, onClose }: { visible: boolean; onClos
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={close}>
       <Pressable style={styles.scrim} onPress={close}>
+        {/* Lift the bottom sheet above the keyboard, or typing in the add-mailbox form
+            happens invisibly underneath it. (Android resizes the window itself.) */}
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
           <View style={styles.grabber} />
           <Text style={styles.title}>Mailboxes</Text>
@@ -121,14 +128,25 @@ export function MailboxSwitcher({ visible, onClose }: { visible: boolean; onClos
                 value={email}
                 onChangeText={setEmail}
               />
-              <TextInput
-                style={styles.input}
-                placeholder="Password"
-                placeholderTextColor={colors.textMuted}
-                secureTextEntry
-                value={password}
-                onChangeText={setPassword}
-              />
+              <View style={styles.pwWrap}>
+                <TextInput
+                  style={styles.pwInput}
+                  placeholder="Password"
+                  placeholderTextColor={colors.textMuted}
+                  secureTextEntry={!showPw}
+                  value={password}
+                  onChangeText={setPassword}
+                />
+                <TouchableOpacity
+                  onPress={() => setShowPw((s) => !s)}
+                  hitSlop={8}
+                  style={styles.eyeBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel={showPw ? "Hide password" : "Show password"}
+                >
+                  <Ionicons name={showPw ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
               {error && <Text style={styles.error}>{error}</Text>}
               <View style={styles.addActions}>
                 <TouchableOpacity
@@ -168,6 +186,7 @@ export function MailboxSwitcher({ visible, onClose }: { visible: boolean; onClos
             </TouchableOpacity>
           )}
         </Pressable>
+        </KeyboardAvoidingView>
       </Pressable>
     </Modal>
   );
@@ -203,6 +222,22 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.text,
   },
+  pwWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surfaceHigh,
+    borderRadius: 12,
+    paddingRight: 12,
+  },
+  pwInput: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontFamily: fonts.regular,
+    fontSize: 15,
+    color: colors.text,
+  },
+  eyeBtn: { paddingLeft: 8, alignSelf: "stretch", justifyContent: "center" },
   error: { fontFamily: fonts.regular, fontSize: 13, color: colors.danger, lineHeight: 18 },
   addActions: { flexDirection: "row", gap: 10, marginTop: 2 },
   cancelBtn: { flex: 1, height: 46, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
