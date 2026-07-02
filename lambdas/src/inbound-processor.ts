@@ -16,6 +16,7 @@ import {
   type DmarcAttachmentKind,
   DEFAULT_POLICY,
   mailboxPk,
+  folderPrefix,
   messageSk,
   deriveThreadId,
   mapVerdict,
@@ -376,6 +377,7 @@ async function ingestDmarcReports(hintDomain: string | undefined, attachments: A
 // was uninstalled / token rotated) are pruned from the registry.
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 const PUSH_CHANNEL_ID = "mail"; // Android notification channel (created on device)
+const PUSH_CATEGORY_ID = "mail"; // matches the app-registered category (Mark as read action)
 
 async function loadDeviceRegistry(address: string): Promise<DeviceRegistry> {
   if (!SETTINGS_TABLE) return { tokens: [] };
@@ -423,6 +425,39 @@ async function sendExpoPush(messages: ReturnType<typeof buildExpoPushMessages>):
   return dead;
 }
 
+/** iOS app-icon badge = the mailbox's EXACT inbox unread count, computed when the
+ *  push is sent (metadata-only COUNT query; consistent read so the message that
+ *  triggered this push is included). Returns undefined on any failure — the push
+ *  still goes out, just without a badge update. Page cap bounds the cost on very
+ *  large mailboxes (the badge shows a floor, which iOS renders the same as 1000+). */
+async function countInboxUnread(recipient: string): Promise<number | undefined> {
+  try {
+    let count = 0;
+    let lastKey: Record<string, unknown> | undefined;
+    for (let page = 0; page < 10; page++) {
+      const out = await ddb.send(
+        new QueryCommand({
+          TableName: INDEX_TABLE,
+          KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+          FilterExpression: "#flags.#unread = :true",
+          ExpressionAttributeNames: { "#flags": "flags", "#unread": "unread" },
+          ExpressionAttributeValues: { ":pk": mailboxPk(recipient), ":prefix": folderPrefix("inbox"), ":true": true },
+          Select: "COUNT",
+          ConsistentRead: true,
+          ExclusiveStartKey: lastKey,
+        }),
+      );
+      count += out.Count ?? 0;
+      lastKey = out.LastEvaluatedKey as Record<string, unknown> | undefined;
+      if (!lastKey) break;
+    }
+    return count;
+  } catch (e) {
+    console.error(`unread count failed for ${recipient}:`, e);
+    return undefined;
+  }
+}
+
 /** Notify one mailbox's devices about a new inbox message (best-effort). */
 async function notifyNewMail(
   recipient: string,
@@ -433,7 +468,15 @@ async function notifyNewMail(
   try {
     const reg = await loadDeviceRegistry(recipient);
     if (reg.tokens.length === 0) return;
-    const messages = buildExpoPushMessages(reg.tokens, { title, body, data, channelId: PUSH_CHANNEL_ID });
+    const badge = await countInboxUnread(recipient);
+    const messages = buildExpoPushMessages(reg.tokens, {
+      title,
+      body,
+      data,
+      badge,
+      channelId: PUSH_CHANNEL_ID,
+      categoryId: PUSH_CATEGORY_ID,
+    });
     if (messages.length === 0) return;
     const dead = await sendExpoPush(messages);
     if (dead.length > 0 && SETTINGS_TABLE) {

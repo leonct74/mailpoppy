@@ -16,6 +16,7 @@ import type { Folder } from "@mailpoppy/core";
 import type { RootStackParamList } from "./src/navigation";
 import { AuthProvider, useAuth } from "./src/AuthContext";
 import { notifyNewMail } from "./src/inboxCache";
+import { MARK_READ_ACTION, markReadFromNotification } from "./src/push";
 import { SendSnackbar } from "./src/components/SendSnackbar";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { InboxScreen } from "./src/screens/InboxScreen";
@@ -45,12 +46,20 @@ function Root() {
    *  the title/body carry sender/subject, reused as the initial header text. */
   const openFrom = useCallback(
     async (response: Notifications.NotificationResponse | null): Promise<boolean> => {
-      if (!response || !navigationRef.isReady()) return false;
+      if (!response) return false;
       const content = response.notification.request.content;
       const data = content.data as { messageId?: string; folder?: string; mailbox?: string } | undefined;
       if (!data?.messageId) return false;
       const target = typeof data.mailbox === "string" ? data.mailbox.trim().toLowerCase() : null;
       const cur = ctx.current;
+      // "Mark as read" action: act on it (in that message's own mailbox) instead
+      // of navigating — the app stays in the background.
+      if (response.actionIdentifier === MARK_READ_ACTION) {
+        const acct = cur.accounts.find((a) => a.email === target);
+        if (acct) void markReadFromNotification(data.messageId, acct.username);
+        return true; // handled — never replay as a tap
+      }
+      if (!navigationRef.isReady()) return false;
       if (target && target !== cur.activeEmail && cur.accounts.some((a) => a.email === target)) {
         try {
           await cur.switchTo(target);

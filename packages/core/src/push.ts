@@ -113,7 +113,8 @@ export interface ExpoPushMessage {
   badge?: number;
   /** Android channel id (created on the device). */
   channelId?: string;
-  /** Collapse-key so multiple unread pushes don't stack endlessly per mailbox. */
+  /** Notification category — must match a category the app registered with the
+   *  OS; its actions (e.g. "Mark as read") then show on the notification. */
   categoryId?: string;
 }
 
@@ -123,6 +124,7 @@ export interface BuildPushOptions {
   data?: Record<string, unknown>;
   badge?: number;
   channelId?: string;
+  categoryId?: string;
 }
 
 // Keep payloads small — Expo/APNs limit the total notification size. Trim the
@@ -160,6 +162,7 @@ export function buildExpoPushMessages(
       ...(opts.data ? { data: opts.data } : {}),
       ...(typeof opts.badge === "number" ? { badge: opts.badge } : {}),
       ...(opts.channelId ? { channelId: opts.channelId } : {}),
+      ...(opts.categoryId ? { categoryId: opts.categoryId } : {}),
     });
   }
   return out;

@@ -15,16 +15,51 @@ import { auth } from "./auth";
 
 /** Android notification channel id — must match the inbound-processor's channelId. */
 export const MAIL_CHANNEL_ID = "mail";
+/** Notification category — must match the inbound-processor's categoryId. */
+export const MAIL_CATEGORY_ID = "mail";
+/** Action identifier for "Mark as read" on a new-mail notification. */
+export const MARK_READ_ACTION = "mark-read";
 
-// How a notification is presented while the app is foregrounded.
+// How a notification is presented while the app is foregrounded. The push itself
+// carries the badge count (computed server-side), so let it apply.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
     shouldShowList: true,
     shouldPlaySound: true,
-    shouldSetBadge: false,
+    shouldSetBadge: true,
   }),
 });
+
+// Register the "mail" category so its actions appear on new-mail notifications
+// (long-press / pull-down). Mark-as-read runs WITHOUT opening the app to the
+// foreground. Fire-and-forget at module load; harmless to re-register.
+void Notifications.setNotificationCategoryAsync(MAIL_CATEGORY_ID, [
+  {
+    identifier: MARK_READ_ACTION,
+    buttonTitle: "Mark as read",
+    options: { opensAppToForeground: false },
+  },
+]).catch(() => {});
+
+/**
+ * Handle a "Mark as read" tap on a notification: flag the message read in the
+ * mailbox it belongs to (throwaway client bound to that mailbox's token — never
+ * disturbs the active session) and drop the app-icon badge by one. Best-effort.
+ */
+export async function markReadFromNotification(messageId: string, username: string): Promise<void> {
+  try {
+    const client = new MailpoppyClient({
+      apiBaseUrl: getConfig().apiBaseUrl,
+      getToken: () => auth.getTokenFor(username),
+    });
+    await client.setFlags(messageId, { unread: false });
+    const badge = await Notifications.getBadgeCountAsync();
+    if (badge > 0) await Notifications.setBadgeCountAsync(badge - 1);
+  } catch (e) {
+    console.warn("[push] mark-read from notification failed:", e);
+  }
+}
 
 // The token we last registered, so we can unregister exactly it on sign-out.
 let registeredToken: string | null = null;
