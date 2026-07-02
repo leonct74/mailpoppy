@@ -244,6 +244,10 @@ function grantsSignature(grants: unknown): string {
 interface BackendBootstrap {
   connectionId: string;
   credentialsUrl: string;
+  /** Bearer token proving this backend may mint ITS OWN connection's creds. The
+   *  broker rejects the mint without it (and rejects it on any other route), so a
+   *  poppy can't use it to touch a sibling. Absent against a pre-auth broker. */
+  credentialsToken?: string;
   port?: number;
   account: { accountId: string; region: string };
 }
@@ -264,6 +268,7 @@ function readBootstrap(): BackendBootstrap | null {
       return {
         connectionId: b.connectionId,
         credentialsUrl: b.credentialsUrl,
+        credentialsToken: typeof b.credentialsToken === "string" ? b.credentialsToken : undefined,
         port: typeof b.port === "number" ? b.port : undefined,
         account: { accountId: b.account.accountId, region: b.account.region },
       };
@@ -419,12 +424,18 @@ async function mintCredentials(connectionId: string): Promise<ScopedCredentials>
   const url = bootstrap
     ? bootstrap.credentialsUrl
     : `${baseUrl}/connections/${encodeURIComponent(connectionId)}/credentials`;
-  const post = (body?: unknown) =>
-    fetchUrl(url, {
+  // The broker requires this backend's own credential token on the mint route (it's
+  // scoped to THIS connection — see the AgentsPoppy broker's caller auth).
+  const post = (body?: unknown) => {
+    const headers: Record<string, string> = {};
+    if (body !== undefined) headers["content-type"] = "application/json";
+    if (bootstrap?.credentialsToken) headers["authorization"] = `Bearer ${bootstrap.credentialsToken}`;
+    return fetchUrl(url, {
       method: "POST",
-      headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+      headers: Object.keys(headers).length ? headers : undefined,
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
+  };
 
   let res = await post();
   for (;;) {
