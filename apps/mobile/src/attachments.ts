@@ -8,6 +8,7 @@
 //    URL, so large attachments never travel through API Gateway / the Lambda.
 import { Linking } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
+import * as IntentLauncher from "expo-intent-launcher";
 import * as Sharing from "expo-sharing";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
@@ -53,6 +54,25 @@ export async function fetchEncryptedAttachmentToCache(
   const target = `${FileSystem.cacheDirectory}${Date.now()}_${sanitize(filename)}`;
   await FileSystem.writeAsStringAsync(target, bytesToBase64(bytes), { encoding: FileSystem.EncodingType.Base64 });
   return target;
+}
+
+/**
+ * ANDROID: open a cached file directly in the user's default viewer app (e.g. the
+ * system PDF viewer) via an ACTION_VIEW intent — the "just show it" behaviour Android
+ * users expect, without a share-sheet detour. Falls back to the share sheet when no
+ * app can display the type.
+ */
+export async function openInAndroidViewer(uri: string, filename: string, contentType?: string): Promise<void> {
+  const contentUri = await FileSystem.getContentUriAsync(uri);
+  try {
+    await IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
+      data: contentUri,
+      type: contentType,
+      flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
+    });
+  } catch {
+    await shareLocalFile(uri, filename, contentType); // no viewer installed → let the user pick
+  }
 }
 
 /** Hand an already-cached file to the native share sheet (for an image this

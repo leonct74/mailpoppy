@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { WebView } from "react-native-webview";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
@@ -23,6 +25,7 @@ import {
   fetchAttachmentToCache,
   fetchEncryptedAttachmentToCache,
   shareLocalFile,
+  openInAndroidViewer,
 } from "../attachments";
 import { decryptEml, MailboxLockedError } from "../mailboxKeys";
 import { MessageBody } from "../components/MessageBody";
@@ -49,8 +52,14 @@ export function MessageScreen({ route, navigation }: Props) {
   const [unlocking, setUnlocking] = useState(false);
   const [unlockError, setUnlockError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0); // bump to refetch after an unlock
-  // An image attachment being viewed full-screen (already downloaded/decrypted to cache).
-  const [preview, setPreview] = useState<{ uri: string; name: string; type?: string } | null>(null);
+  // An attachment being viewed full-screen (already downloaded/decrypted to cache).
+  // kind "image" → ZoomableImage; "pdf" → WebView (iOS renders PDFs natively).
+  const [preview, setPreview] = useState<{
+    uri: string;
+    name: string;
+    type?: string;
+    kind: "image" | "pdf";
+  } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -149,14 +158,21 @@ export function MessageScreen({ route, navigation }: Props) {
       const local = email?.attachments[index];
       const name = filename ?? local?.filename ?? `attachment-${index}`;
       const type = contentType ?? local?.mimeType;
-      if (isImage(type, name)) {
-        // Images get an in-app preview (encrypted ones are decrypted to the cache
-        // first); saving/sharing is a button inside the preview.
+      const img = isImage(type, name);
+      const pdf = isPdf(type, name);
+      if (img || pdf) {
+        // Images and PDFs get previewed (encrypted ones are decrypted to the cache
+        // first); saving/sharing is a button inside the preview. Android's WebView
+        // can't render PDFs, so there they open straight in the system PDF viewer.
         const uri =
           encrypted && encWrappedKey
             ? await fetchEncryptedAttachmentToCache(url, { encrypted, encWrappedKey }, name)
             : await fetchAttachmentToCache(url, name);
-        setPreview({ uri, name, type });
+        if (pdf && Platform.OS === "android") {
+          await openInAndroidViewer(uri, name, type ?? "application/pdf");
+        } else {
+          setPreview({ uri, name, type, kind: img ? "image" : "pdf" });
+        }
       } else if (encrypted && encWrappedKey) {
         // Ciphertext on S3 — fetch, decrypt on-device, then share the plaintext.
         await saveOrShareEncryptedAttachment(url, { encrypted, encWrappedKey }, name, type);
@@ -314,16 +330,22 @@ export function MessageScreen({ route, navigation }: Props) {
                 </Text>
                 {email.attachments.map((a, i) => {
                   const img = isImage(a.mimeType, a.filename);
+                  const pdf = isPdf(a.mimeType, a.filename);
+                  const viewable = img || pdf;
                   return (
                     <TouchableOpacity key={i} style={styles.attachChip} onPress={() => openAttachment(i)} activeOpacity={0.7}>
-                      <Ionicons name={img ? "image-outline" : "document-attach-outline"} size={20} color={colors.primary} />
+                      <Ionicons
+                        name={img ? "image-outline" : pdf ? "document-text-outline" : "document-attach-outline"}
+                        size={20}
+                        color={colors.primary}
+                      />
                       <Text style={styles.attachName} numberOfLines={1}>
                         {a.filename}
                       </Text>
                       {opening === i ? (
                         <ActivityIndicator size="small" color={colors.primary} />
                       ) : (
-                        <Ionicons name={img ? "eye-outline" : "download-outline"} size={18} color={colors.textMuted} />
+                        <Ionicons name={viewable ? "eye-outline" : "download-outline"} size={18} color={colors.textMuted} />
                       )}
                     </TouchableOpacity>
                   );
@@ -340,7 +362,9 @@ export function MessageScreen({ route, navigation }: Props) {
         </>
       )}
 
-      {/* Full-screen image preview (pinch/double-tap to zoom; share/save from the top bar) */}
+      {/* Full-screen attachment preview: images zoom in-app; PDFs render in a WebView
+          (iOS renders them natively — Android PDFs never reach here, they open in the
+          system viewer). Share/save lives in the top bar. */}
       <Modal visible={!!preview} transparent animationType="fade" onRequestClose={() => setPreview(null)}>
         <View style={styles.previewBackdrop}>
           <View style={[styles.previewBar, { paddingTop: insets.top + 6 }]}>
@@ -350,11 +374,28 @@ export function MessageScreen({ route, navigation }: Props) {
             <Text style={styles.previewName} numberOfLines={1}>
               {preview?.name}
             </Text>
-            <TouchableOpacity onPress={() => void sharePreview()} style={styles.iconBtn} hitSlop={8} accessibilityLabel="Share or save image">
+            <TouchableOpacity onPress={() => void sharePreview()} style={styles.iconBtn} hitSlop={8} accessibilityLabel="Share or save attachment">
               <Ionicons name="share-outline" size={24} color="#fff" />
             </TouchableOpacity>
           </View>
-          {preview && <ZoomableImage uri={preview.uri} />}
+          {preview &&
+            (preview.kind === "image" ? (
+              <ZoomableImage uri={preview.uri} />
+            ) : (
+              <WebView
+                style={styles.previewPdf}
+                source={{ uri: preview.uri }}
+                originWhitelist={["file://*"]}
+                allowingReadAccessToURL={preview.uri}
+                javaScriptEnabled={false}
+                startInLoadingState
+                renderLoading={() => (
+                  <View style={styles.previewPdfLoading}>
+                    <ActivityIndicator color="#fff" />
+                  </View>
+                )}
+              />
+            ))}
         </View>
       </Modal>
     </View>
@@ -366,6 +407,12 @@ export function MessageScreen({ route, navigation }: Props) {
 function isImage(contentType?: string, filename?: string): boolean {
   if (contentType?.toLowerCase().startsWith("image/")) return true;
   return /\.(png|jpe?g|gif|webp|heic|heif|bmp)$/i.test(filename ?? "");
+}
+
+/** Is this attachment a PDF? (previewed in-app on iOS; system viewer on Android) */
+function isPdf(contentType?: string, filename?: string): boolean {
+  if (contentType?.toLowerCase().includes("application/pdf")) return true;
+  return /\.pdf$/i.test(filename ?? "");
 }
 
 function ActionButton({
@@ -522,6 +569,16 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   previewName: { flex: 1, fontFamily: fonts.semibold, fontSize: 14, color: "#fff", textAlign: "center" },
+  previewPdf: { flex: 1, backgroundColor: "transparent" },
+  previewPdfLoading: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   actionBar: {
     flexDirection: "row",
     gap: 10,
