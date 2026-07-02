@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Modal,
   ScrollView,
   StyleSheet,
@@ -27,6 +26,7 @@ import {
 } from "../attachments";
 import { decryptEml, MailboxLockedError } from "../mailboxKeys";
 import { MessageBody } from "../components/MessageBody";
+import { ZoomableImage } from "../components/ZoomableImage";
 import { folderLabel } from "../folders";
 import { colors, fonts } from "../theme";
 
@@ -340,7 +340,7 @@ export function MessageScreen({ route, navigation }: Props) {
         </>
       )}
 
-      {/* Full-screen image preview (pinch to zoom on iOS; share/save from the top bar) */}
+      {/* Full-screen image preview (pinch/double-tap to zoom; share/save from the top bar) */}
       <Modal visible={!!preview} transparent animationType="fade" onRequestClose={() => setPreview(null)}>
         <View style={styles.previewBackdrop}>
           <View style={[styles.previewBar, { paddingTop: insets.top + 6 }]}>
@@ -354,15 +354,7 @@ export function MessageScreen({ route, navigation }: Props) {
               <Ionicons name="share-outline" size={24} color="#fff" />
             </TouchableOpacity>
           </View>
-          <ScrollView
-            style={styles.previewZoom}
-            contentContainerStyle={styles.previewZoomContent}
-            maximumZoomScale={5}
-            minimumZoomScale={1}
-            centerContent
-          >
-            {preview && <Image source={{ uri: preview.uri }} style={styles.previewImage} resizeMode="contain" />}
-          </ScrollView>
+          {preview && <ZoomableImage uri={preview.uri} />}
         </View>
       </Modal>
     </View>
@@ -530,9 +522,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   previewName: { flex: 1, fontFamily: fonts.semibold, fontSize: 14, color: "#fff", textAlign: "center" },
-  previewZoom: { flex: 1 },
-  previewZoomContent: { flexGrow: 1 },
-  previewImage: { flex: 1, width: "100%" },
   actionBar: {
     flexDirection: "row",
     gap: 10,
