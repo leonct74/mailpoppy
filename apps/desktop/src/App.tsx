@@ -13,8 +13,16 @@ import { MailpoppyClient } from "@mailpoppy/api-client";
 import { CognitoAuth } from "./lib/auth";
 import { listMailboxes } from "./lib/mailbox";
 import { makeMailClient } from "./lib/mailClient";
-import { establishMailboxKeysForLogin, clearMailboxKeySession } from "./lib/mailboxKeys";
+import { establishMailboxKeysForLogin, clearMailboxKeySession, setActiveMailboxKey, forgetMailboxKey } from "./lib/mailboxKeys";
 import { clearMailCaches } from "./lib/mailCache";
+import {
+  loadAccounts,
+  saveAccounts,
+  withMailbox,
+  withoutMailbox,
+  withActive,
+  type AccountsState,
+} from "./lib/accounts";
 import { cn, Logo, Spinner } from "./ui";
 import { restoreStartupRegion, savedRegion } from "./lib/region";
 import { autoDiscoverRegion } from "./lib/discovery";
@@ -54,8 +62,13 @@ const CREDENTIALS_TOOLTIP =
 function InboxTab({ prefillEmail, regionReady }: { prefillEmail?: string | null; regionReady?: boolean }) {
   const [config, setConfig] = useState<DeploymentConfig | null>(() => loadDeploymentConfig());
   const [editingConfig, setEditingConfig] = useState(false);
-  const [signedIn, setSignedIn] = useState(false);
-  const [mailboxEmail, setMailboxEmail] = useState<string | null>(null);
+  // Every mailbox added to this install (all in the one deployed pool) + which one
+  // is active. Cognito keeps each mailbox's tokens per username, so sessions
+  // coexist and switching never re-asks for a password.
+  const [accounts, setAccounts] = useState<AccountsState>(() => loadAccounts());
+  // True while the user is signing IN AN ADDITIONAL mailbox (keeps the current one).
+  const [adding, setAdding] = useState(false);
+  const activeEmail = accounts.activeEmail;
   // Fresh install, backend already deployed (reinstall / new machine / the packaged
   // container): there's no saved config, but the sidecar can read every value the
   // Inbox needs straight from the stack outputs — so resolve them instead of making
@@ -113,26 +126,75 @@ function InboxTab({ prefillEmail, regionReady }: { prefillEmail?: string | null;
     [config, auth],
   );
 
-  // Restore an existing persisted Cognito session when the config/auth changes.
-  useEffect(() => {
-    setSignedIn(auth?.hasSession() ?? false);
-  }, [auth]);
+  function updateAccounts(next: AccountsState) {
+    saveAccounts(next);
+    setAccounts(next);
+  }
 
-  // Resolve the signed-in mailbox address (from the ID-token claims) for the
-  // Inbox header. Async because it reads/refreshes the token.
+  // Point auth + the encryption read-path at the active mailbox whenever it
+  // changes; and MIGRATE a legacy single-session install (pre-switcher) into the
+  // accounts list, so nobody is signed out by the upgrade.
   useEffect(() => {
-    if (!signedIn || !auth) {
-      setMailboxEmail(null);
+    if (!auth) return;
+    const active = accounts.accounts.find((a) => a.email === activeEmail);
+    if (active) {
+      auth.setActiveUsername(active.username);
+      setActiveMailboxKey(active.email);
       return;
     }
-    let cancelled = false;
-    void auth.currentEmail().then((e) => {
-      if (!cancelled) setMailboxEmail(e);
+    if (accounts.accounts.length === 0 && auth.hasSession()) {
+      const username = auth.lastAuthUsername();
+      void auth.currentEmail().then((email) => {
+        if (email && username) updateAccounts(withMailbox(loadAccounts(), { email, username }));
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth, activeEmail]);
+
+  // "Open inbox" deep-link: if that mailbox is already added, just switch to it.
+  useEffect(() => {
+    if (!prefillEmail) return;
+    const email = prefillEmail.trim().toLowerCase();
+    setAccounts((cur) => {
+      if (!cur.accounts.some((a) => a.email === email) || cur.activeEmail === email) return cur;
+      const next = withActive(cur, email);
+      saveAccounts(next);
+      return next;
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [signedIn, auth]);
+  }, [prefillEmail]);
+
+  // After a successful sign-in (first mailbox OR an added one): record it in the
+  // list and make it active. The email comes from the fresh ID token, so it's the
+  // real address even when the pool uses email as an alias.
+  async function recordSignIn() {
+    if (!auth) return;
+    const username = auth.lastAuthUsername();
+    const email = await auth.currentEmail();
+    if (username && email) updateAccounts(withMailbox(loadAccounts(), { email, username }));
+    setAdding(false);
+  }
+
+  function switchTo(email: string) {
+    if (!accounts.accounts.some((a) => a.email === email)) return;
+    updateAccounts(withActive(accounts, email)); // the effect above re-points auth + keys
+  }
+
+  function removeMailbox(email: string) {
+    const acct = accounts.accounts.find((a) => a.email === email);
+    if (!acct || !auth) return;
+    auth.signOutUser(acct.username); // drop just this mailbox's tokens
+    forgetMailboxKey(email);
+    updateAccounts(withoutMailbox(accounts, email));
+  }
+
+  function signOutAll() {
+    for (const a of accounts.accounts) auth?.signOutUser(a.username);
+    auth?.signOut();
+    clearMailboxKeySession();
+    clearMailCaches();
+    updateAccounts({ accounts: [], activeEmail: null });
+    setAdding(false);
+  }
 
   if (editingConfig) {
     return (
@@ -141,7 +203,11 @@ function InboxTab({ prefillEmail, regionReady }: { prefillEmail?: string | null;
         onSave={(c) => {
           saveDeploymentConfig(c);
           setConfig(c);
-          setSignedIn(false);
+          // A different deployment = a different user pool: the stored sessions
+          // and keys no longer apply.
+          clearMailboxKeySession();
+          clearMailCaches();
+          updateAccounts({ accounts: [], activeEmail: null });
           setEditingConfig(false);
         }}
         onCancel={() => setEditingConfig(false)}
@@ -160,15 +226,25 @@ function InboxTab({ prefillEmail, regionReady }: { prefillEmail?: string | null;
     return <InboxView demo onConnect={() => setEditingConfig(true)} />;
   }
 
-  if (auth && !signedIn) {
+  if (auth && (adding || !activeEmail)) {
     return (
-      <LoginView
-        auth={auth}
-        prefillEmail={prefillEmail ?? undefined}
-        onSignedIn={() => setSignedIn(true)}
-        onReconfigure={() => setEditingConfig(true)}
-        onEstablishKeys={keyStore ? (pw) => establishMailboxKeysForLogin(keyStore, pw) : undefined}
-      />
+      <div className="flex flex-col gap-3">
+        {adding && (
+          <button
+            className="self-start text-sm text-primary underline-offset-2 hover:underline"
+            onClick={() => setAdding(false)}
+          >
+            ← Back to inbox
+          </button>
+        )}
+        <LoginView
+          auth={auth}
+          prefillEmail={adding ? undefined : (prefillEmail ?? undefined)}
+          onSignedIn={() => void recordSignIn()}
+          onReconfigure={() => setEditingConfig(true)}
+          onEstablishKeys={keyStore ? (pw, email) => establishMailboxKeysForLogin(keyStore, pw, email) : undefined}
+        />
+      </div>
     );
   }
 
@@ -180,16 +256,34 @@ function InboxTab({ prefillEmail, regionReady }: { prefillEmail?: string | null;
         <span className="text-secondary">
           ✅ Connected to <code className="font-mono text-xs">{config.apiBaseUrl}</code>
         </span>
-        <button className={linkBtn} onClick={() => { auth?.signOut(); clearMailboxKeySession(); clearMailCaches(); setSignedIn(false); }}>Sign out</button>
+        <button className={linkBtn} onClick={signOutAll}>
+          Sign out{accounts.accounts.length > 1 ? " of all mailboxes" : ""}
+        </button>
         <button className={linkBtn} onClick={() => setEditingConfig(true)}>Change deployment</button>
         <button
           className={linkBtn}
-          onClick={() => { clearDeploymentConfig(); clearMailboxKeySession(); clearMailCaches(); setConfig(null); setSignedIn(false); }}
+          onClick={() => {
+            clearDeploymentConfig();
+            clearMailboxKeySession();
+            clearMailCaches();
+            updateAccounts({ accounts: [], activeEmail: null });
+            setConfig(null);
+          }}
         >
           Disconnect
         </button>
       </div>
-      {liveClient && <InboxView client={liveClient} mailboxEmail={mailboxEmail} />}
+      {liveClient && (
+        <InboxView
+          key={activeEmail ?? "inbox"}
+          client={liveClient}
+          mailboxEmail={activeEmail}
+          accounts={accounts.accounts.map((a) => a.email)}
+          onSwitchMailbox={switchTo}
+          onAddMailbox={() => setAdding(true)}
+          onRemoveMailbox={removeMailbox}
+        />
+      )}
     </>
   );
 }

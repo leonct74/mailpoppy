@@ -69,9 +69,10 @@ export function LoginView({
   onReconfigure?: () => void;
   prefillEmail?: string;
   /** Establish the mailbox encryption keypair for the just-authenticated session,
-   *  using the password the user just typed. Optional: when omitted (e.g. tests,
-   *  demo, or a deployment without the keys endpoint) sign-in proceeds unchanged. */
-  onEstablishKeys?: (password: string) => Promise<EstablishKeysOutcome>;
+   *  using the password the user just typed (and the mailbox it belongs to, for the
+   *  per-mailbox key cache). Optional: when omitted (e.g. tests, demo, or a
+   *  deployment without the keys endpoint) sign-in proceeds unchanged. */
+  onEstablishKeys?: (password: string, email: string) => Promise<EstablishKeysOutcome>;
 }) {
   const [email, setEmail] = useState(prefillEmail ?? "");
   const [password, setPassword] = useState("");
@@ -95,7 +96,7 @@ export function LoginView({
       return;
     }
     try {
-      const r = await onEstablishKeys(pw);
+      const r = await onEstablishKeys(pw, email.trim().toLowerCase());
       if (r.created && r.recoveryKey) {
         setRecovery({ key: r.recoveryKey, rekeyed: r.rekeyed });
         return; // RecoveryKeyPanel takes over until acknowledged

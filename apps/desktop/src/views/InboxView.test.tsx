@@ -102,7 +102,7 @@ describe("InboxView", () => {
     expect(screen.getByDisplayValue("Re: Hello from test")).toBeInTheDocument();
   });
 
-  it("downloads an attachment, and falls back to showing the link when the OS can't open it", async () => {
+  it("previews a PDF attachment in-app (no browser bounce)", async () => {
     const withAttachment = msg({
       hasAttachments: true,
       attachments: [{ filename: "report.pdf", contentType: "application/pdf", sizeBytes: 2048, s3Key: "attachments/m1/0-report.pdf" }],
@@ -110,17 +110,32 @@ describe("InboxView", () => {
     const client = mockClient();
     client.list = vi.fn(async ({ folder }) => ({ items: folder === "inbox" ? [withAttachment] : [] }));
     client.getAttachmentUrl = vi.fn(async () => ({ url: "https://signed.example/report.pdf", filename: "report.pdf" }));
-    // jsdom window.open returns null → openExternal reports "not opened" → fallback link.
-    window.open = vi.fn(() => null) as unknown as typeof window.open;
-    render(<InboxView client={client} />);
+    // The presigned URL is fetched for its bytes; jsdom has no blob URLs, so stub them.
+    const realFetch = global.fetch;
+    global.fetch = vi.fn(async () => new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]))) as unknown as typeof fetch;
+    const realCreate = URL.createObjectURL;
+    const realRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => "blob:preview-1");
+    URL.revokeObjectURL = vi.fn();
+    try {
+      render(<InboxView client={client} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Open: Hello from test" }));
-    fireEvent.click(await screen.findByRole("button", { name: /report\.pdf/ }));
+      fireEvent.click(await screen.findByRole("button", { name: "Open: Hello from test" }));
+      fireEvent.click(await screen.findByRole("button", { name: /report\.pdf/ }));
 
-    await waitFor(() => expect(client.getAttachmentUrl).toHaveBeenCalledWith("m1", 0));
-    // The fallback surfaces the presigned link so the user is never stuck.
-    expect(await screen.findByText(/Couldn’t open/i)).toBeInTheDocument();
-    expect(screen.getByDisplayValue("https://signed.example/report.pdf")).toBeInTheDocument();
+      await waitFor(() => expect(client.getAttachmentUrl).toHaveBeenCalledWith("m1", 0));
+      // The viewer opens IN the app, offering the silent save — no browser window.
+      expect(await screen.findByRole("dialog", { name: /Preview: report\.pdf/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Save to Downloads/ })).toBeInTheDocument();
+
+      // Closing revokes the blob URL (no leak).
+      fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
+      await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:preview-1"));
+    } finally {
+      global.fetch = realFetch;
+      URL.createObjectURL = realCreate;
+      URL.revokeObjectURL = realRevoke;
+    }
   });
 
   it("compose sends an HTML body rendered from Markdown, plus a text fallback", async () => {

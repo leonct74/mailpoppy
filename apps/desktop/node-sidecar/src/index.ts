@@ -5,6 +5,9 @@
  */
 import Fastify from "fastify";
 import { randomUUID } from "node:crypto";
+import { existsSync, promises as fsp } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import * as prov from "./provisioning";
 import * as migration from "./migration";
 import * as mailboxImport from "./mailboxImport";
@@ -174,6 +177,29 @@ app.get("/local-download/:token", async (req, reply) => {
     .header("content-disposition", `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(item.filename)}`)
     .header("content-length", String(item.buf.length))
     .send(item.buf);
+});
+
+// Silent alternative to the browser handoff above: write the bytes straight into
+// the user's Downloads folder and report the final path — the download never
+// leaves the app (no browser window). Used for non-previewable attachments and
+// the preview panel's Download action. Names are de-duplicated ("report (2).pdf"),
+// never overwritten.
+app.post("/local-download/save", async (req, reply) => {
+  const { filename, dataB64 } = (req.body ?? {}) as { filename?: string; dataB64?: string };
+  if (typeof dataB64 !== "string" || !dataB64) {
+    return reply.code(400).send({ error: "dataB64 is required" });
+  }
+  // Base name only: no separators (path traversal) and no leading dot (hidden file).
+  const cleaned = (filename || "attachment").replace(/[/\\]/g, "_").replace(/^\.+/, "_") || "attachment";
+  const dir = join(homedir(), "Downloads");
+  await fsp.mkdir(dir, { recursive: true });
+  const dot = cleaned.lastIndexOf(".");
+  const stem = dot > 0 ? cleaned.slice(0, dot) : cleaned;
+  const ext = dot > 0 ? cleaned.slice(dot) : "";
+  let target = join(dir, cleaned);
+  for (let n = 2; existsSync(target); n++) target = join(dir, `${stem} (${n})${ext}`);
+  await fsp.writeFile(target, Buffer.from(dataB64, "base64"));
+  return { ok: true, path: target, filename: target.slice(dir.length + 1) };
 });
 
 // The active region + the regions where SES inbound is supported (the choices).

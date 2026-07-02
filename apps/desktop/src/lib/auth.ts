@@ -52,10 +52,62 @@ export interface Authenticator {
 
 export class CognitoAuth implements Authenticator {
   private readonly pool: CognitoUserPool;
+  private readonly clientId: string;
   private pendingUser: CognitoUser | null = null;
+  // The storage username (amazon-cognito `LastAuthUser`) of the mailbox the app is
+  // currently acting as. When set, getToken() serves THIS mailbox's token even
+  // though several mailboxes' sessions coexist in localStorage. Null falls back to
+  // the library's "current user" (single-session / legacy path).
+  private activeUsername: string | null = null;
 
   constructor(cfg: DeploymentConfig) {
+    this.clientId = cfg.clientId;
     this.pool = new CognitoUserPool({ UserPoolId: cfg.userPoolId, ClientId: cfg.clientId });
+  }
+
+  /** amazon-cognito's per-pool `LastAuthUser` storage key. */
+  private lastAuthKey(): string {
+    return `CognitoIdentityServiceProvider.${this.clientId}.LastAuthUser`;
+  }
+
+  /** The username the last successful sign-in cached its tokens under (whatever the
+   *  library used — email or an opaque sub). Read straight after signIn to record it. */
+  lastAuthUsername(): string | null {
+    try {
+      return localStorage.getItem(this.lastAuthKey());
+    } catch {
+      return null;
+    }
+  }
+
+  /** Point the app at a specific mailbox's session (by its storage username). Also
+   *  syncs `LastAuthUser` so getCurrentUser()/hasSession() agree with getToken(). */
+  setActiveUsername(username: string | null): void {
+    this.activeUsername = username;
+    try {
+      if (username) localStorage.setItem(this.lastAuthKey(), username);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** A fresh ID token for a SPECIFIC mailbox (by storage username), refreshing if
+   *  needed. This is how one install serves several coexisting mailbox sessions. */
+  getTokenFor(username: string): Promise<string> {
+    const user = new CognitoUser({ Username: username, Pool: this.pool });
+    return new Promise((resolve, reject) => {
+      user.getSession((err: Error | null, session: CognitoUserSession | null) => {
+        if (err || !session) return reject(err ?? new Error("no session"));
+        resolve(session.getIdToken().getJwtToken());
+      });
+    });
+  }
+
+  /** Sign ONE mailbox out (drop just its cached tokens), leaving the others intact. */
+  signOutUser(username: string): void {
+    const user = new CognitoUser({ Username: username, Pool: this.pool });
+    user.signOut();
+    if (this.activeUsername === username) this.activeUsername = null;
   }
 
   signIn(email: string, password: string): Promise<SignInResult> {
@@ -63,7 +115,13 @@ export class CognitoAuth implements Authenticator {
     const auth = new AuthenticationDetails({ Username: email, Password: password });
     return new Promise((resolve, reject) => {
       user.authenticateUser(auth, {
-        onSuccess: () => resolve({ status: "signed-in", email }),
+        onSuccess: () => {
+          // The fresh sign-in is now the active mailbox — getToken()/key
+          // establishment right after this must serve the NEW user, not whichever
+          // mailbox the switcher pointed at before.
+          this.activeUsername = this.lastAuthUsername();
+          resolve({ status: "signed-in", email });
+        },
         onFailure: (err) => reject(err),
         newPasswordRequired: () => {
           this.pendingUser = user; // keep for completeNewPassword
@@ -83,6 +141,7 @@ export class CognitoAuth implements Authenticator {
         {
           onSuccess: () => {
             this.pendingUser = null;
+            this.activeUsername = this.lastAuthUsername();
             resolve({ status: "signed-in", email: user.getUsername() });
           },
           onFailure: (err) => reject(err),
@@ -92,6 +151,7 @@ export class CognitoAuth implements Authenticator {
   }
 
   getToken(): Promise<string> {
+    if (this.activeUsername) return this.getTokenFor(this.activeUsername);
     const user = this.pool.getCurrentUser();
     if (!user) return Promise.reject(new Error("not signed in"));
     return new Promise((resolve, reject) => {
@@ -105,6 +165,7 @@ export class CognitoAuth implements Authenticator {
   signOut(): void {
     this.pool.getCurrentUser()?.signOut();
     this.pendingUser = null;
+    this.activeUsername = null;
   }
 
   hasSession(): boolean {

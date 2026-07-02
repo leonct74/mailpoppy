@@ -30,17 +30,36 @@ function getSodium(): Promise<Sodium> {
   return sodiumReady;
 }
 
-let session: MailboxKeySession | null = null;
+// One unlocked keypair PER mailbox (multi-mailbox: several coexist in memory for
+// the session), plus which mailbox the read path currently serves. The "" slot is
+// the legacy single-mailbox default, kept so callers that never name a mailbox
+// (and the existing tests) behave exactly as before.
+const sessions = new Map<string, MailboxKeySession>();
+let activeKey = "";
+const norm = (email?: string | null) => (email ?? "").trim().toLowerCase();
 
-/** The unlocked keypair for the signed-in mailbox, or null when signed out. */
-export function getMailboxKeySession(): MailboxKeySession | null {
-  return session;
+/** Point the read path at a specific mailbox's unlocked key (switcher). */
+export function setActiveMailboxKey(email: string | null): void {
+  activeKey = norm(email);
 }
 
-/** Drop the cached private key (call on sign-out). Best-effort zeroisation. */
+/** The unlocked keypair for the ACTIVE mailbox, or null when locked/signed out. */
+export function getMailboxKeySession(): MailboxKeySession | null {
+  return sessions.get(activeKey) ?? null;
+}
+
+/** Drop ONE mailbox's cached private key (when that mailbox is removed). */
+export function forgetMailboxKey(email: string): void {
+  const k = norm(email);
+  sessions.get(k)?.privateKey.fill(0);
+  sessions.delete(k);
+}
+
+/** Drop every cached private key (call on sign-out). Best-effort zeroisation. */
 export function clearMailboxKeySession(): void {
-  session?.privateKey.fill(0);
-  session = null;
+  for (const s of sessions.values()) s.privateKey.fill(0);
+  sessions.clear();
+  activeKey = "";
 }
 
 export interface EstablishOutcome {
@@ -61,18 +80,23 @@ export interface EstablishOutcome {
 export async function establishMailboxKeysForLogin(
   store: MailboxKeyStore,
   password: string,
+  /** Which mailbox this key belongs to (multi-mailbox). Omitted = the default slot. */
+  email?: string,
 ): Promise<EstablishOutcome> {
   const s = await getSodium();
   const r = await establishMailboxKeys(s, store, password);
-  session = { publicKey: r.publicKey, privateKey: r.privateKey };
+  const key = norm(email);
+  sessions.set(key, { publicKey: r.publicKey, privateKey: r.privateKey });
+  activeKey = key;
   return { created: r.created, rekeyed: r.rekeyed, recoveryKey: r.recoveryKey };
 }
 
 // ── Read path: decrypt what the inbound Lambda sealed ────────────────────────
 
-/** Recover the per-message content key from a message's wrap, using the cached
- *  private key. Throws a user-facing error if the mailbox is locked (signed out). */
+/** Recover the per-message content key from a message's wrap, using the ACTIVE
+ *  mailbox's cached private key. Throws a user-facing error if locked. */
 async function contentKeyForMessage(s: Sodium, meta: EncryptedRef): Promise<Uint8Array> {
+  const session = getMailboxKeySession();
   if (!session) throw new Error("Your mailbox is locked — sign in again to read this message.");
   return unwrapContentKey(s, session.publicKey, session.privateKey, meta.encWrappedKey!);
 }

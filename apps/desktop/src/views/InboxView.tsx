@@ -19,6 +19,7 @@ import {
   Undo2,
   Download,
   X,
+  Eye,
   ExternalLink,
   Copy,
   ImageOff,
@@ -26,6 +27,10 @@ import {
   RefreshCw,
   Lock,
   ChevronLeft,
+  ChevronDown,
+  Check,
+  Plus,
+  CheckCircle2,
 } from "lucide-react";
 import type { MessageMeta, Folder } from "@mailpoppy/core";
 import { formatBytes, usagePercent, usageLevel } from "@mailpoppy/core";
@@ -33,7 +38,7 @@ import { makeMailClient, type MailClient, type SendAttachment, type MailboxUsage
 import { loadListCache, saveListCache, loadCachedEml, saveCachedEml } from "../lib/mailCache";
 import { filesToAttachments } from "../lib/attachments";
 import { openExternal } from "../lib/openExternal";
-import { downloadBytesViaSidecar } from "../lib/localDownload";
+import { saveBytesToDownloads } from "../lib/localDownload";
 import { decryptEml, decryptAttachmentBytes } from "../lib/mailboxKeys";
 import { SecurityInfo } from "./SecurityInfo";
 import { parseBody, sanitizeHtml, type ParsedBody } from "../lib/mailBody";
@@ -105,6 +110,10 @@ export function InboxView({
   demo,
   onConnect,
   mailboxEmail,
+  accounts,
+  onSwitchMailbox,
+  onAddMailbox,
+  onRemoveMailbox,
 }: {
   client?: MailClient;
   demo?: boolean;
@@ -112,6 +121,11 @@ export function InboxView({
   /** The signed-in mailbox address, shown atop the folder pane so it's always
    *  clear which inbox you're viewing. Omitted in demo mode. */
   mailboxEmail?: string | null;
+  /** Every mailbox added to this install — turns the identity block into a switcher. */
+  accounts?: string[];
+  onSwitchMailbox?: (email: string) => void;
+  onAddMailbox?: () => void;
+  onRemoveMailbox?: (email: string) => void;
 }) {
   const mail = useMemo<MailClient>(() => client ?? makeMailClient(), [client]);
 
@@ -129,6 +143,13 @@ export function InboxView({
   // Fallback when the OS can't auto-open a download (e.g. a Tauri build whose
   // opener plugin isn't active yet): surface the link so the user is never stuck.
   const [attachmentLink, setAttachmentLink] = useState<{ url: string; filename: string } | null>(null);
+  // In-app attachment preview (images + PDFs) — a blob URL rendered in a modal, so
+  // nothing bounces out to a browser window. Revoked on close.
+  const [preview, setPreview] = useState<{ url: string; name: string; kind: "image" | "pdf"; bytes: Uint8Array; contentType: string } | null>(null);
+  // Which attachment is being fetched/decrypted right now (spinner on its chip).
+  const [attBusy, setAttBusy] = useState<number | null>(null);
+  // "Saved to Downloads" confirmation, auto-dismissed.
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
   // One-time security note explaining SES's built-in virus/spam scanning.
   const [scanNoteDismissed, setScanNoteDismissed] = useState(
     () => typeof localStorage !== "undefined" && localStorage.getItem("mailpoppy.scanNoteDismissed") === "1",
@@ -269,35 +290,67 @@ export function InboxView({
     }
   }
 
-  async function downloadAttachment(messageId: string, index: number, _filename: string) {
+  /** Attachment types the app can render itself, keyed off content-type + extension. */
+  function previewKind(att: { filename: string; contentType?: string }): "image" | "pdf" | null {
+    const ct = (att.contentType ?? "").toLowerCase();
+    const name = att.filename.toLowerCase();
+    if (ct.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(name)) return "image";
+    if (ct === "application/pdf" || name.endsWith(".pdf")) return "pdf";
+    return null;
+  }
+
+  /** The attachment's actual bytes: fetched from the presigned URL and, for
+   *  encrypted mail, decrypted here with the cached mailbox key. */
+  async function fetchAttachmentBytes(messageId: string, index: number): Promise<Uint8Array> {
+    const { url } = await mail.getAttachmentUrl(messageId, index);
+    if (selected?.encrypted) {
+      const ciphertext = await (await fetch(url)).text();
+      return decryptAttachmentBytes(selected, ciphertext);
+    }
+    return new Uint8Array(await (await fetch(url)).arrayBuffer());
+  }
+
+  /** Save bytes into ~/Downloads (no browser window); falls back to the browser
+   *  handoff on an old sidecar, and to a manual link if even that can't open. */
+  async function saveAttachment(filename: string, contentType: string, bytes: Uint8Array) {
+    const out = await saveBytesToDownloads(filename, contentType, bytes);
+    if (out.savedAs) {
+      setSaveNotice(out.savedAs);
+      window.setTimeout(() => setSaveNotice((cur) => (cur === out.savedAs ? null : cur)), 6000);
+    } else if (out.url && !out.opened) {
+      setAttachmentLink({ url: out.url, filename });
+    }
+  }
+
+  /** Open an attachment: preview images/PDFs in-app, save everything else. */
+  async function openAttachment(messageId: string, index: number, att: { filename: string; contentType?: string }) {
     setAttachmentLink(null);
+    setSaveNotice(null);
+    setAttBusy(index);
     try {
-      const { url } = await mail.getAttachmentUrl(messageId, index);
-      if (selected?.encrypted) {
-        // The S3 object is ciphertext — a presigned URL can't be opened directly.
-        // Fetch it, decrypt with the cached mailbox key, then hand the plaintext
-        // bytes to the sidecar so the OS browser can save them (WKWebView can't
-        // trigger a blob download).
-        const att = selected.attachments?.[index];
-        const ciphertext = await (await fetch(url)).text();
-        const bytes = await decryptAttachmentBytes(selected, ciphertext);
-        const { url: localUrl, opened } = await downloadBytesViaSidecar(
-          _filename,
-          att?.contentType ?? "application/octet-stream",
-          bytes,
+      const bytes = await fetchAttachmentBytes(messageId, index);
+      const contentType = att.contentType ?? "application/octet-stream";
+      const kind = previewKind(att);
+      if (kind) {
+        const url = URL.createObjectURL(
+          new Blob([bytes as BlobPart], { type: kind === "pdf" ? "application/pdf" : contentType }),
         );
-        // If nothing could open it (Tauri opener not active yet), surface the
-        // loopback link so the user can open it manually (valid ~60s, single-use).
-        if (!opened) setAttachmentLink({ url: localUrl, filename: _filename });
-        return;
+        setPreview({ url, name: att.filename, kind, bytes, contentType });
+      } else {
+        await saveAttachment(att.filename, contentType, bytes);
       }
-      // Plaintext: hand the presigned URL to the OS (window.open is a no-op in the webview).
-      const opened = await openExternal(url);
-      // If nothing could open it (Tauri opener not active yet), show the link.
-      if (!opened) setAttachmentLink({ url, filename: _filename });
     } catch (e) {
       setError(friendlyError(e));
+    } finally {
+      setAttBusy(null);
     }
+  }
+
+  function closePreview() {
+    setPreview((p) => {
+      if (p) URL.revokeObjectURL(p.url);
+      return null;
+    });
   }
 
   async function toggleRead(m: MessageMeta) {
@@ -331,16 +384,17 @@ export function InboxView({
     setParsed(null);
   };
 
-  // The signed-in mailbox identity (folder rail, wide layout).
+  // The signed-in mailbox identity (folder rail, wide layout) — a switcher when
+  // several mailboxes are added.
   const signedIn = mailboxEmail ? (
-    <div className="flex items-center gap-2.5 border-b border-outline-variant/10 px-4 py-3" title={mailboxEmail}>
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary-container/20 text-primary">
-        <AtSign className="size-4" />
-      </div>
-      <div className="min-w-0">
-        <div className="font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">Signed in as</div>
-        <div className="truncate text-sm font-medium text-on-surface">{mailboxEmail}</div>
-      </div>
+    <div className="border-b border-outline-variant/10">
+      <MailboxIdentity
+        mailboxEmail={mailboxEmail}
+        accounts={accounts}
+        onSwitch={onSwitchMailbox}
+        onAdd={onAddMailbox}
+        onRemove={onRemoveMailbox}
+      />
     </div>
   ) : null;
 
@@ -549,13 +603,21 @@ export function InboxView({
           {selected.attachments.map((a, i) => (
             <button
               key={`${a.filename}-${i}`}
-              onClick={() => void downloadAttachment(selected.messageId, i, a.filename)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/30 bg-surface-container px-3 py-1.5 text-xs text-on-surface transition-colors hover:border-primary/50 hover:text-primary"
+              onClick={() => void openAttachment(selected.messageId, i, a)}
+              disabled={attBusy !== null}
+              title={previewKind(a) ? "Preview" : "Save to Downloads"}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/30 bg-surface-container px-3 py-1.5 text-xs text-on-surface transition-colors hover:border-primary/50 hover:text-primary disabled:opacity-60"
             >
               <Paperclip className="size-3.5" /> {a.filename} ({Math.max(1, Math.round(a.sizeBytes / 1024))} KB)
-              <Download className="size-3.5" />
+              {attBusy === i ? <Spinner /> : previewKind(a) ? <Eye className="size-3.5" /> : <Download className="size-3.5" />}
             </button>
           ))}
+        </div>
+      )}
+
+      {saveNotice && (
+        <div className="mt-3 inline-flex items-center gap-2 rounded-lg border border-secondary/30 bg-secondary/10 px-3 py-2 text-sm text-secondary">
+          <CheckCircle2 className="size-4" /> Saved to Downloads: <strong>{saveNotice}</strong>
         </div>
       )}
 
@@ -720,10 +782,14 @@ export function InboxView({
               <div className="flex shrink-0 flex-col gap-2 border-b border-outline-variant/10 p-3">
                 <div className="flex items-center gap-2">
                   {mailboxEmail && (
-                    <div className="flex min-w-0 items-center gap-1.5" title={mailboxEmail}>
-                      <AtSign className="size-4 shrink-0 text-primary" />
-                      <span className="truncate text-xs font-medium text-on-surface">{mailboxEmail}</span>
-                    </div>
+                    <MailboxIdentity
+                      compact
+                      mailboxEmail={mailboxEmail}
+                      accounts={accounts}
+                      onSwitch={onSwitchMailbox}
+                      onAdd={onAddMailbox}
+                      onRemove={onRemoveMailbox}
+                    />
                   )}
                   <div className="ml-auto flex shrink-0 items-center gap-1.5">
                     <button
@@ -747,6 +813,17 @@ export function InboxView({
         </div>
       )}
 
+      {preview && (
+        <AttachmentPreview
+          name={preview.name}
+          url={preview.url}
+          kind={preview.kind}
+          onSave={() => void saveAttachment(preview.name, preview.contentType, preview.bytes)}
+          saveNotice={saveNotice}
+          onClose={closePreview}
+        />
+      )}
+
       {composeInit && (
         <ComposeDialog
           init={composeInit}
@@ -760,6 +837,175 @@ export function InboxView({
         />
       )}
     </section>
+  );
+}
+
+/**
+ * The signed-in identity — and, when the install has (or can add) more mailboxes,
+ * a dropdown switcher: pick a mailbox to jump to it, remove one, or add another.
+ * Mirrors the mobile app's switcher so both clients feel the same.
+ */
+function MailboxIdentity({
+  mailboxEmail,
+  accounts,
+  onSwitch,
+  onAdd,
+  onRemove,
+  compact,
+}: {
+  mailboxEmail: string;
+  accounts?: string[];
+  onSwitch?: (email: string) => void;
+  onAdd?: () => void;
+  onRemove?: (email: string) => void;
+  compact?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const interactive = Boolean(onSwitch || onAdd);
+
+  const identity = compact ? (
+    <span className="flex min-w-0 items-center gap-1.5" title={mailboxEmail}>
+      <AtSign className="size-4 shrink-0 text-primary" />
+      <span className="truncate text-xs font-medium text-on-surface">{mailboxEmail}</span>
+    </span>
+  ) : (
+    <span className="flex min-w-0 items-center gap-2.5" title={mailboxEmail}>
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary-container/20 text-primary">
+        <AtSign className="size-4" />
+      </span>
+      <span className="min-w-0">
+        <span className="block font-mono text-[10px] uppercase tracking-wider text-on-surface-variant">Signed in as</span>
+        <span className="block truncate text-sm font-medium text-on-surface">{mailboxEmail}</span>
+      </span>
+    </span>
+  );
+
+  if (!interactive) {
+    return <div className={compact ? "flex min-w-0 items-center" : "flex items-center px-4 py-3"}>{identity}</div>;
+  }
+
+  return (
+    <div className="relative min-w-0">
+      <button
+        type="button"
+        aria-label="Switch mailbox"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          "flex w-full min-w-0 items-center gap-1.5 text-left transition-colors hover:bg-surface-container",
+          compact ? "rounded-lg px-1.5 py-1" : "px-4 py-3",
+        )}
+      >
+        {identity}
+        <ChevronDown className={cn("size-3.5 shrink-0 text-on-surface-variant transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-30 mt-1 w-64 overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container py-1 shadow-2xl">
+          {(accounts ?? [mailboxEmail]).map((email) => {
+            const active = email === mailboxEmail;
+            return (
+              <div key={email} className="flex items-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    if (!active) onSwitch?.(email);
+                  }}
+                  className={cn(
+                    "flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-surface-container-highest",
+                    active ? "font-medium text-on-surface" : "text-on-surface-variant",
+                  )}
+                >
+                  <Check className={cn("size-3.5 shrink-0", active ? "text-primary" : "opacity-0")} />
+                  <span className="truncate">{email}</span>
+                </button>
+                {onRemove && (
+                  <button
+                    type="button"
+                    aria-label={`Remove ${email}`}
+                    title="Remove this mailbox from the app (its mail stays on the server)"
+                    onClick={() => {
+                      setOpen(false);
+                      onRemove(email);
+                    }}
+                    className="mr-1.5 rounded p-1.5 text-on-surface-variant/60 hover:bg-surface-container-highest hover:text-tertiary"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          {onAdd && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onAdd();
+              }}
+              className="mt-1 flex w-full items-center gap-2 border-t border-outline-variant/10 px-3 py-2 text-left text-sm text-primary transition-colors hover:bg-surface-container-highest"
+            >
+              <Plus className="size-3.5" /> Add mailbox
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Full-screen in-app viewer for image/PDF attachments — no browser bounce. The
+ *  blob URL is created (and revoked) by the caller; PDFs ride the webview's own
+ *  renderer via an <iframe>. */
+function AttachmentPreview({
+  name,
+  url,
+  kind,
+  onSave,
+  saveNotice,
+  onClose,
+}: {
+  name: string;
+  url: string;
+  kind: "image" | "pdf";
+  onSave: () => void;
+  saveNotice: string | null;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-label={`Preview: ${name}`}
+      className="fixed inset-0 z-50 flex flex-col bg-black/80 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="flex shrink-0 items-center gap-3 border-b border-outline-variant/20 bg-surface-container px-4 py-2.5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Paperclip className="size-4 shrink-0 text-on-surface-variant" />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-on-surface">{name}</span>
+        {saveNotice && (
+          <span className="inline-flex items-center gap-1.5 text-xs text-secondary">
+            <CheckCircle2 className="size-3.5" /> Saved to Downloads
+          </span>
+        )}
+        <Button size="sm" variant="secondary" onClick={onSave}>
+          <Download className="size-3.5" /> Save to Downloads
+        </Button>
+        <Button size="sm" variant="ghost" aria-label="Close preview" onClick={onClose}>
+          <X className="size-4" />
+        </Button>
+      </div>
+      <div className="flex min-h-0 flex-1 items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
+        {kind === "image" ? (
+          // eslint-disable-next-line jsx-a11y/img-redundant-alt
+          <img src={url} alt={name} className="max-h-full max-w-full rounded-lg object-contain shadow-2xl" />
+        ) : (
+          <iframe src={url} title={name} className="h-full w-full rounded-lg border-0 bg-white shadow-2xl" />
+        )}
+      </div>
+    </div>
   );
 }
 

@@ -62,3 +62,39 @@ export async function downloadBytesViaSidecar(
   const opened = await openExternal(url);
   return { url, opened };
 }
+
+/** How a save ended: written straight to Downloads (`savedAs`), handed to the
+ *  browser (`opened`), or neither — the caller should surface the manual link. */
+export interface SaveOutcome {
+  /** Final filename inside ~/Downloads when the silent save succeeded. */
+  savedAs?: string;
+  /** Set when the browser-handoff fallback ran instead. */
+  url?: string;
+  opened?: boolean;
+}
+
+/**
+ * Save bytes to the user's Downloads folder WITHOUT opening a browser window —
+ * the professional path. Falls back to the classic browser handoff when the
+ * sidecar predates the save route (older packaged binary), so a download always
+ * completes somewhere.
+ */
+export async function saveBytesToDownloads(
+  filename: string,
+  contentType: string,
+  bytes: Uint8Array,
+): Promise<SaveOutcome> {
+  const dataB64 = await bytesToBase64(bytes);
+  try {
+    const res = await sidecar<{ ok: true; path: string; filename?: string }>("/local-download/save", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ filename, dataB64 }),
+    });
+    return { savedAs: res.filename ?? filename };
+  } catch (e) {
+    if (!/sidecar 404/.test(String(e))) throw e; // a real failure — not just an old binary
+    const { url, opened } = await downloadBytesViaSidecar(filename, contentType, bytes);
+    return { url, opened };
+  }
+}

@@ -71,7 +71,7 @@ describe("LoginView", () => {
     // The recovery key is shown and the inbox is NOT entered yet.
     expect(await screen.findByText("Save your recovery key")).toBeInTheDocument();
     expect(screen.getByLabelText("Recovery key")).toHaveTextContent("RECOVER-ME-1234");
-    expect(onEstablishKeys).toHaveBeenCalledWith("hunter2");
+    expect(onEstablishKeys).toHaveBeenCalledWith("hunter2", "you@x.com");
     expect(onSignedIn).not.toHaveBeenCalled();
 
     // Continue is gated on the acknowledgement checkbox.
