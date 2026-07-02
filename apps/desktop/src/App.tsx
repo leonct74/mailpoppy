@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { LayoutDashboard, Inbox, ArrowLeftRight, HeartPulse, SlidersHorizontal, ShieldCheck, type LucideIcon } from "lucide-react";
 import { HomeView } from "./views/HomeView";
 import { DomainView } from "./views/DomainView";
@@ -11,6 +11,7 @@ import { ConnectView } from "./views/ConnectView";
 import { LoginView } from "./views/LoginView";
 import { MailpoppyClient } from "@mailpoppy/api-client";
 import { CognitoAuth } from "./lib/auth";
+import { listMailboxes } from "./lib/mailbox";
 import { makeMailClient } from "./lib/mailClient";
 import { establishMailboxKeysForLogin, clearMailboxKeySession } from "./lib/mailboxKeys";
 import { clearMailCaches } from "./lib/mailCache";
@@ -21,6 +22,7 @@ import {
   loadDeploymentConfig,
   saveDeploymentConfig,
   clearDeploymentConfig,
+  DEFAULT_STACK_NAME,
   type DeploymentConfig,
 } from "./lib/deploymentConfig";
 
@@ -49,11 +51,54 @@ const CREDENTIALS_TOOLTIP =
  *   config, signed out   → login
  *   config, signed in    → live inbox (Cognito JWT → API Gateway)
  */
-function InboxTab({ prefillEmail }: { prefillEmail?: string | null }) {
+function InboxTab({ prefillEmail, regionReady }: { prefillEmail?: string | null; regionReady?: boolean }) {
   const [config, setConfig] = useState<DeploymentConfig | null>(() => loadDeploymentConfig());
   const [editingConfig, setEditingConfig] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
   const [mailboxEmail, setMailboxEmail] = useState<string | null>(null);
+  // Fresh install, backend already deployed (reinstall / new machine / the packaged
+  // container): there's no saved config, but the sidecar can read every value the
+  // Inbox needs straight from the stack outputs — so resolve them instead of making
+  // the admin paste them into ConnectView. The manual form stays as the fallback for
+  // when no backend is found (true first run, or no AWS credentials on this machine).
+  const [probing, setProbing] = useState(() => loadDeploymentConfig() === null);
+  // One shot per mount: after an explicit Disconnect (config → null again) the
+  // user chose to leave — silently re-resolving would make Disconnect a no-op.
+  const probedRef = useRef(false);
+  useEffect(() => {
+    if (config !== null) {
+      setProbing(false);
+      return;
+    }
+    if (regionReady === false) return; // wait for the startup region restore/discovery
+    if (probedRef.current) return;
+    probedRef.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listMailboxes(DEFAULT_STACK_NAME);
+        if (cancelled) return;
+        if (res.apiBaseUrl && res.userPoolId && res.clientId) {
+          const c: DeploymentConfig = {
+            apiBaseUrl: res.apiBaseUrl,
+            userPoolId: res.userPoolId,
+            clientId: res.clientId,
+            region: res.region,
+            stackName: DEFAULT_STACK_NAME,
+          };
+          saveDeploymentConfig(c);
+          setConfig(c);
+        }
+      } catch {
+        /* no deployed backend (or no creds) — fall through to demo + Connect */
+      } finally {
+        if (!cancelled) setProbing(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [config, regionReady]);
 
   const auth = useMemo(() => (config ? new CognitoAuth(config) : null), [config]);
   const liveClient = useMemo(
@@ -105,6 +150,13 @@ function InboxTab({ prefillEmail }: { prefillEmail?: string | null }) {
   }
 
   if (!config) {
+    if (probing) {
+      return (
+        <div className="flex flex-1 items-center justify-center gap-2 text-sm text-on-surface-variant">
+          <Spinner /> Looking for your deployed backend…
+        </div>
+      );
+    }
     return <InboxView demo onConnect={() => setEditingConfig(true)} />;
   }
 
@@ -247,7 +299,7 @@ export function App() {
             // The mailbox is a full-bleed three-pane layout that fills the
             // viewport (its panes scroll internally — this container does not).
             <div className={cn("min-h-0 flex-1 flex-col px-6 py-6", tab === "inbox" ? "flex" : "hidden")}>
-              <InboxTab prefillEmail={inboxEmail} />
+              <InboxTab prefillEmail={inboxEmail} regionReady={regionReady} />
             </div>
           )}
           {/* The page content is the only scroll region for these views. */}
