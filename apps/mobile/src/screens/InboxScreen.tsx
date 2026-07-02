@@ -28,6 +28,7 @@ import type { RootStackParamList } from "../navigation";
 import { FOLDERS, folderLabel } from "../folders";
 import { mail } from "../mailClient";
 import { loadInboxCache, saveInboxCache, onNewMail } from "../inboxCache";
+import { hapticDelete } from "../haptics";
 import { MailboxSwitcher } from "../components/MailboxSwitcher";
 import { useAuth } from "../AuthContext";
 import { colors, fonts, shortDate } from "../theme";
@@ -468,6 +469,7 @@ function SwipeableRow({
   );
 
   const commit = useCallback(() => {
+    hapticDelete();
     try {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     } catch {

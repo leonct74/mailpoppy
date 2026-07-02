@@ -6,6 +6,7 @@ import { hydrateDeployment, resolveConfig } from "./config";
 import { resetContacts } from "./contacts";
 import { clearInboxCaches } from "./inboxCache";
 import { clearMessageCache } from "./messageCache";
+import { hapticSwitch } from "./haptics";
 import {
   registerForPush,
   unregisterForPush,
@@ -196,6 +197,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setActiveMailboxKey(acct.email); // restore this mailbox's unlocked key (or lock)
       resetContacts(); // don't carry one mailbox's autocomplete into another
       apply(withActive(state(), addr));
+      hapticSwitch();
     },
     [accounts, activeEmail, apply, state],
   );

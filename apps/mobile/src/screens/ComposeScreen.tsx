@@ -20,12 +20,8 @@ import { mail } from "../mailClient";
 import { parseEml } from "../eml";
 import { useAuth } from "../AuthContext";
 import { loadContacts, suggestContacts, type Contact } from "../contacts";
-import {
-  pickFileAttachment,
-  pickPhotoAttachment,
-  uploadAttachmentToS3,
-  type PickedAttachment,
-} from "../attachments";
+import { pickFileAttachment, pickPhotoAttachment, type PickedAttachment } from "../attachments";
+import { queueSend } from "../outbox";
 import { colors, fonts } from "../theme";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Compose">;
@@ -33,20 +29,19 @@ type Props = NativeStackScreenProps<RootStackParamList, "Compose">;
 export function ComposeScreen({ route, navigation }: Props) {
   const params = route.params;
   const insets = useSafeAreaInsets();
-  const { email: selfEmail } = useAuth();
+  const { email: selfEmail, accounts, activeEmail } = useAuth();
   const [to, setTo] = useState(params?.to ?? "");
-  const [cc, setCc] = useState("");
-  const [bcc, setBcc] = useState("");
-  const [showCcBcc, setShowCcBcc] = useState(false);
+  const [cc, setCc] = useState(params?.cc ?? "");
+  const [bcc, setBcc] = useState(params?.bcc ?? "");
+  const [showCcBcc, setShowCcBcc] = useState(Boolean(params?.cc || params?.bcc));
   const [subject, setSubject] = useState(params?.subject ?? "");
   const [body, setBody] = useState(params?.body ?? "");
   const [draftId, setDraftId] = useState<string | undefined>(params?.draftId);
-  const [attachments, setAttachments] = useState<PickedAttachment[]>([]);
+  const [attachments, setAttachments] = useState<PickedAttachment[]>(params?.attachments ?? []);
   const [maxAttachBytes, setMaxAttachBytes] = useState(DEFAULT_MAX_ATTACHMENT_BYTES);
   const [picking, setPicking] = useState(false);
-  const [sending, setSending] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [loadingDraft, setLoadingDraft] = useState(Boolean(params?.draftId));
+  const [loadingDraft, setLoadingDraft] = useState(Boolean(params?.draftId) && !params?.skipDraftLoad);
   const [error, setError] = useState<string | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [toFocused, setToFocused] = useState(false);
@@ -78,8 +73,9 @@ export function ComposeScreen({ route, navigation }: Props) {
   }, []);
 
   // Opened from the Drafts folder → load the saved content into the editor.
+  // (An undone send passes its content directly and skips the network load.)
   useEffect(() => {
-    if (!params?.draftId) return;
+    if (!params?.draftId || params?.skipDraftLoad) return;
     let alive = true;
     void (async () => {
       try {
@@ -109,7 +105,7 @@ export function ComposeScreen({ route, navigation }: Props) {
   const recipients = parseList(to);
   const ccList = parseList(cc);
   const bccList = parseList(bcc);
-  const busy = sending || saving || picking;
+  const busy = saving || picking;
   const attachTotal = attachments.reduce((n, a) => n + a.sizeBytes, 0);
   const canSend = recipients.length + ccList.length + bccList.length > 0 && !busy;
   const canSave =
@@ -158,42 +154,32 @@ export function ComposeScreen({ route, navigation }: Props) {
     setAttachments((prev) => prev.filter((_, idx) => idx !== i));
   }
 
-  async function send() {
+  function send() {
     if (!canSend) return;
-    setSending(true);
-    setError(null);
-    try {
-      // Upload each attachment straight to S3 (presigned PUT), then reference it
-      // by key — large files never go through the API.
-      let sendAttachments: { filename: string; contentType: string; s3Key: string }[] | undefined;
-      if (attachments.length) {
-        sendAttachments = [];
-        for (const a of attachments) {
-          const { uploadUrl, key } = await mail.presignAttachment({
-            filename: a.filename,
-            contentType: a.contentType,
-            sizeBytes: a.sizeBytes,
-          });
-          await uploadAttachmentToS3(uploadUrl, a.uri, a.contentType);
-          sendAttachments.push({ filename: a.filename, contentType: a.contentType, s3Key: key });
-        }
-      }
-      await mail.send({
+    // Hand the message to the outbox and close immediately: it sends after a short
+    // undo window (the snackbar at the app root shows the countdown). Attachments
+    // upload at dispatch time, so Undo pulls everything back intact. The send is
+    // bound to THIS mailbox's session, so switching mailboxes meanwhile is safe.
+    const username = accounts.find((a) => a.email === activeEmail)?.username;
+    if (!username) {
+      setError("No active mailbox session. Please sign in again.");
+      return;
+    }
+    queueSend({
+      input: {
         to: recipients,
         ...(ccList.length ? { cc: ccList } : {}),
         ...(bccList.length ? { bcc: bccList } : {}),
         subject: subject.trim(),
         text: body,
-        ...(sendAttachments ? { attachments: sendAttachments } : {}),
         inReplyTo: params?.inReplyTo,
         references: params?.references,
         draftId,
-      });
-      navigation.goBack();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setSending(false);
-    }
+      },
+      attachments,
+      username,
+    });
+    navigation.goBack();
   }
 
   async function saveDraft() {
@@ -422,14 +408,8 @@ export function ComposeScreen({ route, navigation }: Props) {
           activeOpacity={0.85}
           accessibilityLabel="Send"
         >
-          {sending ? (
-            <ActivityIndicator color={colors.primaryText} />
-          ) : (
-            <>
-              <Text style={[styles.sendText, !canSend && styles.sendTextDisabled]}>Send</Text>
-              <Ionicons name="send" size={16} color={canSend ? colors.primaryText : colors.textMuted} />
-            </>
-          )}
+          <Text style={[styles.sendText, !canSend && styles.sendTextDisabled]}>Send</Text>
+          <Ionicons name="send" size={16} color={canSend ? colors.primaryText : colors.textMuted} />
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>

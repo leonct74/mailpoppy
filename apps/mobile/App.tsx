@@ -16,6 +16,7 @@ import type { Folder } from "@mailpoppy/core";
 import type { RootStackParamList } from "./src/navigation";
 import { AuthProvider, useAuth } from "./src/AuthContext";
 import { notifyNewMail } from "./src/inboxCache";
+import { SendSnackbar } from "./src/components/SendSnackbar";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { InboxScreen } from "./src/screens/InboxScreen";
 import { MessageScreen } from "./src/screens/MessageScreen";
@@ -117,21 +118,42 @@ function Root() {
   if (status === "signed-out") return <LoginScreen />;
 
   return (
-    <NavigationContainer ref={navigationRef}>
-      {/* Each screen renders its own header to match the redesign, so the native
-          stack header is hidden. */}
-      <Stack.Navigator
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: colors.bg },
+    <View style={styles.flex}>
+      <NavigationContainer ref={navigationRef}>
+        {/* Each screen renders its own header to match the redesign, so the native
+            stack header is hidden. */}
+        <Stack.Navigator
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: colors.bg },
+          }}
+        >
+          <Stack.Screen name="Inbox" component={InboxScreen} />
+          <Stack.Screen name="Message" component={MessageScreen} />
+          <Stack.Screen name="Settings" component={SettingsScreen} />
+          <Stack.Screen name="Compose" component={ComposeScreen} options={{ presentation: "modal" }} />
+        </Stack.Navigator>
+      </NavigationContainer>
+      {/* Undo-send lives at the root so it survives Compose closing. Undo reopens
+          Compose with everything the message had — attachments included. */}
+      <SendSnackbar
+        onUndo={(job) => {
+          if (!navigationRef.isReady()) return;
+          navigationRef.navigate("Compose", {
+            to: job.input.to.join(", "),
+            cc: job.input.cc?.join(", "),
+            bcc: job.input.bcc?.join(", "),
+            subject: job.input.subject,
+            body: job.input.text,
+            inReplyTo: job.input.inReplyTo,
+            references: job.input.references,
+            draftId: job.input.draftId,
+            attachments: job.attachments,
+            skipDraftLoad: true,
+          });
         }}
-      >
-        <Stack.Screen name="Inbox" component={InboxScreen} />
-        <Stack.Screen name="Message" component={MessageScreen} />
-        <Stack.Screen name="Settings" component={SettingsScreen} />
-        <Stack.Screen name="Compose" component={ComposeScreen} options={{ presentation: "modal" }} />
-      </Stack.Navigator>
-    </NavigationContainer>
+      />
+    </View>
   );
 }
 
@@ -162,5 +184,6 @@ export default function App() {
 }
 
 const styles = {
+  flex: { flex: 1 },
   loading: { flex: 1, alignItems: "center" as const, justifyContent: "center" as const, backgroundColor: colors.bg },
 };
