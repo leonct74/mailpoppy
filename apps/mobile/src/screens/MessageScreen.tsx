@@ -28,6 +28,7 @@ import {
   openInAndroidViewer,
 } from "../attachments";
 import { decryptEml, MailboxLockedError } from "../mailboxKeys";
+import { loadCachedMessage, saveCachedMessage } from "../messageCache";
 import { MessageBody } from "../components/MessageBody";
 import { ZoomableImage } from "../components/ZoomableImage";
 import { folderLabel } from "../folders";
@@ -66,20 +67,32 @@ export function MessageScreen({ route, navigation }: Props) {
     void mail.setFlags(messageId, { unread: false }).catch(() => {});
     void (async () => {
       try {
-        const { eml } = await mail.getRaw(messageId);
-        // A notification tap carries only messageId (the encryption fields can't
-        // travel through the push service), so `encrypted === undefined` means we
-        // were opened from a notification — look up this message's metadata before
-        // decrypting. From the inbox, the fields are passed in and no lookup runs.
+        // An email is immutable once received, so a cached copy is authoritative:
+        // a hit means no network at all (instant re-open, offline reading). The
+        // cache stores the EML as fetched — ciphertext for encrypted mail — plus
+        // the encryption meta, so a notification tap needs no metadata lookup.
         let enc: { encrypted?: boolean; encWrappedKey?: string } = { encrypted, encWrappedKey };
-        if (encrypted === undefined) {
-          try {
-            const { items } = await mail.list({ folder, limit: 100 });
-            const m = items.find((x) => x.messageId === messageId);
-            if (m) enc = { encrypted: m.encrypted, encWrappedKey: m.encWrappedKey };
-          } catch {
-            /* leave as-is; a sealed body simply won't parse and shows as empty */
+        let eml: string;
+        const cached = await loadCachedMessage(messageId);
+        if (cached) {
+          eml = cached.eml;
+          enc = { encrypted: cached.encrypted, encWrappedKey: cached.encWrappedKey };
+        } else {
+          ({ eml } = await mail.getRaw(messageId));
+          // A notification tap carries only messageId (the encryption fields can't
+          // travel through the push service), so `encrypted === undefined` means we
+          // were opened from a notification — look up this message's metadata
+          // before decrypting. From the inbox, the fields are passed in directly.
+          if (encrypted === undefined) {
+            try {
+              const { items } = await mail.list({ folder, limit: 100 });
+              const m = items.find((x) => x.messageId === messageId);
+              if (m) enc = { encrypted: m.encrypted, encWrappedKey: m.encWrappedKey };
+            } catch {
+              /* leave as-is; a sealed body simply won't parse and shows as empty */
+            }
           }
+          void saveCachedMessage(messageId, { eml, encrypted: enc.encrypted, encWrappedKey: enc.encWrappedKey });
         }
         // Decrypt before parsing — a no-op for mail stored in clear.
         const plain = await decryptEml(enc, eml);
@@ -164,10 +177,11 @@ export function MessageScreen({ route, navigation }: Props) {
         // Images and PDFs get previewed (encrypted ones are decrypted to the cache
         // first); saving/sharing is a button inside the preview. Android's WebView
         // can't render PDFs, so there they open straight in the system PDF viewer.
+        const cacheKey = `${messageId}-${index}`;
         const uri =
           encrypted && encWrappedKey
-            ? await fetchEncryptedAttachmentToCache(url, { encrypted, encWrappedKey }, name)
-            : await fetchAttachmentToCache(url, name);
+            ? await fetchEncryptedAttachmentToCache(url, { encrypted, encWrappedKey }, name, cacheKey)
+            : await fetchAttachmentToCache(url, name, cacheKey);
         if (pdf && Platform.OS === "android") {
           await openInAndroidViewer(uri, name, type ?? "application/pdf");
         } else {

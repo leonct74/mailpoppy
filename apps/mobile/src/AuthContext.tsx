@@ -4,6 +4,8 @@ import { auth } from "./auth";
 import { cognitoStorage } from "./cognitoStorage";
 import { hydrateDeployment, resolveConfig } from "./config";
 import { resetContacts } from "./contacts";
+import { clearInboxCaches } from "./inboxCache";
+import { clearMessageCache } from "./messageCache";
 import {
   registerForPush,
   unregisterForPush,
@@ -246,6 +248,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       for (const u of toSignOut) auth.signOutUser(u);
       auth.signOut();
       clearAllMailboxKeys(emails); // wipes the keychain copies too
+      void clearInboxCaches();
+      void clearMessageCache();
       void Notifications.setBadgeCountAsync(0).catch(() => {});
       resetContacts();
       apply({ accounts: [], activeEmail: null });

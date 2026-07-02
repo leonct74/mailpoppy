@@ -27,6 +27,7 @@ import type { MessageMeta, Folder } from "@mailpoppy/core";
 import type { RootStackParamList } from "../navigation";
 import { FOLDERS, folderLabel } from "../folders";
 import { mail } from "../mailClient";
+import { loadInboxCache, saveInboxCache, onNewMail } from "../inboxCache";
 import { MailboxSwitcher } from "../components/MailboxSwitcher";
 import { useAuth } from "../AuthContext";
 import { colors, fonts, shortDate } from "../theme";
@@ -60,20 +61,41 @@ export function InboxScreen({ navigation }: Props) {
   const [emptying, setEmptying] = useState(false);
   const searchRef = useRef<TextInput>(null);
 
+  // Latest values for async callbacks (avoids stale closures in cache hydration
+  // and drops responses that land after a mailbox switch).
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const activeEmailRef = useRef(activeEmail);
+  activeEmailRef.current = activeEmail;
+  const folderRef = useRef(folder);
+  folderRef.current = folder;
+
   const load = useCallback(
-    async (mode: "initial" | "refresh" | "more") => {
+    async (mode: "initial" | "refresh" | "more" | "silent") => {
       if (mode === "refresh") setRefreshing(true);
       else if (mode === "more") setLoadingMore(true);
-      else setLoading(true);
-      setError(null);
+      else if (mode === "initial") setLoading(true);
+      if (mode !== "silent") setError(null);
+      const requestedFor = activeEmailRef.current;
       try {
         const res = await mail.list({
           folder,
           limit: PAGE,
           cursor: mode === "more" ? cursor : undefined,
         });
+        // The user switched mailbox or folder while this was in flight — the
+        // response belongs to the previous view, so it must not touch state or cache.
+        if (activeEmailRef.current !== requestedFor || folderRef.current !== folder) return;
+        if (mode === "silent") {
+          try {
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+          } catch {
+            /* cosmetic */
+          }
+        }
         setItems((prev) => (mode === "more" ? [...prev, ...res.items] : res.items));
         setCursor(res.cursor);
+        if (mode !== "more" && requestedFor) saveInboxCache(requestedFor, folder, res.items);
         // Keep the app-icon badge in sync with the inbox's unread count whenever
         // the inbox (re)loads — open app / pull-to-refresh / focus. (Closed-app
         // badge updates would need the push to carry a badge count; see follow-up.)
@@ -81,7 +103,10 @@ export function InboxScreen({ navigation }: Props) {
           void Notifications.setBadgeCountAsync(res.items.filter((m) => m.flags.unread).length).catch(() => {});
         }
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        // A failed background refresh keeps showing the cached list quietly.
+        if (mode !== "silent" && activeEmailRef.current === requestedFor) {
+          setError(e instanceof Error ? e.message : String(e));
+        }
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -91,12 +116,32 @@ export function InboxScreen({ navigation }: Props) {
     [folder, cursor],
   );
 
+  // Show the last-known listing INSTANTLY (from the per-mailbox cache), then
+  // revalidate in the background — no spinner when we have anything to show.
   useFocusEffect(
     useCallback(() => {
-      void load("initial");
+      void (async () => {
+        const email = activeEmailRef.current;
+        if (itemsRef.current.length === 0 && email) {
+          const cached = await loadInboxCache(email, folder);
+          if (cached?.length && activeEmailRef.current === email && itemsRef.current.length === 0) {
+            setItems(cached);
+            setLoading(false);
+          }
+        }
+        void load(itemsRef.current.length > 0 ? "silent" : "initial");
+      })();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [folder, activeEmail]),
   );
+
+  // A push arriving while the app is open = new mail in some mailbox. If it's the
+  // one on screen, reload quietly so the message just appears in the list.
+  useEffect(() => {
+    return onNewMail((mailbox) => {
+      if (mailbox === activeEmailRef.current && folder === "inbox") void load("silent");
+    });
+  }, [folder, load]);
 
   // Switching the active mailbox resets to a fresh inbox for it; the focus effect
   // above (keyed on activeEmail) then loads that mailbox's messages.

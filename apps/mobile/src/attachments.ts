@@ -29,10 +29,31 @@ function sanitize(name: string): string {
   return cleaned.slice(-120) || "attachment";
 }
 
+/** The local cache path for an attachment. With a `cacheKey` (message id + index)
+ *  the name is DETERMINISTIC, so the same attachment is fetched/decrypted once and
+ *  every later view reuses the file; without one, a unique temp name is used. */
+function cachePath(filename: string, cacheKey?: string): string {
+  return `${FileSystem.cacheDirectory}${sanitize(cacheKey ?? String(Date.now()))}_${sanitize(filename)}`;
+}
+
+async function existing(path: string): Promise<string | null> {
+  try {
+    const info = await FileSystem.getInfoAsync(path);
+    return info.exists && (info.size ?? 0) > 0 ? path : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Download a received attachment into the cache, returning its local file:// URI
- *  (used both to preview images in-app and as the staging step before sharing). */
-export async function fetchAttachmentToCache(url: string, filename: string): Promise<string> {
-  const target = `${FileSystem.cacheDirectory}${Date.now()}_${sanitize(filename)}`;
+ *  (used both to preview attachments in-app and as the staging step before sharing).
+ *  A deterministic `cacheKey` makes repeat views hit the cached copy. */
+export async function fetchAttachmentToCache(url: string, filename: string, cacheKey?: string): Promise<string> {
+  const target = cachePath(filename, cacheKey);
+  if (cacheKey) {
+    const hit = await existing(target);
+    if (hit) return hit;
+  }
   const { uri } = await FileSystem.downloadAsync(url, target);
   return uri;
 }
@@ -42,16 +63,22 @@ export async function fetchAttachmentToCache(url: string, filename: string): Pro
  * The S3 object is base64 ciphertext (text), so we fetch it, decrypt with the
  * cached mailbox key (decryption happens on the device — the bytes are never
  * readable server-side) and write the plaintext to the cache. No CORS concerns:
- * this is a native fetch.
+ * this is a native fetch. A deterministic `cacheKey` makes repeat views reuse the
+ * already-decrypted copy (the OS-purgeable cache dir, same place as before).
  */
 export async function fetchEncryptedAttachmentToCache(
   url: string,
   meta: EncryptedRef,
   filename: string,
+  cacheKey?: string,
 ): Promise<string> {
+  const target = cachePath(filename, cacheKey);
+  if (cacheKey) {
+    const hit = await existing(target);
+    if (hit) return hit;
+  }
   const ciphertextB64 = await (await fetch(url)).text();
   const bytes = await decryptAttachmentBytes(meta, ciphertextB64);
-  const target = `${FileSystem.cacheDirectory}${Date.now()}_${sanitize(filename)}`;
   await FileSystem.writeAsStringAsync(target, bytesToBase64(bytes), { encoding: FileSystem.EncodingType.Base64 });
   return target;
 }

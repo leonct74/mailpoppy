@@ -15,6 +15,7 @@ import {
 import type { Folder } from "@mailpoppy/core";
 import type { RootStackParamList } from "./src/navigation";
 import { AuthProvider, useAuth } from "./src/AuthContext";
+import { notifyNewMail } from "./src/inboxCache";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { InboxScreen } from "./src/screens/InboxScreen";
 import { MessageScreen } from "./src/screens/MessageScreen";
@@ -81,6 +82,16 @@ function Root() {
     });
     return () => sub.remove();
   }, [openFrom]);
+
+  // A push landing while the app is OPEN means new mail just arrived — tell the
+  // inbox so the message appears in the list without a manual pull-to-refresh.
+  useEffect(() => {
+    const sub = Notifications.addNotificationReceivedListener((notification) => {
+      const data = notification.request.content.data as { mailbox?: string } | undefined;
+      if (typeof data?.mailbox === "string") notifyNewMail(data.mailbox);
+    });
+    return () => sub.remove();
+  }, []);
 
   // Once signed in and the navigator is mounted, replay any held tap.
   useEffect(() => {
