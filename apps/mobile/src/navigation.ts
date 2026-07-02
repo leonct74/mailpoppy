@@ -1,4 +1,4 @@
-import type { Folder } from "@mailpoppy/core";
+import type { Folder, MessageMeta } from "@mailpoppy/core";
 import type { PickedAttachment } from "./attachments";
 
 // Route params for the signed-in stack (React Navigation native-stack).
@@ -15,6 +15,14 @@ export type RootStackParamList = {
     encWrappedKey?: string;
   };
   Settings: undefined; // account info + sign out
+
+  // A conversation (messages sharing a threadId), opened from a collapsed inbox
+  // row. Receives a snapshot of the thread's messages from the listing.
+  Thread: {
+    subject: string;
+    folder: Folder;
+    messages: MessageMeta[];
+  };
 
   Compose:
     | {

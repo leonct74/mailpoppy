@@ -29,6 +29,7 @@ import { FOLDERS, folderLabel } from "../folders";
 import { mail } from "../mailClient";
 import { loadInboxCache, saveInboxCache, onNewMail } from "../inboxCache";
 import { hapticDelete } from "../haptics";
+import { groupByThread, ungrouped, type ThreadGroup } from "../threads";
 import { MailboxSwitcher } from "../components/MailboxSwitcher";
 import { useAuth } from "../AuthContext";
 import { colors, fonts, shortDate } from "../theme";
@@ -171,6 +172,19 @@ export function InboxScreen({ navigation }: Props) {
           .some((s) => s!.toLowerCase().includes(q)),
       )
     : items;
+
+  // The inbox collapses a conversation into one row (newest message + count).
+  // Other folders and search results stay flat — there a specific message is
+  // usually the target, not a conversation.
+  const groups = folder === "inbox" && !q ? groupByThread(filtered) : ungrouped(filtered);
+
+  function openThread(group: ThreadGroup) {
+    navigation.navigate("Thread", {
+      subject: group.latest.subject,
+      folder,
+      messages: group.messages,
+    });
+  }
 
   function open(item: MessageMeta) {
     if (folder === "drafts") {
@@ -318,8 +332,8 @@ export function InboxScreen({ navigation }: Props) {
         <FlatList
           style={styles.list}
           contentContainerStyle={styles.listContent}
-          data={filtered}
-          keyExtractor={(m) => m.messageId}
+          data={groups}
+          keyExtractor={(g) => g.latest.messageId}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={() => load("refresh")} tintColor={colors.primary} />
           }
@@ -338,9 +352,26 @@ export function InboxScreen({ navigation }: Props) {
               </Text>
             </View>
           }
-          renderItem={({ item }) => (
-            <SwipeableRow item={item} folder={folder} onPress={() => open(item)} onDelete={removeItem} />
-          )}
+          renderItem={({ item: group }) =>
+            group.count === 1 ? (
+              <SwipeableRow
+                item={group.latest}
+                folder={folder}
+                onPress={() => open(group.latest)}
+                onDelete={removeItem}
+              />
+            ) : (
+              // A conversation row: no swipe (deleting "a thread" is ambiguous —
+              // individual messages are deletable from the reader), tap opens it.
+              <Row
+                item={group.latest}
+                folder={folder}
+                onPress={() => openThread(group)}
+                count={group.count}
+                unreadOverride={group.unread}
+              />
+            )
+          }
         />
       )}
 
@@ -533,8 +564,22 @@ function SwipeableRow({
   );
 }
 
-function Row({ item, folder, onPress }: { item: MessageMeta; folder: Folder; onPress: () => void }) {
-  const unread = item.flags.unread;
+function Row({
+  item,
+  folder,
+  onPress,
+  count,
+  unreadOverride,
+}: {
+  item: MessageMeta;
+  folder: Folder;
+  onPress: () => void;
+  /** >1 marks a collapsed conversation and shows the message count. */
+  count?: number;
+  /** Thread rows are unread when ANY of their messages is. */
+  unreadOverride?: boolean;
+}) {
+  const unread = unreadOverride ?? item.flags.unread;
   const outgoing = folder === "sent" || folder === "drafts";
   const who = outgoing
     ? recipientLabel(item)
@@ -549,6 +594,11 @@ function Row({ item, folder, onPress }: { item: MessageMeta; folder: Folder; onP
           <Text style={[styles.sender, unread && styles.senderUnread]} numberOfLines={1}>
             {outgoing ? `To: ${who}` : who}
           </Text>
+          {count != null && count > 1 && (
+            <View style={styles.threadCount}>
+              <Text style={styles.threadCountText}>{count}</Text>
+            </View>
+          )}
           <Text style={[styles.date, unread && styles.dateUnread]}>{shortDate(item.date)}</Text>
         </View>
         <Text style={[styles.subject, unread && styles.subjectUnread]} numberOfLines={1}>
@@ -692,6 +742,17 @@ const styles = StyleSheet.create({
   senderUnread: { fontFamily: fonts.bold, color: colors.text },
   date: { fontFamily: fonts.medium, fontSize: 11, color: colors.textMuted },
   dateUnread: { color: colors.primary },
+  threadCount: {
+    minWidth: 22,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 6,
+    marginRight: 6,
+    backgroundColor: colors.surfaceVariant,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  threadCountText: { fontFamily: fonts.bold, fontSize: 11, color: colors.text },
   subject: { fontFamily: fonts.regular, fontSize: 14, color: colors.text, marginBottom: 2 },
   subjectUnread: { fontFamily: fonts.semibold },
   snippetRow: { flexDirection: "row", alignItems: "center", gap: 4 },

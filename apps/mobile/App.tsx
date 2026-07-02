@@ -20,6 +20,7 @@ import { SendSnackbar } from "./src/components/SendSnackbar";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { InboxScreen } from "./src/screens/InboxScreen";
 import { MessageScreen } from "./src/screens/MessageScreen";
+import { ThreadScreen } from "./src/screens/ThreadScreen";
 import { ComposeScreen } from "./src/screens/ComposeScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { colors } from "./src/theme";
@@ -130,6 +131,7 @@ function Root() {
         >
           <Stack.Screen name="Inbox" component={InboxScreen} />
           <Stack.Screen name="Message" component={MessageScreen} />
+          <Stack.Screen name="Thread" component={ThreadScreen} />
           <Stack.Screen name="Settings" component={SettingsScreen} />
           <Stack.Screen name="Compose" component={ComposeScreen} options={{ presentation: "modal" }} />
         </Stack.Navigator>
