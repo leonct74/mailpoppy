@@ -110,13 +110,10 @@ describe("InboxView", () => {
     const client = mockClient();
     client.list = vi.fn(async ({ folder }) => ({ items: folder === "inbox" ? [withAttachment] : [] }));
     client.getAttachmentUrl = vi.fn(async () => ({ url: "https://signed.example/report.pdf", filename: "report.pdf" }));
-    // The presigned URL is fetched for its bytes; jsdom has no blob URLs, so stub them.
+    // The presigned URL is fetched for its bytes (the rasterising itself is
+    // pdf.js's job — not exercisable in jsdom, where the viewer shows its fallback).
     const realFetch = global.fetch;
     global.fetch = vi.fn(async () => new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]))) as unknown as typeof fetch;
-    const realCreate = URL.createObjectURL;
-    const realRevoke = URL.revokeObjectURL;
-    URL.createObjectURL = vi.fn(() => "blob:preview-1");
-    URL.revokeObjectURL = vi.fn();
     try {
       render(<InboxView client={client} />);
 
@@ -128,13 +125,12 @@ describe("InboxView", () => {
       expect(await screen.findByRole("dialog", { name: /Preview: report\.pdf/ })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /Save to Downloads/ })).toBeInTheDocument();
 
-      // Closing revokes the blob URL (no leak).
       fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
-      await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:preview-1"));
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog", { name: /Preview: report\.pdf/ })).not.toBeInTheDocument(),
+      );
     } finally {
       global.fetch = realFetch;
-      URL.createObjectURL = realCreate;
-      URL.revokeObjectURL = realRevoke;
     }
   });
 

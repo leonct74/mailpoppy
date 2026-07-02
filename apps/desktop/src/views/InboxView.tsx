@@ -42,6 +42,7 @@ import { saveBytesToDownloads } from "../lib/localDownload";
 import { decryptEml, decryptAttachmentBytes } from "../lib/mailboxKeys";
 import { SecurityInfo } from "./SecurityInfo";
 import { parseBody, sanitizeHtml, type ParsedBody } from "../lib/mailBody";
+import { PdfViewer } from "./PdfViewer";
 import { buildReply, type ComposeInit, type ReplyMode } from "../lib/reply";
 import { renderMarkdown } from "../lib/compose";
 import { filterMessages } from "../lib/search";
@@ -143,9 +144,11 @@ export function InboxView({
   // Fallback when the OS can't auto-open a download (e.g. a Tauri build whose
   // opener plugin isn't active yet): surface the link so the user is never stuck.
   const [attachmentLink, setAttachmentLink] = useState<{ url: string; filename: string } | null>(null);
-  // In-app attachment preview (images + PDFs) — a blob URL rendered in a modal, so
-  // nothing bounces out to a browser window. Revoked on close.
-  const [preview, setPreview] = useState<{ url: string; name: string; kind: "image" | "pdf"; bytes: Uint8Array; contentType: string } | null>(null);
+  // In-app attachment preview (images + PDFs) — rendered in a modal, so nothing
+  // bounces out to a browser window. Images use a blob URL (revoked on close);
+  // PDFs are rasterised from the bytes by pdf.js (the webview's own PDF plugin
+  // doesn't run in the sandboxed container iframe).
+  const [preview, setPreview] = useState<{ url: string | null; name: string; kind: "image" | "pdf"; bytes: Uint8Array; contentType: string } | null>(null);
   // Which attachment is being fetched/decrypted right now (spinner on its chip).
   const [attBusy, setAttBusy] = useState<number | null>(null);
   // "Saved to Downloads" confirmation, auto-dismissed.
@@ -332,9 +335,8 @@ export function InboxView({
       const contentType = att.contentType ?? "application/octet-stream";
       const kind = previewKind(att);
       if (kind) {
-        const url = URL.createObjectURL(
-          new Blob([bytes as BlobPart], { type: kind === "pdf" ? "application/pdf" : contentType }),
-        );
+        // Only images need a blob URL; PDFs render straight from the bytes.
+        const url = kind === "image" ? URL.createObjectURL(new Blob([bytes as BlobPart], { type: contentType })) : null;
         setPreview({ url, name: att.filename, kind, bytes, contentType });
       } else {
         await saveAttachment(att.filename, contentType, bytes);
@@ -348,7 +350,7 @@ export function InboxView({
 
   function closePreview() {
     setPreview((p) => {
-      if (p) URL.revokeObjectURL(p.url);
+      if (p?.url) URL.revokeObjectURL(p.url);
       return null;
     });
   }
@@ -818,6 +820,7 @@ export function InboxView({
           name={preview.name}
           url={preview.url}
           kind={preview.kind}
+          bytes={preview.bytes}
           onSave={() => void saveAttachment(preview.name, preview.contentType, preview.bytes)}
           saveNotice={saveNotice}
           onClose={closePreview}
@@ -954,20 +957,23 @@ function MailboxIdentity({
   );
 }
 
-/** Full-screen in-app viewer for image/PDF attachments — no browser bounce. The
- *  blob URL is created (and revoked) by the caller; PDFs ride the webview's own
- *  renderer via an <iframe>. */
+/** Full-screen in-app viewer for image/PDF attachments — no browser bounce.
+ *  Images use a blob URL (created/revoked by the caller); PDFs are rasterised
+ *  from the bytes by pdf.js, since the webview's own PDF plugin doesn't run in
+ *  the sandboxed container iframe (it rendered a blank page). */
 function AttachmentPreview({
   name,
   url,
   kind,
+  bytes,
   onSave,
   saveNotice,
   onClose,
 }: {
   name: string;
-  url: string;
+  url: string | null;
   kind: "image" | "pdf";
+  bytes: Uint8Array;
   onSave: () => void;
   saveNotice: string | null;
   onClose: () => void;
@@ -998,11 +1004,11 @@ function AttachmentPreview({
         </Button>
       </div>
       <div className="flex min-h-0 flex-1 items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
-        {kind === "image" ? (
+        {kind === "image" && url ? (
           // eslint-disable-next-line jsx-a11y/img-redundant-alt
           <img src={url} alt={name} className="max-h-full max-w-full rounded-lg object-contain shadow-2xl" />
         ) : (
-          <iframe src={url} title={name} className="h-full w-full rounded-lg border-0 bg-white shadow-2xl" />
+          <PdfViewer bytes={bytes} />
         )}
       </div>
     </div>

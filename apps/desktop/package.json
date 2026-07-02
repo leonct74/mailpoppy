@@ -29,6 +29,7 @@
     "libsodium-wrappers-sumo": "^0.8.4",
     "lucide-react": "^1.17.0",
     "marked": "^12.0.2",
+    "pdfjs-dist": "^6.1.200",
     "postal-mime": "^2.2.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
