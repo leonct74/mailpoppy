@@ -7,7 +7,7 @@ import {
   requestPasswordReset,
   confirmPasswordReset,
 } from "@/lib/auth";
-import { resolveConfig } from "@/lib/config";
+import { resolveConfig, ResolveError } from "@/lib/config";
 import { PRIVACY_VERSION } from "@/lib/legal";
 import { mail } from "@/lib/mailClient";
 import { establishMailboxKeysForLogin } from "@/lib/mailpoppy/mailboxKeys";
@@ -18,6 +18,8 @@ import {
   KeyIcon,
   ArrowRightIcon,
   CloudIcon,
+  EyeIcon,
+  EyeOffIcon,
 } from "./icons";
 
 type Mode = "signin" | "newpw" | "forgot" | "reset";
@@ -48,6 +50,9 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
   const [resetCode, setResetCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set alongside `error` when the fix is self-service: renders a direct link
+  // (e.g. "Manage plan" for a lapsed domain — this is the web, no App Store rules).
+  const [errorLink, setErrorLink] = useState<{ href: string; label: string } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // Privacy Policy: must be accepted before the first sign-in (remembered after).
   const [accepted, setAccepted] = useState(false);
@@ -86,6 +91,7 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
   function go(next: Mode) {
     setMode(next);
     setError(null);
+    setErrorLink(null);
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -93,6 +99,7 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
     if (mode === "signin" && !accepted) return; // gate: must accept first
     setBusy(true);
     setError(null);
+    setErrorLink(null);
     try {
       if (mode === "newpw") {
         await completeNewPassword(newPassword);
@@ -121,6 +128,9 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
       }
     } catch (err) {
       setError(friendly(err));
+      if (err instanceof ResolveError && err.code === "inactive_subscription") {
+        setErrorLink({ href: "/account", label: "Manage this domain's plan" });
+      }
     } finally {
       setBusy(false);
     }
@@ -302,6 +312,18 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
           )}
 
           {error && <p className="text-danger mt-4 text-center text-sm leading-relaxed">{error}</p>}
+          {error && errorLink && (
+            <p className="mt-2 text-center">
+              <a
+                href={errorLink.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-heading text-[13px] font-semibold hover:underline"
+              >
+                {errorLink.label} →
+              </a>
+            </p>
+          )}
         </div>
 
         <div className="text-muted mt-7 flex items-center justify-center gap-1.5 text-xs font-medium">
@@ -322,6 +344,9 @@ function Field({
   icon: Icon,
   ...input
 }: { label: string; icon: ComponentType<{ size?: number }> } & React.InputHTMLAttributes<HTMLInputElement>) {
+  // Password fields get a show/hide toggle (same affordance as the mobile app).
+  const isPassword = input.type === "password";
+  const [revealed, setRevealed] = useState(false);
   return (
     <div className="mb-4">
       <label className="text-muted mb-1.5 ml-0.5 block text-[11px] font-semibold tracking-wider uppercase">
@@ -333,9 +358,21 @@ function Field({
         </span>
         <input
           {...input}
+          type={isPassword && revealed ? "text" : input.type}
           autoCorrect="off"
           className="text-text placeholder:text-dim h-full w-full bg-transparent text-base outline-none"
         />
+        {isPassword && (
+          <button
+            type="button"
+            aria-label={revealed ? "Hide password" : "Show password"}
+            onClick={() => setRevealed((v) => !v)}
+            tabIndex={-1}
+            className="text-muted hover:text-text ml-2 shrink-0"
+          >
+            {revealed ? <EyeOffIcon size={20} /> : <EyeIcon size={20} />}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -449,6 +486,7 @@ function RecoveryKeyPanel({
 }
 
 function friendly(e: unknown): string {
+  if (e instanceof ResolveError) return e.message; // already user-facing + actionable
   const msg = e instanceof Error ? e.message : String(e);
   if (/UserNotFound|NotAuthorized|Incorrect username or password/i.test(msg))
     return "That email or password isn't right. Please try again.";
