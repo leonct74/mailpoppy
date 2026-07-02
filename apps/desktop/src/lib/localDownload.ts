@@ -5,7 +5,27 @@
 // (the sidecar sets Content-Disposition: attachment). This mirrors how plaintext
 // attachments are handed off (openExternal on the presigned S3 URL).
 import { sidecar, SIDECAR } from "./sidecar";
+import { inAgentsPoppyContainer } from "./hostBridge";
 import { openExternal } from "./openExternal";
+
+/**
+ * The URL the system browser should fetch for a one-shot download token.
+ * Standalone, that's the sidecar's fixed loopback port. In the AgentsPoppy
+ * container the backend listens on a broker-assigned port the frontend can't
+ * know — but the broker exposes a narrow passthrough (`/ext-dl/<id>/local-download/
+ * <token>`) on the SAME origin that serves this frontend (`/ext-ui/<id>/…`), so the
+ * URL is derived from our own location. The backend's port stays hidden throughout.
+ */
+function downloadUrlFor(token: string): string {
+  const tok = encodeURIComponent(token);
+  if (inAgentsPoppyContainer()) {
+    // location.origin can read "null" in a sandboxed frame — parse the full href.
+    const here = new URL(window.location.href);
+    const m = here.pathname.match(/^\/ext-ui\/([^/]+)\//);
+    if (m) return `${here.protocol}//${here.host}/ext-dl/${m[1]}/local-download/${tok}`;
+  }
+  return `${SIDECAR}/local-download/${tok}`;
+}
 
 // Base64-encode bytes without blowing the call stack on large attachments
 // (String.fromCharCode(...bytes) overflows for multi-MB files). FileReader's
@@ -38,7 +58,7 @@ export async function downloadBytesViaSidecar(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ filename, contentType, dataB64 }),
   });
-  const url = `${SIDECAR}/local-download/${token}`;
+  const url = downloadUrlFor(token);
   const opened = await openExternal(url);
   return { url, opened };
 }
