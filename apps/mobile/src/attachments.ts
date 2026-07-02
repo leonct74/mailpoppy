@@ -28,18 +28,50 @@ function sanitize(name: string): string {
   return cleaned.slice(-120) || "attachment";
 }
 
+/** Download a received attachment into the cache, returning its local file:// URI
+ *  (used both to preview images in-app and as the staging step before sharing). */
+export async function fetchAttachmentToCache(url: string, filename: string): Promise<string> {
+  const target = `${FileSystem.cacheDirectory}${Date.now()}_${sanitize(filename)}`;
+  const { uri } = await FileSystem.downloadAsync(url, target);
+  return uri;
+}
+
 /**
- * Download a received attachment to the cache and open the native share sheet.
- * For an image this includes "Save Image" (Photos); for PDFs/docs it offers
- * Files, Drive, etc. Falls back to opening the URL if sharing is unavailable.
+ * Fetch an ENCRYPTED attachment into the cache, returning its local file:// URI.
+ * The S3 object is base64 ciphertext (text), so we fetch it, decrypt with the
+ * cached mailbox key (decryption happens on the device — the bytes are never
+ * readable server-side) and write the plaintext to the cache. No CORS concerns:
+ * this is a native fetch.
  */
+export async function fetchEncryptedAttachmentToCache(
+  url: string,
+  meta: EncryptedRef,
+  filename: string,
+): Promise<string> {
+  const ciphertextB64 = await (await fetch(url)).text();
+  const bytes = await decryptAttachmentBytes(meta, ciphertextB64);
+  const target = `${FileSystem.cacheDirectory}${Date.now()}_${sanitize(filename)}`;
+  await FileSystem.writeAsStringAsync(target, bytesToBase64(bytes), { encoding: FileSystem.EncodingType.Base64 });
+  return target;
+}
+
+/** Hand an already-cached file to the native share sheet (for an image this
+ *  includes "Save Image" → Photos; for PDFs/docs it offers Files, Drive, etc.). */
+export async function shareLocalFile(uri: string, filename: string, contentType?: string): Promise<void> {
+  if (!(await Sharing.isAvailableAsync())) {
+    throw new Error("Sharing isn't available on this device, so this file can't be opened here.");
+  }
+  await Sharing.shareAsync(uri, { mimeType: contentType, dialogTitle: filename });
+}
+
+/** Download a received attachment to the cache and open the native share sheet.
+ *  Falls back to opening the URL if sharing is unavailable. */
 export async function saveOrShareAttachment(
   url: string,
   filename: string,
   contentType?: string,
 ): Promise<void> {
-  const target = `${FileSystem.cacheDirectory}${Date.now()}_${sanitize(filename)}`;
-  const { uri } = await FileSystem.downloadAsync(url, target);
+  const uri = await fetchAttachmentToCache(url, filename);
   if (await Sharing.isAvailableAsync()) {
     await Sharing.shareAsync(uri, { mimeType: contentType, dialogTitle: filename });
   } else {
@@ -47,27 +79,15 @@ export async function saveOrShareAttachment(
   }
 }
 
-/**
- * Save/share an ENCRYPTED attachment. The S3 object is base64 ciphertext (text),
- * so we fetch it, decrypt with the cached mailbox key (decryption happens on the
- * device — the bytes are never readable server-side), write the plaintext to the
- * cache, and hand it to the share sheet. No CORS concerns: this is a native fetch.
- */
+/** Save/share an ENCRYPTED attachment (fetch → on-device decrypt → share sheet). */
 export async function saveOrShareEncryptedAttachment(
   url: string,
   meta: EncryptedRef,
   filename: string,
   contentType?: string,
 ): Promise<void> {
-  const ciphertextB64 = await (await fetch(url)).text();
-  const bytes = await decryptAttachmentBytes(meta, ciphertextB64);
-  const target = `${FileSystem.cacheDirectory}${Date.now()}_${sanitize(filename)}`;
-  await FileSystem.writeAsStringAsync(target, bytesToBase64(bytes), { encoding: FileSystem.EncodingType.Base64 });
-  if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(target, { mimeType: contentType, dialogTitle: filename });
-  } else {
-    throw new Error("Sharing isn't available on this device, so this encrypted file can't be opened here.");
-  }
+  const uri = await fetchEncryptedAttachmentToCache(url, meta, filename);
+  await shareLocalFile(uri, filename, contentType);
 }
 
 async function asAttachment(

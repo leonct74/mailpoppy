@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,7 +18,13 @@ import type { RootStackParamList } from "../navigation";
 import { mail } from "../mailClient";
 import { useAuth } from "../AuthContext";
 import { parseEml, type ParsedEmail } from "../eml";
-import { saveOrShareAttachment, saveOrShareEncryptedAttachment } from "../attachments";
+import {
+  saveOrShareAttachment,
+  saveOrShareEncryptedAttachment,
+  fetchAttachmentToCache,
+  fetchEncryptedAttachmentToCache,
+  shareLocalFile,
+} from "../attachments";
 import { decryptEml, MailboxLockedError } from "../mailboxKeys";
 import { MessageBody } from "../components/MessageBody";
 import { folderLabel } from "../folders";
@@ -41,6 +49,8 @@ export function MessageScreen({ route, navigation }: Props) {
   const [unlocking, setUnlocking] = useState(false);
   const [unlockError, setUnlockError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0); // bump to refetch after an unlock
+  // An image attachment being viewed full-screen (already downloaded/decrypted to cache).
+  const [preview, setPreview] = useState<{ uri: string; name: string; type?: string } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -139,7 +149,15 @@ export function MessageScreen({ route, navigation }: Props) {
       const local = email?.attachments[index];
       const name = filename ?? local?.filename ?? `attachment-${index}`;
       const type = contentType ?? local?.mimeType;
-      if (encrypted && encWrappedKey) {
+      if (isImage(type, name)) {
+        // Images get an in-app preview (encrypted ones are decrypted to the cache
+        // first); saving/sharing is a button inside the preview.
+        const uri =
+          encrypted && encWrappedKey
+            ? await fetchEncryptedAttachmentToCache(url, { encrypted, encWrappedKey }, name)
+            : await fetchAttachmentToCache(url, name);
+        setPreview({ uri, name, type });
+      } else if (encrypted && encWrappedKey) {
         // Ciphertext on S3 — fetch, decrypt on-device, then share the plaintext.
         await saveOrShareEncryptedAttachment(url, { encrypted, encWrappedKey }, name, type);
       } else {
@@ -149,6 +167,15 @@ export function MessageScreen({ route, navigation }: Props) {
       Alert.alert("Couldn't open attachment", e instanceof Error ? e.message : String(e));
     } finally {
       setOpening(null);
+    }
+  }
+
+  async function sharePreview() {
+    if (!preview) return;
+    try {
+      await shareLocalFile(preview.uri, preview.name, preview.type);
+    } catch (e) {
+      Alert.alert("Couldn't share image", e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -285,19 +312,22 @@ export function MessageScreen({ route, navigation }: Props) {
                 <Text style={styles.attachLabel}>
                   {email.attachments.length} attachment{email.attachments.length === 1 ? "" : "s"}
                 </Text>
-                {email.attachments.map((a, i) => (
-                  <TouchableOpacity key={i} style={styles.attachChip} onPress={() => openAttachment(i)} activeOpacity={0.7}>
-                    <Ionicons name="document-attach-outline" size={20} color={colors.primary} />
-                    <Text style={styles.attachName} numberOfLines={1}>
-                      {a.filename}
-                    </Text>
-                    {opening === i ? (
-                      <ActivityIndicator size="small" color={colors.primary} />
-                    ) : (
-                      <Ionicons name="download-outline" size={18} color={colors.textMuted} />
-                    )}
-                  </TouchableOpacity>
-                ))}
+                {email.attachments.map((a, i) => {
+                  const img = isImage(a.mimeType, a.filename);
+                  return (
+                    <TouchableOpacity key={i} style={styles.attachChip} onPress={() => openAttachment(i)} activeOpacity={0.7}>
+                      <Ionicons name={img ? "image-outline" : "document-attach-outline"} size={20} color={colors.primary} />
+                      <Text style={styles.attachName} numberOfLines={1}>
+                        {a.filename}
+                      </Text>
+                      {opening === i ? (
+                        <ActivityIndicator size="small" color={colors.primary} />
+                      ) : (
+                        <Ionicons name={img ? "eye-outline" : "download-outline"} size={18} color={colors.textMuted} />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             )}
           </ScrollView>
@@ -309,8 +339,41 @@ export function MessageScreen({ route, navigation }: Props) {
           </View>
         </>
       )}
+
+      {/* Full-screen image preview (pinch to zoom on iOS; share/save from the top bar) */}
+      <Modal visible={!!preview} transparent animationType="fade" onRequestClose={() => setPreview(null)}>
+        <View style={styles.previewBackdrop}>
+          <View style={[styles.previewBar, { paddingTop: insets.top + 6 }]}>
+            <TouchableOpacity onPress={() => setPreview(null)} style={styles.iconBtn} hitSlop={8} accessibilityLabel="Close preview">
+              <Ionicons name="close" size={26} color="#fff" />
+            </TouchableOpacity>
+            <Text style={styles.previewName} numberOfLines={1}>
+              {preview?.name}
+            </Text>
+            <TouchableOpacity onPress={() => void sharePreview()} style={styles.iconBtn} hitSlop={8} accessibilityLabel="Share or save image">
+              <Ionicons name="share-outline" size={24} color="#fff" />
+            </TouchableOpacity>
+          </View>
+          <ScrollView
+            style={styles.previewZoom}
+            contentContainerStyle={styles.previewZoomContent}
+            maximumZoomScale={5}
+            minimumZoomScale={1}
+            centerContent
+          >
+            {preview && <Image source={{ uri: preview.uri }} style={styles.previewImage} resizeMode="contain" />}
+          </ScrollView>
+        </View>
+      </Modal>
     </View>
   );
+}
+
+/** Is this attachment an image we can preview in-app? Checks the content type
+ *  first, then the filename extension (some senders label images octet-stream). */
+function isImage(contentType?: string, filename?: string): boolean {
+  if (contentType?.toLowerCase().startsWith("image/")) return true;
+  return /\.(png|jpe?g|gif|webp|heic|heif|bmp)$/i.test(filename ?? "");
 }
 
 function ActionButton({
@@ -457,6 +520,19 @@ const styles = StyleSheet.create({
   },
   unlockBtnDisabled: { opacity: 0.5 },
   unlockBtnText: { fontFamily: fonts.bold, fontSize: 15, color: colors.primaryText },
+  previewBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.96)" },
+  previewBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 10,
+    paddingBottom: 6,
+    gap: 8,
+  },
+  previewName: { flex: 1, fontFamily: fonts.semibold, fontSize: 14, color: "#fff", textAlign: "center" },
+  previewZoom: { flex: 1 },
+  previewZoomContent: { flexGrow: 1 },
+  previewImage: { flex: 1, width: "100%" },
   actionBar: {
     flexDirection: "row",
     gap: 10,
