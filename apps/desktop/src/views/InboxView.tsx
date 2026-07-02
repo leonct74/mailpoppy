@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Inbox as InboxIcon,
   Send,
@@ -30,6 +30,7 @@ import {
 import type { MessageMeta, Folder } from "@mailpoppy/core";
 import { formatBytes, usagePercent, usageLevel } from "@mailpoppy/core";
 import { makeMailClient, type MailClient, type SendAttachment, type MailboxUsage } from "../lib/mailClient";
+import { loadListCache, saveListCache, loadCachedEml, saveCachedEml } from "../lib/mailCache";
 import { filesToAttachments } from "../lib/attachments";
 import { openExternal } from "../lib/openExternal";
 import { downloadBytesViaSidecar } from "../lib/localDownload";
@@ -152,8 +153,20 @@ export function InboxView({
     setComposeInit(buildReply(selected, mode, { self: selected.mailbox, quotedBody: parsed?.text ?? selected.snippet }));
   }
 
-  // `background` refreshes (polling / window-focus) stay silent: no spinner, and
-  // a transient failure never replaces a working list with an error banner.
+  // Cache identity: which mailbox the persisted list caches belong to. Demo mode
+  // has no stable identity, so it never caches.
+  const cacheId = !demo && mailboxEmail ? mailboxEmail : null;
+
+  // Latest folder/client, so an in-flight response can tell whether it's still
+  // wanted. Without this, switching folders mid-fetch let the OLD folder's reply
+  // land in (and get cached for) the NEW folder.
+  const folderRef = useRef(folder);
+  folderRef.current = folder;
+  const mailRef = useRef(mail);
+  mailRef.current = mail;
+
+  // `background` refreshes (polling / window-focus / cache revalidation) stay silent:
+  // no spinner, and a transient failure never replaces a working list with an error.
   async function refresh(f: Folder = folder, opts: { background?: boolean } = {}) {
     if (!opts.background) {
       setLoading(true);
@@ -161,7 +174,9 @@ export function InboxView({
     }
     try {
       const res = await mail.list({ folder: f, limit: 100 });
+      if (folderRef.current !== f || mailRef.current !== mail) return; // stale response — drop it
       setItems(res.items);
+      if (cacheId) saveListCache(cacheId, f, res.items);
       if (opts.background) setError(null); // a good poll clears a stale transient error
     } catch (e) {
       if (!opts.background) setError(friendlyError(e));
@@ -170,13 +185,22 @@ export function InboxView({
     }
   }
 
-  // Reload whenever the folder changes.
+  // Reload whenever the folder changes. A cached list renders instantly (no spinner)
+  // and a silent refresh replaces it — the mobile app's stale-while-revalidate.
   useEffect(() => {
     setSelected(null);
     setRaw(null);
     setParsed(null);
     setQuery("");
-    void refresh(folder);
+    const cached = cacheId ? loadListCache(cacheId, folder) : null;
+    if (cached) {
+      setItems(cached);
+      setError(null);
+      void refresh(folder, { background: true });
+    } else {
+      setItems([]); // never show the previous folder's rows under the spinner
+      void refresh(folder);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folder, mail]);
 
@@ -208,15 +232,21 @@ export function InboxView({
     setShowRaw(false);
     setAttachmentLink(null);
 
-    let eml: string;
-    try {
-      ({ eml } = await mail.getRaw(m.messageId));
-      // Encrypted mail comes back as ciphertext — decrypt with the cached mailbox
-      // key before parsing/displaying (a no-op for mail stored in clear).
-      eml = await decryptEml(m, eml);
-    } catch (e) {
-      setError(friendlyError(e));
-      return;
+    // Delivered mail is immutable, so a cached body needs no network and no decrypt.
+    // Drafts are NOT immutable (editable elsewhere) — always fetched fresh.
+    const cacheable = folder !== "drafts";
+    let eml = cacheable ? loadCachedEml(m.messageId) : null;
+    if (eml === null) {
+      try {
+        ({ eml } = await mail.getRaw(m.messageId));
+        // Encrypted mail comes back as ciphertext — decrypt with the cached mailbox
+        // key before parsing/displaying (a no-op for mail stored in clear).
+        eml = await decryptEml(m, eml);
+        if (cacheable) saveCachedEml(m.messageId, eml);
+      } catch (e) {
+        setError(friendlyError(e));
+        return;
+      }
     }
     setRaw(eml);
 
@@ -832,6 +862,8 @@ function ComposeDialog({
   onClose: () => void;
   onSend: (input: {
     to: string[];
+    cc?: string[];
+    bcc?: string[];
     subject: string;
     text: string;
     html?: string;
@@ -841,6 +873,10 @@ function ComposeDialog({
   }) => Promise<void>;
 }) {
   const [to, setTo] = useState(init.to.join(", "));
+  const [cc, setCc] = useState((init.cc ?? []).join(", "));
+  const [bcc, setBcc] = useState((init.bcc ?? []).join(", "));
+  // Cc/Bcc stay collapsed until asked for (or prefilled) — most mail needs neither.
+  const [showCcBcc, setShowCcBcc] = useState(Boolean(init.cc?.length || init.bcc?.length));
   const [subject, setSubject] = useState(init.subject);
   const [text, setText] = useState(init.text);
   const [preview, setPreview] = useState(false);
@@ -862,12 +898,17 @@ function ComposeDialog({
     setSending(true);
     setErr(null);
     try {
-      const recipients = to.split(",").map((s) => s.trim()).filter(Boolean);
+      const parseList = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
+      const recipients = parseList(to);
       if (recipients.length === 0) throw new Error("Add at least one recipient");
+      const ccList = parseList(cc);
+      const bccList = parseList(bcc);
       // Send a formatted HTML body (rendered from Markdown) + a plaintext fallback.
       const html = text.trim() ? renderMarkdown(text) : undefined;
       await onSend({
         to: recipients,
+        cc: ccList.length ? ccList : undefined,
+        bcc: bccList.length ? bccList : undefined,
         subject,
         text,
         html,
@@ -893,8 +934,27 @@ function ComposeDialog({
     >
       <div className="w-[480px] max-w-[90vw] rounded-xl border border-outline-variant/20 bg-surface-container p-6 shadow-2xl">
         <h3 className="mb-3 text-lg font-semibold text-on-surface">{init.inReplyTo ? "Reply" : "New message"}</h3>
-        <label className={fieldLabel}>To (comma-separated)</label>
+        <div className="flex items-baseline justify-between">
+          <label className={fieldLabel}>To (comma-separated)</label>
+          {!showCcBcc && (
+            <button
+              type="button"
+              onClick={() => setShowCcBcc(true)}
+              className="text-xs text-primary underline-offset-2 hover:underline"
+            >
+              Cc / Bcc
+            </button>
+          )}
+        </div>
         <input aria-label="To" value={to} onChange={(e) => setTo(e.target.value)} placeholder="alice@example.com" className={cn(fieldInput, "mb-3")} />
+        {showCcBcc && (
+          <>
+            <label className={fieldLabel}>Cc</label>
+            <input aria-label="Cc" value={cc} onChange={(e) => setCc(e.target.value)} placeholder="copy@example.com" className={cn(fieldInput, "mb-3")} />
+            <label className={fieldLabel}>Bcc</label>
+            <input aria-label="Bcc" value={bcc} onChange={(e) => setBcc(e.target.value)} placeholder="hidden@example.com" className={cn(fieldInput, "mb-3")} />
+          </>
+        )}
         <label className={fieldLabel}>Subject</label>
         <input aria-label="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} className={cn(fieldInput, "mb-3")} />
         <div className="flex items-baseline justify-between">

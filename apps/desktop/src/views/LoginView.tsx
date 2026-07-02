@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { KeyRound, Copy, Check, ShieldAlert } from "lucide-react";
+import { KeyRound, Copy, Check, ShieldAlert, Eye, EyeOff } from "lucide-react";
 import type { Authenticator } from "../lib/auth";
 import { Card, Button, Spinner } from "../ui";
 import { friendlyError } from "../lib/errors";
@@ -20,6 +20,42 @@ export interface EstablishKeysOutcome {
 const fieldCls =
   "w-full rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface placeholder:text-outline-variant focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30";
 const labelCls = "mb-1 block text-sm text-on-surface-variant";
+
+/** Password field with a show/hide toggle (same affordance as the mobile app). */
+function PasswordInput({
+  ariaLabel,
+  value,
+  onChange,
+  autoComplete,
+}: {
+  ariaLabel: string;
+  value: string;
+  onChange: (v: string) => void;
+  autoComplete: string;
+}) {
+  const [revealed, setRevealed] = useState(false);
+  return (
+    <div className="relative">
+      <input
+        aria-label={ariaLabel}
+        className={`${fieldCls} pr-9`}
+        type={revealed ? "text" : "password"}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        autoComplete={autoComplete}
+      />
+      <button
+        type="button"
+        aria-label={revealed ? "Hide password" : "Show password"}
+        onClick={() => setRevealed((v) => !v)}
+        tabIndex={-1}
+        className="absolute inset-y-0 right-2.5 flex items-center text-on-surface-variant hover:text-on-surface"
+      >
+        {revealed ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+      </button>
+    </div>
+  );
+}
 
 export function LoginView({
   auth,
@@ -96,7 +132,17 @@ export function LoginView({
     <Card className="max-w-md">
       <h3 className="text-lg font-semibold text-on-surface">Sign in to your mailbox</h3>
 
-      <div className="mt-4 flex flex-col gap-3">
+      <div
+        className="mt-4 flex flex-col gap-3"
+        onKeyDown={(e) => {
+          // No surrounding <form>, so give the fields the Enter-to-sign-in every
+          // login screen is expected to have.
+          if (e.key === "Enter" && !busy) {
+            e.preventDefault();
+            void submit();
+          }
+        }}
+      >
         {!needsNewPassword ? (
           <>
             <div>
@@ -105,7 +151,7 @@ export function LoginView({
             </div>
             <div>
               <label className={labelCls}>Password</label>
-              <input aria-label="Password" className={fieldCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+              <PasswordInput ariaLabel="Password" value={password} onChange={setPassword} autoComplete="current-password" />
             </div>
           </>
         ) : (
@@ -113,7 +159,7 @@ export function LoginView({
             <p className="text-sm text-on-surface-variant">Set a new password to finish activating this mailbox.</p>
             <div>
               <label className={labelCls}>New password</label>
-              <input aria-label="New password" className={fieldCls} type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" />
+              <PasswordInput ariaLabel="New password" value={newPassword} onChange={setNewPassword} autoComplete="new-password" />
             </div>
           </>
         )}

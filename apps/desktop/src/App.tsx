@@ -13,6 +13,7 @@ import { MailpoppyClient } from "@mailpoppy/api-client";
 import { CognitoAuth } from "./lib/auth";
 import { makeMailClient } from "./lib/mailClient";
 import { establishMailboxKeysForLogin, clearMailboxKeySession } from "./lib/mailboxKeys";
+import { clearMailCaches } from "./lib/mailCache";
 import { cn, Logo, Spinner } from "./ui";
 import { restoreStartupRegion, savedRegion } from "./lib/region";
 import { autoDiscoverRegion } from "./lib/discovery";
@@ -127,11 +128,11 @@ function InboxTab({ prefillEmail }: { prefillEmail?: string | null }) {
         <span className="text-secondary">
           ✅ Connected to <code className="font-mono text-xs">{config.apiBaseUrl}</code>
         </span>
-        <button className={linkBtn} onClick={() => { auth?.signOut(); clearMailboxKeySession(); setSignedIn(false); }}>Sign out</button>
+        <button className={linkBtn} onClick={() => { auth?.signOut(); clearMailboxKeySession(); clearMailCaches(); setSignedIn(false); }}>Sign out</button>
         <button className={linkBtn} onClick={() => setEditingConfig(true)}>Change deployment</button>
         <button
           className={linkBtn}
-          onClick={() => { clearDeploymentConfig(); clearMailboxKeySession(); setConfig(null); setSignedIn(false); }}
+          onClick={() => { clearDeploymentConfig(); clearMailboxKeySession(); clearMailCaches(); setConfig(null); setSignedIn(false); }}
         >
           Disconnect
         </button>

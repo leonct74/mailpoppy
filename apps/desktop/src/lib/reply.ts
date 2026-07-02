@@ -8,6 +8,8 @@ export type ReplyMode = "reply" | "replyAll" | "forward";
 
 export interface ComposeInit {
   to: string[];
+  cc?: string[];
+  bcc?: string[];
   subject: string;
   text: string;
   inReplyTo?: string;
