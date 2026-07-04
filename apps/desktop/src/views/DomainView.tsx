@@ -47,7 +47,7 @@ import { Card, Button, Spinner, cn } from "../ui";
 type Tone = "ok" | "warn" | "muted" | "bad";
 const TONE: Record<Tone, string> = {
   ok: "border-secondary/20 bg-secondary/10 text-secondary",
-  warn: "border-amber-400/30 bg-amber-400/10 text-amber-300",
+  warn: "border-warn/30 bg-warn/10 text-warn",
   muted: "border-outline-variant/20 bg-surface-container-highest/40 text-on-surface-variant",
   bad: "border-tertiary/30 bg-tertiary-container/15 text-tertiary",
 };
@@ -381,7 +381,7 @@ export function DomainView({
           same getMailFrom loader is shared so the panel and the badge agree, and
           onStateChange keeps the badge live after the admin applies the change. */}
       {mailFrom && mailFrom !== "error" && mailFromAlignment(mailFrom) !== "aligned" && (
-        <Card className="border-amber-400/30 bg-amber-400/5">
+        <Card className="border-warn/30 bg-warn/5">
           <MailFromSetup
             domain={domain}
             region={backend?.region}
@@ -422,7 +422,7 @@ export function DomainView({
         </div>
 
         {domainUnverified && (
-          <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-200">
+          <div className="mt-3 rounded-lg border border-warn/30 bg-warn/10 p-3 text-sm text-warn-bright">
             This domain isn't verified for sending yet. Finish its{" "}
             {onRunSetup ? (
               <button onClick={onRunSetup} className="underline underline-offset-2 hover:no-underline">
@@ -553,7 +553,7 @@ export function DomainView({
 
       {/* Danger zone — remove just THIS domain (mailboxes + mail + SES + DNS),
           leaving the shared backend and other domains intact. */}
-      <div className="overflow-hidden rounded-xl border border-error/20 bg-[#1a0f14]">
+      <div className="overflow-hidden rounded-xl border border-error/20 bg-error/10">
         <button
           type="button"
           aria-label="Toggle danger zone"
@@ -628,7 +628,7 @@ export function DomainView({
                   <li>{removeResult.dnsRemoved.length} DNS record change(s)</li>
                 </ul>
                 {removeResult.warnings.length > 0 && (
-                  <div className="mt-2 text-sm text-amber-300">
+                  <div className="mt-2 text-sm text-warn">
                     <b>Warnings:</b>
                     <ul className="mt-1 list-disc pl-5">
                       {removeResult.warnings.map((w, i) => (

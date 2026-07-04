@@ -73,7 +73,7 @@ const FEATURES: Feature[] = [
 const badgeCls = (s: Feature["status"]) =>
   s === "on"
     ? "border-secondary/20 bg-secondary/10 text-secondary"
-    : "border-amber-400/30 bg-amber-400/10 text-amber-300";
+    : "border-warn/30 bg-warn/10 text-warn";
 
 export function SecurityInfo({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
@@ -82,7 +82,7 @@ export function SecurityInfo({ open, onClose }: { open: boolean; onClose: () => 
       role="dialog"
       aria-modal="true"
       aria-label="Email security"
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-base/80 p-4"
       onClick={onClose}
     >
       <div

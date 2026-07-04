@@ -13,7 +13,7 @@ import { ExtLink, Spinner, cn } from "../ui";
 // so flipping a policy in the AWS console reflects here as soon as they switch back.
 
 const dotClass = (s: CapStatus) =>
-  s === "allowed" ? "bg-secondary" : s === "denied" ? "bg-tertiary" : "bg-amber-400";
+  s === "allowed" ? "bg-secondary" : s === "denied" ? "bg-tertiary" : "bg-warn";
 const dotLabel = (s: CapStatus) => (s === "allowed" ? "ok" : s === "denied" ? "missing" : "unknown");
 
 /** Copies a policy's JSON to the clipboard so it can be pasted into the IAM
@@ -125,7 +125,7 @@ export function CapabilityLights() {
             </li>
           ))}
           {!caps.checkable && (
-            <li className="mt-0.5 rounded-md border border-amber-400/20 bg-amber-400/5 px-2 py-1.5 text-[11px] leading-snug text-on-surface-variant">
+            <li className="mt-0.5 rounded-md border border-warn/20 bg-warn/5 px-2 py-1.5 text-[11px] leading-snug text-on-surface-variant">
               Couldn&apos;t run a live check — add the read-only{" "}
               <code className="font-mono text-on-surface">iam:SimulatePrincipalPolicy</code> action to this identity to see
               real status.

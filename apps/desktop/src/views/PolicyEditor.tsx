@@ -142,7 +142,7 @@ export function PolicyEditor({ stackName, domain, load, save }: PolicyEditorProp
           </p>
 
           {invalid.length > 0 && (
-            <div className="mt-2 text-sm text-amber-300">
+            <div className="mt-2 text-sm text-warn">
               These entries don't look like an address or domain and won't match anything:{" "}
               {invalid.map((e) => (
                 <code key={e} className="mr-2 font-mono">{e}</code>
@@ -163,7 +163,7 @@ export function PolicyEditor({ stackName, domain, load, save }: PolicyEditorProp
 
             {showAdvanced && (
               <div className="mt-2.5">
-                <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
+                <div className="rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn-bright">
                   <b>Recommended: leave these at their defaults.</b> Virus mail is quarantined and spam goes to Junk —
                   this suits almost everyone. Changing them can cause wanted mail to be hidden or lost. Only adjust these
                   if you know exactly why.

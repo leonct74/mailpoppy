@@ -106,7 +106,7 @@ function OkBadge({ children }: { children: ReactNode }) {
 
 /** A warning callout (amber). */
 function Warn({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("rounded-lg border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100", className)}>{children}</div>;
+  return <div className={cn("rounded-lg border border-warn/30 bg-warn/10 p-4 text-sm text-warn-bright", className)}>{children}</div>;
 }
 
 const permTone = (v: "ok" | "denied" | "error") =>
@@ -114,7 +114,7 @@ const permTone = (v: "ok" | "denied" | "error") =>
     ? "border-secondary/20 bg-secondary/10 text-secondary"
     : v === "denied"
       ? "border-tertiary/30 bg-tertiary-container/15 text-tertiary"
-      : "border-amber-400/30 bg-amber-400/10 text-amber-300";
+      : "border-warn/30 bg-warn/10 text-warn";
 const permIcon = (v: "ok" | "denied" | "error") => (v === "ok" ? "✓" : v === "denied" ? "⛔" : "⚠");
 
 export function SetupWizard({
@@ -607,7 +607,7 @@ export function SetupWizard({
       {/* In-app confirmation dialog (native window.confirm is unreliable in the
           Tauri webview). */}
       {confirmAction && (
-        <div role="dialog" aria-modal="true" className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-[1000] flex items-center justify-center bg-base/80 p-4">
           <div className="w-full max-w-md rounded-xl border border-outline-variant/20 bg-surface-container p-6 shadow-2xl">
             <p className="mb-5 text-sm leading-relaxed text-on-surface">{confirmAction.message}</p>
             <div className="flex justify-end gap-2">

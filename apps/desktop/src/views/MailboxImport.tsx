@@ -230,7 +230,7 @@ export function MailboxImport({
               </span>
             )}
             {plan.errorCount > 0 && (
-              <span className="text-amber-300">
+              <span className="text-warn">
                 <b>{plan.errorCount}</b> {plan.errorCount === 1 ? "row has" : "rows have"} problems and will be skipped
               </span>
             )}
@@ -262,7 +262,7 @@ export function MailboxImport({
                         </div>
                       ))}
                       {r.warnings.map((w, i) => (
-                        <div key={`w${i}`} className="text-amber-300/90">
+                        <div key={`w${i}`} className="text-warn/90">
                           • {w}
                         </div>
                       ))}
@@ -310,7 +310,7 @@ function StatusIcon({ st }: { st: RowStatus }) {
       return <Spinner aria-label="working" />;
     case "ok":
       return st.migrateError ? (
-        <AlertTriangle className="size-4 shrink-0 text-amber-300" aria-label="created, import warning" />
+        <AlertTriangle className="size-4 shrink-0 text-warn" aria-label="created, import warning" />
       ) : (
         <CheckCircle2 className="size-4 shrink-0 text-secondary" aria-label="done" />
       );
@@ -330,7 +330,7 @@ function StatusText({ st }: { st: RowStatus }) {
     case "migrating":
       return <>importing mail…</>;
     case "ok":
-      if (st.migrateError) return <span className="text-amber-300">created · mail import failed</span>;
+      if (st.migrateError) return <span className="text-warn">created · mail import failed</span>;
       if (st.imported != null) return <>{st.existed ? "already existed" : "created"} · {st.imported} imported</>;
       return <>{st.existed ? "already existed" : "created"}</>;
     case "failed":

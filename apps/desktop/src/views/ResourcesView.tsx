@@ -174,7 +174,7 @@ export function ResourcesView({
                     {g.items.map((r) => {
                       const url = awsConsoleUrl(r.type, r.physicalId, inv.region);
                       return (
-                        <tr key={r.logicalId} className="transition-colors hover:bg-white/[0.02]">
+                        <tr key={r.logicalId} className="transition-colors hover:bg-on-surface/5">
                           <Td className="break-all font-mono text-xs text-on-surface">{r.physicalId || r.logicalId}</Td>
                           <Td className="text-xs text-on-surface-variant">{r.type}</Td>
                           <Td className="text-xs text-on-surface-variant">{r.status}</Td>
@@ -223,7 +223,7 @@ export function ResourcesView({
                   const url = ledgerConsoleUrl(e);
                   const deleted = e.action === "deleted";
                   return (
-                    <tr key={`${e.ts}-${i}`} className="transition-colors hover:bg-white/[0.02]">
+                    <tr key={`${e.ts}-${i}`} className="transition-colors hover:bg-on-surface/5">
                       <Td className={cn("whitespace-nowrap text-xs text-on-surface-variant", deleted && "line-through opacity-60")}>
                         {new Date(e.ts).toLocaleString()}
                       </Td>

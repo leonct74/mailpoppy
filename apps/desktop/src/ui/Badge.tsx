@@ -7,7 +7,7 @@ type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
 const tones: Record<Tone, string> = {
   neutral: "bg-surface-container-highest text-on-surface-variant border-outline-variant/40",
   success: "bg-secondary/10 text-secondary border-secondary/30",
-  warning: "bg-amber-400/10 text-amber-300 border-amber-400/30",
+  warning: "bg-warn/10 text-warn border-warn/30",
   danger: "bg-tertiary-container/15 text-tertiary border-tertiary/30",
   info: "bg-primary/10 text-primary border-primary/30",
   brand: "bg-primary/10 text-primary border-primary/30",

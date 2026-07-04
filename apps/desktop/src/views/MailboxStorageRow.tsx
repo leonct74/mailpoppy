@@ -128,8 +128,8 @@ export function MailboxStorageRow({
 
   const pct = info ? usagePercent(info.usedBytes, info.quotaBytes) : null;
   const level = info ? usageLevel(info.usedBytes, info.quotaBytes) : "ok";
-  const barClass = level === "full" ? "bg-tertiary-container" : level === "warn" ? "bg-amber-400" : "bg-primary";
-  const textClass = level === "full" ? "text-tertiary" : level === "warn" ? "text-amber-300" : "text-primary";
+  const barClass = level === "full" ? "bg-tertiary-container" : level === "warn" ? "bg-warn" : "bg-primary";
+  const textClass = level === "full" ? "text-tertiary" : level === "warn" ? "text-warn" : "text-primary";
   const armed = confirmText.trim().toLowerCase() === CONFIRM_WORD;
 
   return (

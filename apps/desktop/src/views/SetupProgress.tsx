@@ -123,7 +123,7 @@ export function SetupProgress({ phases, reconciling }: { phases: PhaseView[]; re
               <span className="font-semibold text-on-surface">{current.label}</span>
               <span className="text-on-surface-variant"> — {current.detail}</span>
               {current.canStall && (
-                <div className="mt-1.5 inline-flex items-start gap-1 rounded border border-amber-400/30 bg-amber-400/10 px-1.5 py-1 text-[11px] leading-snug text-amber-200">
+                <div className="mt-1.5 inline-flex items-start gap-1 rounded border border-warn/30 bg-warn/10 px-1.5 py-1 text-[11px] leading-snug text-warn-bright">
                   <Clock className="mt-px size-3 shrink-0" />
                   <span>This can take a while — it runs automatically, so you can leave the app and come back.</span>
                 </div>

@@ -1,11 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import "@fontsource/hanken-grotesk/400.css";
-import "@fontsource/hanken-grotesk/500.css";
-import "@fontsource/hanken-grotesk/600.css";
-import "@fontsource/hanken-grotesk/700.css";
-import "@fontsource/jetbrains-mono/400.css";
-import "@fontsource/jetbrains-mono/500.css";
+// No webfonts — the poppy design kit's stacks are native (system sans + system
+// mono), per the AgentsPoppy design contract (extension-sdk DESIGN.md).
 import "./index.css";
 import { App } from "./App";
 

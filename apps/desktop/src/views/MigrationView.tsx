@@ -438,7 +438,7 @@ export function MigrationView({
             ) : mailboxes && mailboxes.length > 0 ? (
               <MailboxSelect value={mailbox} onChange={setMailbox} groups={mailboxesByDomain} />
             ) : (
-              <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+              <div className="rounded-lg border border-warn/30 bg-warn/10 px-4 py-3 text-sm text-warn-bright">
                 {mbNotice ?? "No mailboxes available."}
               </div>
             )}
@@ -488,7 +488,7 @@ export function MigrationView({
                 {mailbox ? (
                   <span className="font-mono text-secondary">{mailbox}</span>
                 ) : (
-                  <span className="text-amber-300">— choose a destination mailbox above</span>
+                  <span className="text-warn">— choose a destination mailbox above</span>
                 )}
               </div>
             </div>
@@ -511,7 +511,7 @@ export function MigrationView({
               </thead>
               <tbody>
                 {folders.map((f) => (
-                  <tr key={f.path} className="transition-colors hover:bg-white/[0.02]">
+                  <tr key={f.path} className="transition-colors hover:bg-on-surface/5">
                     <Td>
                       <input
                         aria-label={`Include ${f.path}`}
@@ -551,7 +551,7 @@ export function MigrationView({
             </thead>
             <tbody>
               {summary.folders.map((r) => (
-                <tr key={r.path} className="transition-colors hover:bg-white/[0.02]">
+                <tr key={r.path} className="transition-colors hover:bg-on-surface/5">
                   <Td className="font-mono text-on-surface">{r.path}</Td>
                   <Td className="font-mono text-on-surface-variant">{r.mappedFolder}</Td>
                   <Td className="text-on-surface">{r.imported}</Td>

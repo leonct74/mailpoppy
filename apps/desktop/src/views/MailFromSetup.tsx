@@ -25,7 +25,7 @@ const bannerCls: Record<Tone, string> = {
   success: "border-secondary/30 bg-secondary/10 text-secondary",
   info: "border-primary/30 bg-primary/10 text-primary",
   danger: "border-tertiary/30 bg-tertiary-container/15 text-tertiary",
-  warn: "border-amber-400/30 bg-amber-400/10 text-amber-100",
+  warn: "border-warn/30 bg-warn/10 text-warn-bright",
   neutral: "border-outline-variant/20 bg-surface-container-lowest text-on-surface-variant",
 };
 function Banner({ tone, children }: { tone: Tone; children: React.ReactNode }) {

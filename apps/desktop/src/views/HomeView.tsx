@@ -41,7 +41,7 @@ import { Card, Button, Spinner, cn } from "../ui";
 type Tone = "ok" | "warn" | "muted" | "bad";
 const TONE: Record<Tone, string> = {
   ok: "border-secondary/20 bg-secondary/10 text-secondary",
-  warn: "border-amber-400/30 bg-amber-400/10 text-amber-300",
+  warn: "border-warn/30 bg-warn/10 text-warn",
   muted: "border-outline-variant/20 bg-surface-container-highest/40 text-on-surface-variant",
   bad: "border-tertiary/30 bg-tertiary-container/15 text-tertiary",
 };
@@ -501,7 +501,7 @@ function LeftoverInfrastructureCard({
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-error/20 bg-[#1a0f14]">
+    <div className="overflow-hidden rounded-xl border border-error/20 bg-error/10">
       <button
         type="button"
         aria-label="Toggle danger zone"
@@ -564,7 +564,7 @@ function LeftoverInfrastructureCard({
                 </ul>
               )}
               {result.warnings.length > 0 && (
-                <div className="mt-2 text-sm text-amber-300">
+                <div className="mt-2 text-sm text-warn">
                   <b>Warnings:</b>
                   <ul className="mt-1 list-disc pl-5">
                     {result.warnings.map((w, i) => (

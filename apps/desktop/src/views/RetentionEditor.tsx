@@ -117,7 +117,7 @@ export function RetentionEditor({ stackName, domain, load, save }: RetentionEdit
           </div>
 
           {!keepForever && (
-            <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
+            <div className="mt-3 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn-bright">
               ⚠️ This <b>permanently deletes</b> any mail older than {Math.max(1, Math.floor(Number(retentionDays) || 0)) || "—"} days, in
               every folder, on the next daily cleanup. Make sure this matches the rules that apply to your users.
             </div>

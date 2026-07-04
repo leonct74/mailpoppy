@@ -24,13 +24,13 @@ import { friendlyError } from "../lib/errors";
 type Tone = "good" | "watch" | "action" | "neutral";
 const toneText: Record<Tone, string> = {
   good: "text-secondary",
-  watch: "text-amber-200",
+  watch: "text-warn-bright",
   action: "text-tertiary",
   neutral: "text-on-surface-variant",
 };
 const toneDot: Record<Tone, string> = {
   good: "bg-secondary",
-  watch: "bg-amber-300",
+  watch: "bg-warn",
   action: "bg-tertiary",
   neutral: "bg-outline-variant",
 };

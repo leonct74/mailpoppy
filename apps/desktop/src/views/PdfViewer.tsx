@@ -44,7 +44,7 @@ export function PdfViewer({ bytes }: { bytes: Uint8Array }) {
           canvas.height = Math.floor(viewport.height);
           canvas.style.width = `${Math.floor(viewport.width / dpr)}px`;
           canvas.style.height = `${Math.floor(viewport.height / dpr)}px`;
-          canvas.className = "mx-auto mb-3 block rounded bg-white shadow-lg";
+          canvas.className = "mx-auto mb-3 block rounded bg-paper shadow-lg";
           host.appendChild(canvas);
           await page.render({ canvas, viewport }).promise;
         }

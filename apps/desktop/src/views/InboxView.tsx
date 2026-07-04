@@ -528,7 +528,7 @@ export function InboxView({
             >
               <div className="mb-1 flex items-baseline justify-between gap-2">
                 <span className={cn("flex items-center gap-1 truncate", unread ? "font-bold text-on-surface" : "text-on-surface-variant")}>
-                  {m.flags.starred && <Star className="size-3.5 shrink-0 fill-amber-300 text-amber-300" />}
+                  {m.flags.starred && <Star className="size-3.5 shrink-0 fill-warn text-warn" />}
                   {fromLabel(m)}
                 </span>
                 <span className={cn("shrink-0 whitespace-nowrap font-mono text-xs", unread ? "text-primary" : "text-on-surface-variant")}>
@@ -624,7 +624,7 @@ export function InboxView({
       )}
 
       {attachmentLink && (
-        <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100">
+        <div className="mt-3 rounded-lg border border-warn/30 bg-warn/10 p-3 text-sm text-warn-bright">
           <div>
             Couldn’t open <strong>{attachmentLink.filename}</strong> automatically. Click below, or copy this link into
             your browser to download it (the link is valid for 5 minutes):
@@ -692,7 +692,7 @@ export function InboxView({
   // Floating "scanned & verified" reassurance (wide layout only).
   const footerBadge = (
     <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
-      <div className="flex items-center gap-2 rounded-full border border-outline-variant/20 bg-surface-container/80 px-3 py-1.5 backdrop-blur">
+      <div className="flex items-center gap-2 rounded-full border border-outline-variant/20 bg-surface-container/80 px-3 py-1.5">
         <ShieldCheck className="size-3.5 text-secondary" />
         <span className="font-mono text-[11px] text-on-surface-variant">Incoming mail scanned &amp; verified by AWS SES</span>
       </div>
@@ -702,7 +702,7 @@ export function InboxView({
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-4">
       {demo && (
-        <div className="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-4 py-2.5 text-sm text-amber-200">
+        <div className="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-warn/30 bg-warn/10 px-4 py-2.5 text-sm text-warn-bright">
           <span>
             🧪 <strong className="font-semibold">Demo data</strong> — not connected to a live mailbox.
           </span>
@@ -982,7 +982,7 @@ function AttachmentPreview({
     <div
       role="dialog"
       aria-label={`Preview: ${name}`}
-      className="fixed inset-0 z-50 flex flex-col bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex flex-col bg-base/90"
       onClick={onClose}
     >
       <div
@@ -1019,8 +1019,8 @@ function AttachmentPreview({
 function StorageMeter({ usage }: { usage: MailboxUsage }) {
   const pct = usagePercent(usage.usedBytes, usage.quotaBytes);
   const level = usageLevel(usage.usedBytes, usage.quotaBytes);
-  const barClass = level === "full" ? "bg-tertiary-container" : level === "warn" ? "bg-amber-400" : "bg-primary";
-  const textClass = level === "full" ? "text-tertiary" : level === "warn" ? "text-amber-300" : "text-primary";
+  const barClass = level === "full" ? "bg-tertiary-container" : level === "warn" ? "bg-warn" : "bg-primary";
+  const textClass = level === "full" ? "text-tertiary" : level === "warn" ? "text-warn" : "text-primary";
   return (
     <div aria-label="Mailbox storage" className="mt-auto px-2 pt-4 text-xs text-on-surface-variant">
       {usage.quotaBytes && pct !== null ? (
@@ -1036,7 +1036,7 @@ function StorageMeter({ usage }: { usage: MailboxUsage }) {
             {formatBytes(usage.usedBytes)} of {formatBytes(usage.quotaBytes)}
           </div>
           {level === "full" && <div className="mt-0.5 text-tertiary">Full — new mail is bounced.</div>}
-          {level === "warn" && <div className="mt-0.5 text-amber-300">Almost full.</div>}
+          {level === "warn" && <div className="mt-0.5 text-warn">Almost full.</div>}
         </>
       ) : (
         <div>Storage: {formatBytes(usage.usedBytes)} used</div>
@@ -1083,7 +1083,7 @@ function MessageBody({
       ) : sanitized ? (
         <>
           {sanitized.blockedRemote && !allowImages && (
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-1.5 text-sm text-amber-100">
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-warn/30 bg-warn/10 px-3 py-1.5 text-sm text-warn-bright">
               <span className="inline-flex items-center gap-2">
                 <ImageOff className="size-4" /> Remote images blocked to protect your privacy.
               </span>
@@ -1094,7 +1094,7 @@ function MessageBody({
           )}
           {/* Safe: HTML is sanitized by DOMPurify (lib/mailBody.ts) before it reaches the DOM. */}
           <div
-            className="mt-2 overflow-x-auto rounded-lg border border-outline-variant/10 bg-white p-3 text-slate-800"
+            className="mt-2 overflow-x-auto rounded-lg border border-outline-variant/10 bg-paper p-3 text-on-paper"
             dangerouslySetInnerHTML={{ __html: sanitized.clean }}
           />
         </>
@@ -1182,7 +1182,7 @@ function ComposeDialog({
     <div
       role="dialog"
       aria-label="Compose message"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-base/80 p-4"
     >
       <div className="w-[480px] max-w-[90vw] rounded-xl border border-outline-variant/20 bg-surface-container p-6 shadow-2xl">
         <h3 className="mb-3 text-lg font-semibold text-on-surface">{init.inReplyTo ? "Reply" : "New message"}</h3>
@@ -1220,7 +1220,7 @@ function ComposeDialog({
         {preview ? (
           <div
             aria-label="Preview"
-            className="min-h-[120px] rounded-lg border border-outline-variant/30 bg-white p-2 text-slate-800"
+            className="min-h-[120px] rounded-lg border border-outline-variant/30 bg-paper p-2 text-on-paper"
             dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
           />
         ) : (
