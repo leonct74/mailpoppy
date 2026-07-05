@@ -39,19 +39,27 @@ export class ResolveError extends Error {
 }
 
 function resolveErrorMessage(code: ResolveErrorCode, domain: string): string {
+  // Both branches state that the domain needs an active plan and that the person who
+  // manages its email turns it on — but NEITHER names or links an external place to buy
+  // (Apple anti-steering, guideline 3.1.1). The admin who pays already knows where; a
+  // tappable "Manage plan" link can be added post-review if wanted.
   if (code === "inactive_subscription") {
-    // Deliberately does NOT name or link an external purchase page (Apple anti-steering
-    // 3.1.1). It states a plan is needed and who to ask — the admin who buys already
-    // knows where. A tappable "Manage plan" link can be added post-review if wanted.
+    // The domain IS registered with the Hub, but its plan isn't active.
     return (
-      `The MailPoppy mobile app isn't turned on for @${domain} yet — this domain needs ` +
-      `an active plan. Ask whoever looks after email for ${domain} to switch it on, then ` +
-      `you can sign in here.`
+      `The MailPoppy app isn't turned on for @${domain} yet — this domain needs an ` +
+      `active plan. Ask whoever manages email for ${domain} to switch it on, then you ` +
+      `can sign in here.`
     );
   }
+  // unknown_domain: the domain isn't set up with MailPoppy at all. A domain only becomes
+  // "known" to the Hub once its admin activates a plan for it, so MOST not-yet-activated
+  // domains land here (not on the 403 above) — lead with the plan message so the user
+  // understands what's needed. Keep a typo fallback, since a mistyped or non-MailPoppy
+  // address lands here too.
   return (
-    `We couldn't find MailPoppy set up for @${domain}. ` +
-    `Double-check the address, or ask whoever looks after your email.`
+    `MailPoppy isn't set up for @${domain} yet. To use the app on this domain it needs an ` +
+    `active plan — ask whoever manages email for ${domain} to turn it on. ` +
+    `(If that's not what you expected, double-check your email address for a typo.)`
   );
 }
 
