@@ -1,18 +1,35 @@
 "use client";
 
-// The admin billing dashboard. Sign in with a MailPoppy account (Firebase email/password),
-// see the domains you own, and turn the mobile client on/off per domain. Activation goes
-// through Stripe (Checkout for your first domain, then add-on for the rest); "Manage billing"
-// opens the Stripe portal. All data comes from /api/account; actions hit the account routes.
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+// The admin billing dashboard. Sign in with a MailPoppy account (email/password or Google),
+// see the domains you own and their live subscription status, and turn the apps on/off per
+// domain. Activation goes through Stripe; "Manage billing" opens the Stripe portal.
+//
+// State comes from /api/account, but a completed first-domain payment only flips mobileActive
+// via the Stripe webhook — so after checkout (and on a manual "Sync"), we call
+// /api/account/reconcile, which pulls the truth straight from Stripe. That makes the dashboard
+// self-healing even if the webhook is slow, unregistered, or failed.
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  GoogleAuthProvider,
   signOut,
   onAuthStateChanged,
   type User,
 } from "firebase/auth";
 import { getClientAuth } from "@/lib/hub/firebaseClient";
+import { Logo } from "@/components/webmail/Logo";
+import {
+  DevicesIcon,
+  GlobeIcon,
+  CheckCircleIcon,
+  ShieldIcon,
+  ArrowRightIcon,
+  ClockIcon,
+} from "@/components/webmail/icons";
 
 interface DomainRow {
   domain: string;
@@ -30,6 +47,14 @@ interface AccountData {
 function friendlyAuthError(e: unknown): string {
   const code = (e as { code?: string })?.code ?? "";
   switch (code) {
+    case "auth/popup-closed-by-user":
+    case "auth/cancelled-popup-request":
+    case "auth/user-cancelled":
+      return "";
+    case "auth/popup-blocked":
+      return "Your browser blocked the sign-in popup. Allow popups for this site and try again.";
+    case "auth/account-exists-with-different-credential":
+      return "You already have an account with this email — sign in with your email and password.";
     case "auth/invalid-credential":
     case "auth/wrong-password":
     case "auth/user-not-found":
@@ -48,6 +73,36 @@ function friendlyAuthError(e: unknown): string {
   }
 }
 
+const fmtDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+
+/** The account's plan standing, reduced to one banner (tone drives the colour). */
+function planSummary(d: AccountData | null): { tone: "on" | "warn" | "off"; title: string; sub: string } {
+  const status = d?.subscriptionStatus ?? "none";
+  if (d?.cancelAt) {
+    return { tone: "warn", title: "Scheduled to cancel", sub: `Access stays on until ${fmtDate(d.cancelAt)}.` };
+  }
+  switch (status) {
+    case "active":
+      return {
+        tone: "on",
+        title: "Subscription active",
+        sub: d?.currentPeriodEnd ? `Renews automatically on ${fmtDate(d.currentPeriodEnd)}.` : "Your plan is live.",
+      };
+    case "trialing":
+      return {
+        tone: "on",
+        title: "Trial active",
+        sub: d?.currentPeriodEnd ? `Your trial runs until ${fmtDate(d.currentPeriodEnd)}.` : "Your trial is live.",
+      };
+    case "past_due":
+      return { tone: "warn", title: "Payment past due", sub: "Update your card in “Manage billing” to keep access." };
+    case "canceled":
+      return { tone: "off", title: "Subscription ended", sub: "Activate a domain below to start again." };
+    default:
+      return { tone: "off", title: "No active plan yet", sub: "Activate a domain below to switch on the apps." };
+  }
+}
+
 export default function AccountPage() {
   const auth = getClientAuth();
   const [user, setUser] = useState<User | null>(null);
@@ -55,6 +110,7 @@ export default function AccountPage() {
 
   const [data, setData] = useState<AccountData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -65,6 +121,7 @@ export default function AccountPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const [justActivated, setJustActivated] = useState<string | null>(null);
+  const reconciledRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!auth) {
@@ -74,6 +131,15 @@ export default function AccountPage() {
     return onAuthStateChanged(auth, (u) => {
       setUser(u);
       setAuthReady(true);
+    });
+  }, [auth]);
+
+  // Surface a Google redirect-fallback error (unauthorised domain / provider disabled) if any.
+  useEffect(() => {
+    if (!auth) return;
+    getRedirectResult(auth).catch((err) => {
+      const msg = friendlyAuthError(err);
+      if (msg) setFormErr(msg);
     });
   }, [auth]);
 
@@ -105,10 +171,47 @@ export default function AccountPage() {
     }
   }, [auth]);
 
+  // Pull the true state from Stripe and write it through, so a completed payment shows up even
+  // when the webhook hasn't. Falls back to a plain load if reconcile itself fails.
+  const reconcile = useCallback(
+    async (domain?: string) => {
+      const u = auth?.currentUser;
+      if (!u) return;
+      setSyncing(true);
+      setError(null);
+      try {
+        const token = await u.getIdToken();
+        const res = await fetch("/api/account/reconcile", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: domain ? JSON.stringify({ domain }) : undefined,
+        });
+        const j = (await res.json().catch(() => ({}))) as AccountData & { error?: string };
+        if (!res.ok) throw new Error(j.error ?? `HTTP ${res.status}`);
+        setData(j);
+      } catch {
+        await load(); // never leave the dashboard blank because a sync hiccuped
+      } finally {
+        setSyncing(false);
+      }
+    },
+    [auth, load],
+  );
+
+  // After checkout we land with ?activated=<domain>; reconcile that domain once, otherwise just
+  // load. onAuthStateChanged drives this when the user resolves.
   useEffect(() => {
-    if (user) void load();
-    else setData(null);
-  }, [user, load]);
+    if (!user) {
+      setData(null);
+      return;
+    }
+    if (justActivated && reconciledRef.current !== justActivated) {
+      reconciledRef.current = justActivated;
+      void reconcile(justActivated);
+    } else if (!justActivated) {
+      void load();
+    }
+  }, [user, justActivated, reconcile, load]);
 
   async function submitLogin(e: FormEvent) {
     e.preventDefault();
@@ -120,6 +223,30 @@ export default function AccountPage() {
       else await createUserWithEmailAndPassword(auth, email.trim(), password);
     } catch (err) {
       setFormErr(friendlyAuthError(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function signInWithGoogle() {
+    if (!auth) return;
+    setSubmitting(true);
+    setFormErr(null);
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (err) {
+      const code = (err as { code?: string })?.code ?? "";
+      if (code === "auth/popup-blocked" || code === "auth/operation-not-supported-in-this-environment") {
+        try {
+          await signInWithRedirect(auth, provider);
+          return;
+        } catch (e2) {
+          setFormErr(friendlyAuthError(e2));
+        }
+      } else {
+        setFormErr(friendlyAuthError(err));
+      }
     } finally {
       setSubmitting(false);
     }
@@ -153,9 +280,6 @@ export default function AccountPage() {
 
   // --- render -------------------------------------------------------------
 
-  // `authReady` is false on the server and on the client's first paint, so both render the same
-  // "Loading…" shell — no hydration mismatch. It flips true once onAuthStateChanged fires (or
-  // immediately if Firebase isn't configured).
   if (!authReady) {
     return (
       <Shell>
@@ -167,7 +291,8 @@ export default function AccountPage() {
   if (!auth) {
     return (
       <Shell>
-        <p className="text-dim">
+        <Logo size="sm" />
+        <p className="text-dim mt-8">
           Sign-in isn&apos;t configured yet. Set the <code>NEXT_PUBLIC_FIREBASE_*</code> values and rebuild.
         </p>
       </Shell>
@@ -177,88 +302,141 @@ export default function AccountPage() {
   if (!user) {
     return (
       <Shell>
-        <h1 className="text-heading text-2xl font-bold">Your MailPoppy account</h1>
-        <p className="text-dim mt-1">Sign in to turn the mobile app on for your domains.</p>
-        <form onSubmit={submitLogin} className="border-hairline bg-surface mt-6 space-y-3 rounded-2xl border p-5">
-          <input
-            type="email"
-            required
-            autoComplete="email"
-            placeholder="you@yourdomain.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="bg-surface-high border-hairline w-full rounded-lg border px-3 py-2 outline-none focus:border-primary"
-          />
-          <input
-            type="password"
-            required
-            autoComplete={mode === "signin" ? "current-password" : "new-password"}
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="bg-surface-high border-hairline w-full rounded-lg border px-3 py-2 outline-none focus:border-primary"
-          />
-          {formErr && <p className="text-danger text-sm">{formErr}</p>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="bg-primary text-primary-text w-full rounded-lg py-2 font-semibold disabled:opacity-60"
-          >
-            {submitting ? "…" : mode === "signin" ? "Sign in" : "Create account"}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMode(mode === "signin" ? "signup" : "signin");
-              setFormErr(null);
-            }}
-            className="text-dim hover:text-text w-full text-sm"
-          >
-            {mode === "signin" ? "Need an account? Create one" : "Already have an account? Sign in"}
-          </button>
-        </form>
+        <Logo size="sm" />
+        <div className="mt-10 max-w-sm">
+          <h1 className="text-heading text-3xl font-bold tracking-tight">Your MailPoppy account</h1>
+          <p className="text-muted mt-2">Sign in to manage the apps for your domains.</p>
+          <div className="border-hairline bg-surface mt-6 space-y-4 rounded-2xl border p-5">
+            <button
+              type="button"
+              onClick={() => void signInWithGoogle()}
+              disabled={submitting}
+              className="border-hairline bg-surface-high text-text hover:bg-surface-variant flex w-full items-center justify-center gap-2.5 rounded-xl border px-4 py-2.5 text-sm font-semibold transition-colors disabled:opacity-60"
+            >
+              <GoogleGlyph />
+              Continue with Google
+            </button>
+            <div className="flex items-center gap-3">
+              <span className="border-hairline h-px flex-1 border-t" />
+              <span className="text-dim text-xs font-medium">or with email</span>
+              <span className="border-hairline h-px flex-1 border-t" />
+            </div>
+            <form onSubmit={submitLogin} className="space-y-3">
+              <input
+                type="email"
+                required
+                autoComplete="email"
+                placeholder="you@yourdomain.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="bg-surface-high border-hairline focus:border-primary w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
+              />
+              <input
+                type="password"
+                required
+                autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="bg-surface-high border-hairline focus:border-primary w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
+              />
+              {formErr && <p className="text-danger text-sm">{formErr}</p>}
+              <button
+                type="submit"
+                disabled={submitting}
+                className="bg-primary text-primary-text w-full rounded-xl py-2.5 text-sm font-bold tracking-wide transition-opacity hover:opacity-90 disabled:opacity-60"
+              >
+                {submitting ? "…" : mode === "signin" ? "Sign in" : "Create account"}
+              </button>
+            </form>
+            <button
+              type="button"
+              onClick={() => {
+                setMode(mode === "signin" ? "signup" : "signin");
+                setFormErr(null);
+              }}
+              className="text-dim hover:text-text w-full text-center text-sm"
+            >
+              {mode === "signin" ? "Need an account? Create one" : "Already have an account? Sign in"}
+            </button>
+          </div>
+        </div>
       </Shell>
     );
   }
 
   const status = data?.subscriptionStatus ?? "none";
+  const plan = planSummary(data);
+  const planTone =
+    plan.tone === "on"
+      ? "border-primary/30 bg-primary/[0.07]"
+      : plan.tone === "warn"
+        ? "border-danger/30 bg-danger/[0.06]"
+        : "border-hairline bg-surface";
+  const activeCount = data?.domains.filter((d) => d.mobileActive).length ?? 0;
+
   return (
     <Shell>
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-heading text-2xl font-bold">Mobile access</h1>
-          <p className="text-dim mt-1 text-sm">{user.email}</p>
+          <Logo size="sm" />
+          <h1 className="text-heading mt-4 text-3xl font-bold tracking-tight">Mobile &amp; web access</h1>
+          <p className="text-dim mt-1 text-sm">{data?.email || user.email}</p>
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={() => void reconcile()}
+            disabled={syncing}
+            className="border-hairline text-muted hover:bg-surface-variant hover:text-text rounded-lg border px-3 py-1.5 text-sm transition-colors disabled:opacity-60"
+            title="Pull the latest status from Stripe"
+          >
+            {syncing ? "Syncing…" : "Sync status"}
+          </button>
           {status !== "none" && (
             <button
               onClick={() => act("/api/account/portal")}
               disabled={busy === "portal"}
-              className="border-hairline text-text hover:bg-surface-variant rounded-lg border px-3 py-1.5 text-sm disabled:opacity-60"
+              className="border-hairline text-text hover:bg-surface-variant rounded-lg border px-3 py-1.5 text-sm transition-colors disabled:opacity-60"
             >
               {busy === "portal" ? "…" : "Manage billing"}
             </button>
           )}
-          <button
-            onClick={() => signOut(auth)}
-            className="text-dim hover:text-text rounded-lg px-3 py-1.5 text-sm"
-          >
+          <button onClick={() => signOut(auth)} className="text-dim hover:text-text rounded-lg px-3 py-1.5 text-sm">
             Sign out
           </button>
         </div>
       </div>
 
+      {/* Plan status banner */}
+      <div className={`mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border p-5 ${planTone}`}>
+        <div className="flex items-start gap-3">
+          <span className={plan.tone === "warn" ? "text-danger" : plan.tone === "on" ? "text-primary" : "text-dim"}>
+            {plan.tone === "warn" ? <ClockIcon size={22} /> : <ShieldIcon size={22} />}
+          </span>
+          <div>
+            <div className="text-text font-bold">{plan.title}</div>
+            <div className="text-muted mt-0.5 text-sm">{plan.sub}</div>
+          </div>
+        </div>
+        {(status === "active" || status === "trialing") && (
+          <span className="text-muted text-sm">
+            {activeCount} {activeCount === 1 ? "domain" : "domains"} on
+          </span>
+        )}
+      </div>
+
       {justActivated && (
-        <p className="border-hairline bg-surface text-text mt-4 rounded-xl border p-3 text-sm">
-          ✓ Payment received — turning on <b>{justActivated}</b>. If it&apos;s not on below yet, give it a few
-          seconds and refresh.
+        <p className="border-primary/30 bg-primary/[0.07] text-text mt-4 flex items-center gap-2 rounded-xl border p-3 text-sm">
+          <span className="text-primary">
+            <CheckCircleIcon size={16} />
+          </span>
+          Payment received — confirming <b>{justActivated}</b>{syncing ? "…" : ". It should be on below now."}
         </p>
       )}
       {data?.cancelAt && (
-        <div className="border-hairline bg-surface mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 text-sm">
+        <div className="border-danger/30 bg-danger/[0.06] mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 text-sm">
           <span className="text-text">
-            Your subscription will cancel on <b>{new Date(data.cancelAt).toLocaleDateString()}</b> — access stays
-            on until then.
+            Your subscription will cancel on <b>{fmtDate(data.cancelAt)}</b> — access stays on until then.
           </span>
           <button
             onClick={() => act("/api/account/resume")}
@@ -272,29 +450,38 @@ export default function AccountPage() {
 
       {error && <p className="text-danger mt-4 text-sm">{error}</p>}
 
-      <div className="mt-6 space-y-2">
+      {/* Domains */}
+      <h2 className="text-heading mt-8 text-sm font-bold tracking-wide uppercase">Your domains</h2>
+      <div className="mt-3 space-y-2.5">
         {loading && !data && <p className="text-dim">Loading…</p>}
         {data && data.domains.length === 0 && (
-          <p className="text-dim border-hairline bg-surface rounded-2xl border p-5">
-            No domains yet. Set up a domain in the MailPoppy desktop app first, then come back here to turn on
-            the mobile client for it.
-          </p>
+          <div className="border-hairline bg-surface text-muted rounded-2xl border p-6 text-sm leading-relaxed">
+            No domains yet. Set up a domain in the <b className="text-text">MailPoppy desktop app</b> first, then come
+            back here to switch on the apps for it.
+          </div>
         )}
         {data?.domains.map((d) => (
           <div
             key={d.domain}
-            className="border-hairline bg-surface flex items-center justify-between gap-4 rounded-xl border p-4"
+            className="border-hairline bg-surface flex flex-wrap items-center justify-between gap-4 rounded-2xl border p-5"
           >
-            <div>
-              <div className="text-text font-semibold">{d.domain}</div>
-              <div className="text-dim text-xs">
-                {d.mobileActive ? "Mobile client on for everyone in this domain" : "Mobile client off"}
+            <div className="flex items-start gap-3">
+              <span className={`mt-0.5 ${d.mobileActive ? "text-primary" : "text-dim"}`}>
+                <GlobeIcon size={20} />
+              </span>
+              <div>
+                <div className="text-text font-semibold">{d.domain}</div>
+                <div className="text-dim text-xs">
+                  {d.mobileActive
+                    ? "Everyone with a mailbox here can use the mobile & web apps"
+                    : "The apps are off for this domain"}
+                </div>
               </div>
             </div>
             {d.mobileActive ? (
               <div className="flex items-center gap-3">
-                <span className="rounded-full bg-primary/15 text-primary px-2.5 py-1 text-xs font-semibold">
-                  Active
+                <span className="bg-primary/15 text-primary inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold">
+                  <CheckCircleIcon size={13} /> Active
                 </span>
                 <button
                   onClick={() => act("/api/account/deactivate", d.domain)}
@@ -308,18 +495,56 @@ export default function AccountPage() {
               <button
                 onClick={() => act("/api/account/checkout", d.domain)}
                 disabled={busy === d.domain}
-                className="bg-primary text-primary-text rounded-lg px-3 py-1.5 text-sm font-semibold disabled:opacity-60"
+                className="bg-primary text-primary-text inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold tracking-wide transition-opacity hover:opacity-90 disabled:opacity-60"
               >
-                {busy === d.domain ? "…" : "Activate mobile"}
+                {busy === d.domain ? "…" : "Activate"}
+                {busy !== d.domain && <ArrowRightIcon size={15} />}
               </button>
             )}
           </div>
         ))}
       </div>
+
+      <p className="text-dim mt-6 flex items-center gap-1.5 text-xs">
+        <DevicesIcon size={13} />
+        Paid once per domain — everyone with a mailbox on an active domain signs in on iPhone, Android and the web.
+      </p>
     </Shell>
   );
 }
 
+/** The multi-colour Google "G" (inlined so we ship no external asset). */
+function GoogleGlyph() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 48 48" aria-hidden>
+      <path
+        fill="#FFC107"
+        d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.3-.4-3.5z"
+      />
+      <path
+        fill="#FF3D00"
+        d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"
+      />
+      <path
+        fill="#4CAF50"
+        d="M24 44c5.5 0 10.5-2.1 14.3-5.5l-6.6-5.6C29.6 34.6 26.9 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.6 39.6 16.2 44 24 44z"
+      />
+      <path
+        fill="#1976D2"
+        d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.1-4 5.5l6.6 5.6C41.9 35.9 44 30.5 44 24c0-1.3-.1-2.3-.4-3.5z"
+      />
+    </svg>
+  );
+}
+
 function Shell({ children }: { children: React.ReactNode }) {
-  return <main className="mx-auto w-full max-w-2xl px-5 py-12">{children}</main>;
+  return (
+    <main className="bg-bg text-text relative min-h-screen overflow-hidden">
+      <div
+        aria-hidden
+        className="bg-primary-bright pointer-events-none absolute -top-40 left-1/2 h-[26rem] w-[26rem] -translate-x-1/2 rounded-full opacity-[0.07] blur-3xl"
+      />
+      <div className="relative mx-auto w-full max-w-2xl px-5 py-12 sm:py-16">{children}</div>
+    </main>
+  );
 }
