@@ -19,6 +19,16 @@ interface HostRequest {
 type HostResponse = { id: string; ok: true; result: unknown } | { id: string; ok: false; error: string };
 
 /**
+ * An UNSOLICITED message the host pushes to this frame (not a reply to a request). The
+ * host sends one when something about our connection changed out from under us — e.g.
+ * the operator tore the backend down from the AgentsPoppy console — so we can refresh
+ * instead of showing a footprint that no longer exists. Distinguished from a
+ * HostResponse by the `hostEvent` discriminator (a response has `id`+`ok`; an event has
+ * neither). Mirrors `HostEvent` in @agentspoppy/extension-sdk.
+ */
+export type HostEvent = { hostEvent: "connection-changed"; connectionId?: string; reason?: string };
+
+/**
  * True when MailPoppy is running inside the AgentsPoppy container (an iframe) rather
  * than as the standalone top-level Tauri window. A cross-origin access throw also
  * means we're framed, so treat it as container mode.
@@ -38,20 +48,40 @@ const BRIDGE_TIMEOUT_MS = 15 * 60 * 1000;
 let seq = 0;
 let wired = false;
 const pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+const eventListeners = new Set<(e: HostEvent) => void>();
 
 function ensureWired(): void {
   if (wired) return;
   wired = true;
   window.addEventListener("message", (e: MessageEvent) => {
-    const res = e.data as Partial<HostResponse> | null;
-    if (!res || typeof res.id !== "string" || typeof (res as HostResponse).ok !== "boolean") return;
-    const p = pending.get(res.id);
+    const data = e.data as (Partial<HostResponse> & Partial<HostEvent>) | null;
+    if (!data) return;
+    // Host push event (unsolicited) — fan out to subscribers, never a pending request.
+    if (typeof data.hostEvent === "string") {
+      const evt = data as HostEvent;
+      for (const cb of [...eventListeners]) cb(evt);
+      return;
+    }
+    // Otherwise it's a reply to one of our requests.
+    if (typeof data.id !== "string" || typeof (data as HostResponse).ok !== "boolean") return;
+    const p = pending.get(data.id);
     if (!p) return; // unknown / duplicate correlation id
-    pending.delete(res.id);
+    pending.delete(data.id);
     clearTimeout(p.timer);
-    if ((res as { ok: boolean }).ok) p.resolve((res as { result: unknown }).result);
-    else p.reject(new Error((res as { error: string }).error));
+    if ((data as { ok: boolean }).ok) p.resolve((data as { result: unknown }).result);
+    else p.reject(new Error((data as { error: string }).error));
   });
+}
+
+/**
+ * Subscribe to unsolicited {@link HostEvent}s the AgentsPoppy host pushes (e.g. our
+ * backend was torn down from the console). Returns an unsubscribe fn. Standalone (no
+ * host), this simply never fires — safe to call unconditionally.
+ */
+export function onHostEvent(handler: (e: HostEvent) => void): () => void {
+  ensureWired();
+  eventListeners.add(handler);
+  return () => eventListeners.delete(handler);
 }
 
 function callHost<T>(method: string, params: unknown[]): Promise<T> {

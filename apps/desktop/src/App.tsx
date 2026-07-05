@@ -24,6 +24,7 @@ import {
   type AccountsState,
 } from "./lib/accounts";
 import { cn, Logo, Spinner } from "./ui";
+import { onHostEvent } from "./lib/hostBridge";
 import { restoreStartupRegion, savedRegion } from "./lib/region";
 import { autoDiscoverRegion } from "./lib/discovery";
 import {
@@ -311,6 +312,9 @@ export function App() {
   // deployed elsewhere looks missing until you detour through the region picker. Gate
   // the Home overview on it so the first load already queries the right region.
   const [regionReady, setRegionReady] = useState(false);
+  // Bumped to remount the whole content subtree so every view re-fetches. Used when the
+  // AgentsPoppy host tells us our backend changed under us (see the host-event effect).
+  const [reloadNonce, setReloadNonce] = useState(0);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -329,6 +333,30 @@ export function App() {
     return () => {
       cancelled = true;
     };
+  }, []);
+  // When the operator tears our backend down from the AgentsPoppy console, this frame
+  // stays alive but every view's loaded data (domains, resources, mailboxes) is now
+  // stale. The host pushes `connection-changed`; drop any domain/setup drill-in (its
+  // target may no longer exist) back to the overview and remount the content subtree so
+  // each view re-fetches — no manual "Refresh" needed.
+  useEffect(() => {
+    return onHostEvent((e) => {
+      if (e.hostEvent !== "connection-changed") return;
+      // A teardown deletes the whole backend our local session points at (the Cognito
+      // pool, API and stack). Clear the now-invalid local footprint FIRST so the
+      // remounted Inbox doesn't read a stale deployment config and render a phantom
+      // "Connected" state (login/list would then fail against the deleted pool); with
+      // storage cleared it re-probes and honestly falls to demo + Connect, matching Home.
+      if (e.reason === "teardown") {
+        clearDeploymentConfig();
+        clearMailboxKeySession();
+        clearMailCaches();
+        saveAccounts({ accounts: [], activeEmail: null });
+      }
+      setSelectedDomain(null);
+      setSetupTarget(null);
+      setReloadNonce((n) => n + 1);
+    });
   }, []);
   function go(id: Tab) {
     setTab(id);
@@ -386,9 +414,10 @@ export function App() {
           })}
         </nav>
       </header>
-      <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <main key={reloadNonce} className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {/* Views stay mounted after first visit (only the active one is shown)
-              so form data + scroll position survive tab switches. */}
+              so form data + scroll position survive tab switches. A bump to
+              `reloadNonce` (host teardown) remounts this subtree so every view refetches. */}
           {visited.has("inbox") && (
             // The mailbox is a full-bleed three-pane layout that fills the
             // viewport (its panes scroll internally — this container does not).

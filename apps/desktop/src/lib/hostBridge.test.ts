@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { invokeBackend } from "./hostBridge";
+import { invokeBackend, onHostEvent } from "./hostBridge";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -34,5 +34,26 @@ describe("hostBridge guest", () => {
   it("rejects with the host's error string on failure", async () => {
     fakeHost(() => "backend 404: {\"error\":\"nope\"}", false);
     await expect(invokeBackend({ method: "GET", path: "/x" })).rejects.toThrow(/backend 404/);
+  });
+
+  it("delivers an unsolicited host event to subscribers, and unsubscribe stops it", () => {
+    const seen: unknown[] = [];
+    const off = onHostEvent((e) => seen.push(e));
+    window.dispatchEvent(
+      new MessageEvent("message", { data: { hostEvent: "connection-changed", connectionId: "c1", reason: "teardown" } }),
+    );
+    expect(seen).toEqual([{ hostEvent: "connection-changed", connectionId: "c1", reason: "teardown" }]);
+    off();
+    window.dispatchEvent(new MessageEvent("message", { data: { hostEvent: "connection-changed" } }));
+    expect(seen).toHaveLength(1); // no further deliveries after unsubscribe
+  });
+
+  it("does not mistake a request response for a host event", () => {
+    const seen: unknown[] = [];
+    const off = onHostEvent((e) => seen.push(e));
+    // A HostResponse (has id+ok, no hostEvent) must not reach event subscribers.
+    window.dispatchEvent(new MessageEvent("message", { data: { id: "r1", ok: true, result: {} } }));
+    expect(seen).toHaveLength(0);
+    off();
   });
 });
