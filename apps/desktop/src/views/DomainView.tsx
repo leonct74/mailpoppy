@@ -443,7 +443,10 @@ export function DomainView({
               <input
                 aria-label={`New mailbox name on ${domain}`}
                 value={localPart}
-                onChange={(e) => setLocalPart(e.target.value.trim().toLowerCase())}
+                // Keep only the local part: if someone types a full address out of
+                // habit (the domain is already the fixed suffix), drop everything
+                // from "@" on so we never build "you@d.com@d.com".
+                onChange={(e) => setLocalPart(e.target.value.trim().toLowerCase().replace(/@.*$/, ""))}
                 placeholder="you"
                 className={cn(inputCls, "w-40 rounded-r-none")}
                 {...noAutoCap}

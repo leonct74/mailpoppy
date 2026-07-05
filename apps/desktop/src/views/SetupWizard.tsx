@@ -178,7 +178,10 @@ export function SetupWizard({
   // Mailboxes. The backend's stack name is resolved (one backend per install),
   // not typed — there's no editable stack-name field anymore.
   const stackName = resolveStackName();
-  const [mbEmail, setMbEmail] = useState("");
+  // The first mailbox is always on the domain just set up, so we collect only the
+  // local part and append "@domain" — the user can't misspell the domain, and
+  // doesn't retype what they already entered above (mirrors DomainView).
+  const [mbLocalPart, setMbLocalPart] = useState("");
   const [mbPassword, setMbPassword] = useState("");
   const [mailboxes, setMailboxes] = useState<Mailbox[] | null>(null);
   const [mbBackend, setMbBackend] = useState<BackendInfo | null>(null);
@@ -584,12 +587,16 @@ export function SetupWizard({
   }, [step]);
 
   async function createMb() {
+    const local = mbLocalPart.trim().toLowerCase();
+    if (!local || !mbPassword) return;
+    const email = `${local}@${domain}`;
     setMbBusy(true);
     setMbError(null);
     setMbCreated(null);
     try {
-      const res = await createMailbox({ email: mbEmail, password: mbPassword, stackName });
+      const res = await createMailbox({ email, password: mbPassword, stackName });
       setMbCreated(res.mailbox.email);
+      setMbLocalPart("");
       setMbPassword("");
       // Persist the backend config so the Inbox tab is ready to sign in.
       if (res.apiBaseUrl && res.userPoolId && res.clientId) {
@@ -1031,15 +1038,23 @@ export function SetupWizard({
               <div className="mt-4 flex flex-wrap items-end gap-3">
                 <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
                   Email address
-                  <input
-                    aria-label="Mailbox email"
-                    name="new-mailbox-address"
-                    value={mbEmail}
-                    onChange={(e) => setMbEmail(e.target.value.trim().toLowerCase())}
-                    placeholder="you@yourdomain.com"
-                    className={cn(inputCls, "w-64")}
-                    {...noAutoCap}
-                  />
+                  <span className="flex items-stretch">
+                    <input
+                      aria-label="Mailbox email"
+                      name="new-mailbox-address"
+                      value={mbLocalPart}
+                      // Keep only the local part: if someone types a full address out
+                      // of habit (the domain is already shown as the fixed suffix),
+                      // drop everything from "@" on so we never build "you@d.com@d.com".
+                      onChange={(e) => setMbLocalPart(e.target.value.trim().toLowerCase().replace(/@.*$/, ""))}
+                      placeholder="you"
+                      className={cn(inputCls, "w-40 rounded-r-none")}
+                      {...noAutoCap}
+                    />
+                    <span className="flex items-center rounded-r-lg border border-l-0 border-outline-variant/30 bg-surface-container-highest/40 px-3 font-mono text-sm text-on-surface-variant">
+                      @{domain}
+                    </span>
+                  </span>
                 </label>
                 <label className="flex flex-col gap-1 text-sm text-on-surface-variant">
                   Password
@@ -1053,7 +1068,7 @@ export function SetupWizard({
                     className={cn(inputCls, "w-64")}
                   />
                 </label>
-                <Button onClick={() => void createMb()} disabled={mbBusy || !mbEmail || !mbPassword}>
+                <Button onClick={() => void createMb()} disabled={mbBusy || !mbLocalPart || !mbPassword}>
                   {mbBusy ? <Spinner className="border-white/40 border-t-white" /> : null}
                   {mbBusy ? "Creating…" : "Create mailbox"}
                 </Button>

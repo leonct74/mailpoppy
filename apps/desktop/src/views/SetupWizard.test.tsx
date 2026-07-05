@@ -193,14 +193,17 @@ describe("SetupWizard · Mailboxes", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Yes, continue/i }));
     await screen.findByText(/ready to send and receive/i);
 
-    // The real form is now present — fill it and create.
-    fireEvent.change(await screen.findByLabelText("Mailbox email"), { target: { value: "You@YourDomain.com" } });
+    // The real form is now present. The domain is pre-filled as a fixed "@domain"
+    // suffix, so the user types ONLY the local part (and can't misspell the domain).
+    expect(screen.getByText("@yourdomain.com")).toBeInTheDocument();
+    fireEvent.change(await screen.findByLabelText("Mailbox email"), { target: { value: "You" } });
     fireEvent.change(screen.getByLabelText("Mailbox password"), { target: { value: "Mailpoppy-Test-1!" } });
     const createBtn = screen.getByRole("button", { name: "Create mailbox" });
     expect(createBtn).not.toBeDisabled();
     fireEvent.click(createBtn);
 
-    // Success banner + the create call gets a lower-cased email.
+    // Success banner + the create call gets the local part joined to the domain,
+    // lower-cased.
     expect(await screen.findByText(/tab is now connected/i)).toBeInTheDocument();
     const createCall = mockSidecar.mock.calls.find((c) => c[0] === "/mailbox/create")!;
     const body = JSON.parse((createCall[1] as RequestInit).body as string);
