@@ -104,6 +104,10 @@ export default function ActivatePage() {
   const [deployment, setDeployment] = useState<Deployment | null>(null);
   const [activated, setActivated] = useState<string | null>(null);
   const [activeDomains, setActiveDomains] = useState<string[]>([]);
+  // True once we've confirmed THIS domain is already on for the signed-in account (paid or comped) —
+  // so a config refresh (re-registering after a redeploy) shows a "you're set" confirmation instead
+  // of a "Subscribe" button that reads like paying again.
+  const [alreadyActive, setAlreadyActive] = useState(false);
 
   const [price, setPrice] = useState<PriceInfo | null>(null);
   const [busy, setBusy] = useState(false);
@@ -181,6 +185,27 @@ export default function ActivatePage() {
   useEffect(() => {
     if (user) void ensureRegistered();
   }, [user, ensureRegistered]);
+
+  // Pre-checkout: if this domain is ALREADY active for the signed-in account (a config refresh after
+  // a redeploy, or a repeat visit), detect it so we don't offer a redundant "Subscribe". Sign-in has
+  // already re-registered the live config via ensureRegistered, so this really is a done deal.
+  useEffect(() => {
+    if (!user || !domain || activated) return;
+    void (async () => {
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch("/api/account", { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          domains?: { domain: string; mobileActive?: boolean; manualEntitlement?: boolean }[];
+        };
+        const d = (data.domains ?? []).find((x) => x.domain.toLowerCase() === domain.toLowerCase());
+        setAlreadyActive(!!d && (!!d.mobileActive || !!d.manualEntitlement));
+      } catch {
+        /* best-effort — fall back to the normal subscribe path */
+      }
+    })();
+  }, [user, domain, activated]);
 
   // On the post-checkout screen, list the account's active domains for the confirmation copy.
   useEffect(() => {
@@ -471,6 +496,23 @@ export default function ActivatePage() {
                     >
                       {mode === "signup" ? "Already have an account? Sign in" : "Need an account? Create one"}
                     </button>
+                  </div>
+                ) : alreadyActive ? (
+                  <div className="border-primary/30 bg-primary/[0.07] rounded-xl border p-4">
+                    <div className="text-heading flex items-center gap-2 font-semibold">
+                      <CheckCircleIcon size={18} />
+                      {domain} is already active
+                    </div>
+                    <p className="text-muted mt-1.5 text-sm leading-relaxed">
+                      Your mobile settings are up to date — everyone with a mailbox on {domain} can sign in on the
+                      app. No new charge.
+                    </p>
+                    <a
+                      href="/account"
+                      className="text-primary mt-3 inline-flex items-center gap-1.5 text-sm font-semibold hover:underline"
+                    >
+                      Manage your domains <ArrowRightIcon size={14} />
+                    </a>
                   </div>
                 ) : (
                   <div>
