@@ -8,7 +8,7 @@
 // via the Stripe webhook — so after checkout (and on a manual "Sync"), we call
 // /api/account/reconcile, which pulls the truth straight from Stripe. That makes the dashboard
 // self-healing even if the webhook is slow, unregistered, or failed.
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -121,7 +121,6 @@ export default function AccountPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const [justActivated, setJustActivated] = useState<string | null>(null);
-  const reconciledRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!auth) {
@@ -198,20 +197,16 @@ export default function AccountPage() {
     [auth, load],
   );
 
-  // After checkout we land with ?activated=<domain>; reconcile that domain once, otherwise just
-  // load. onAuthStateChanged drives this when the user resolves.
+  // Reconcile against Stripe whenever a signed-in dashboard loads, so the status shown is always
+  // the real one — self-healing even when the webhook never ran. onAuthStateChanged drives this;
+  // reconcile falls back to a plain load() if the sync itself fails.
   useEffect(() => {
     if (!user) {
       setData(null);
       return;
     }
-    if (justActivated && reconciledRef.current !== justActivated) {
-      reconciledRef.current = justActivated;
-      void reconcile(justActivated);
-    } else if (!justActivated) {
-      void load();
-    }
-  }, [user, justActivated, reconcile, load]);
+    void reconcile();
+  }, [user, reconcile]);
 
   async function submitLogin(e: FormEvent) {
     e.preventDefault();
