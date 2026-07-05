@@ -331,29 +331,46 @@ describe("SetupWizard · Mailboxes", () => {
 });
 
 describe("SetupWizard · resume from reality", () => {
-  it("resumes a deployed + verified domain after a restart — no progress lost", async () => {
+  it("resumes an IN-PROGRESS (not-yet-verified) domain after a restart — no progress lost", async () => {
     mockSidecar.mockImplementation(async (path: string) => {
       if (path === "/aws/readiness") return READY;
       if (path.startsWith("/mailbox/list")) return { ...BACKEND, mailboxes: [] };
       if (path.startsWith("/teardown/domains")) return { ok: true, domains: ["resumed.com"] };
-      if (path.includes("/provision/") && path.endsWith("/status")) return { dkim: "SUCCESS", verifiedForSending: true };
-      // Unmocked paths (region config, MAIL FROM status) throw — those components
-      // tolerate sidecar failures, and reconcile swallows best-effort lookups.
+      if (path.includes("/provision/") && path.endsWith("/status")) return { dkim: "PENDING", verifiedForSending: false };
       throw new Error(`unexpected sidecar path ${path}`);
     });
 
     render(<SetupWizard />);
 
-    // The domain is restored from AWS, not a blank field…
+    // An unfinished domain IS restored from AWS (not a blank field) so the verify poll
+    // picks back up where it left off.
     await waitFor(() =>
       expect((screen.getByPlaceholderText("yourdomain.com") as HTMLInputElement).value).toBe("resumed.com"),
     );
-    // …the persistent progress stepper is always present…
     expect(screen.getByText(/Your setup progress/i)).toBeInTheDocument();
-    // …the stepper has advanced past verification onto the mailbox step…
-    expect(await screen.findByText(/add an email address and password/i)).toBeInTheDocument();
-    // …and the mailbox form is unlocked because we resumed past verification.
-    expect(screen.getByLabelText("Mailbox email")).toBeInTheDocument();
+  });
+
+  it("with an already-verified domain and NO preset, opens a clean 'add another domain' form — never stranded on the finished domain's step", async () => {
+    // Regression: previously a verified domain resumed onto its mailbox/test step, which
+    // gave the user no domain field and blocked adding a SECOND domain. A finished domain
+    // is now managed from its own domain view; opening setup means "add another".
+    mockSidecar.mockImplementation(async (path: string) => {
+      if (path === "/aws/readiness") return READY;
+      if (path.startsWith("/mailbox/list")) return { ...BACKEND, mailboxes: [] };
+      if (path.startsWith("/teardown/domains")) return { ok: true, domains: ["done.com"] };
+      if (path.includes("/provision/") && path.endsWith("/status")) return { dkim: "SUCCESS", verifiedForSending: true };
+      throw new Error(`unexpected sidecar path ${path}`);
+    });
+
+    render(<SetupWizard />);
+    await screen.findByText(/connected and ready/i);
+
+    // Stays on the (empty, editable) domain form; never advances onto the finished
+    // domain's mailbox step.
+    await waitFor(() =>
+      expect((screen.getByPlaceholderText("yourdomain.com") as HTMLInputElement).value).toBe(""),
+    );
+    expect(screen.queryByLabelText("Mailbox email")).not.toBeInTheDocument();
   });
 
   it("surfaces leftover DNS and lands on Set up email service when a domain exists but no backend is deployed", async () => {

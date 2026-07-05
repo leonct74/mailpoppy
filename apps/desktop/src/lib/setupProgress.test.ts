@@ -6,10 +6,18 @@ describe("deriveResume (resume from real AWS state)", () => {
     expect(deriveResume({ backendDeployed: false, domains: [] })).toEqual({ domain: "", step: "start", leftover: false });
   });
 
-  it("resumes a deployed+verified backend straight to the verified step", () => {
+  it("a re-run pinned to a verified domain (presetDomain) resumes straight to the verified step", () => {
+    expect(
+      deriveResume({ backendDeployed: true, domains: ["acme.com"], presetDomain: "acme.com", dkim: "SUCCESS", verifiedForSending: true }),
+    ).toEqual({ domain: "acme.com", step: "verified", leftover: false });
+  });
+
+  it("an already-verified domain with NO preset is a clean slate — opening setup means 'add another domain', not resume the finished one", () => {
+    // Regression: previously this resumed the finished domain to its last step, which
+    // stranded the user on the verified/test panel and blocked adding a SECOND domain.
     expect(
       deriveResume({ backendDeployed: true, domains: ["acme.com"], dkim: "SUCCESS", verifiedForSending: true }),
-    ).toEqual({ domain: "acme.com", step: "verified", leftover: false });
+    ).toEqual({ domain: "", step: "start", leftover: false });
   });
 
   it("resumes a deployed-but-not-yet-verified domain to 'verifying' (so the poller resumes)", () => {

@@ -530,7 +530,14 @@ export function SetupWizard({
 
       const r = deriveResume({ backendDeployed: deployed, domains, dkim, verifiedForSending, presetDomain });
       setLeftover(r.leftover);
-      if (r.domain) setDomain(r.domain);
+      if (r.domain) {
+        setDomain(r.domain);
+      } else if (!presetDomain) {
+        // Adding a NEW domain with nothing in-progress to resume: clear a stale draft
+        // left by a just-finished domain so the form starts empty. Only clear a draft
+        // that matches an already-set-up domain, so a value the user just typed is kept.
+        setDomain((cur) => (domains.some((d) => d.toLowerCase() === cur.trim().toLowerCase()) ? "" : cur));
+      }
 
       // Reconstruct just enough so the resumed step's panels render — the data
       // those panels read normally comes from in-session API calls.

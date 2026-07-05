@@ -73,6 +73,13 @@ export function deriveResume(i: ResumeInput): ResumeState {
     const provisionedByUs = i.domains.some((d) => d.toLowerCase() === domain);
     if (domain && provisionedByUs && i.dkim !== undefined) {
       const verified = i.dkim === "SUCCESS" && i.verifiedForSending === true;
+      // A FINISHED (verified) domain is only worth resuming when the user explicitly
+      // reopened THAT domain (presetDomain). With no preset, opening setup means "add
+      // ANOTHER domain" — start fresh with an empty form instead of stranding the user
+      // on the finished domain's last step (which blocked adding a second domain).
+      // An IN-PROGRESS (not-yet-verified) domain still resumes, so the verify poll picks
+      // back up where it left off.
+      if (verified && !i.presetDomain) return { domain: "", step: "start", leftover: false };
       return { domain, step: verified ? "verified" : "verifying", leftover: false };
     }
     return { domain, step: "start", leftover: false };
