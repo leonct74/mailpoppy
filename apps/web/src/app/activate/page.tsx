@@ -10,6 +10,8 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   onAuthStateChanged,
   type User,
@@ -147,6 +149,17 @@ export default function ActivatePage() {
     });
   }, [auth]);
 
+  // If Google sign-in fell back to a full-page redirect, the success lands via
+  // onAuthStateChanged above; here we only surface a redirect *error* (e.g. the
+  // provider isn't enabled, or the domain isn't authorised) so it isn't swallowed.
+  useEffect(() => {
+    if (!auth) return;
+    getRedirectResult(auth).catch((err) => {
+      const msg = friendlyAuthError(err);
+      if (msg) setFormErr(msg);
+    });
+  }, [auth]);
+
   // Once signed in with a domain to bind, register it (idempotent) so it's resolvable + appears
   // on the dashboard even before checkout.
   const ensureRegistered = useCallback(async () => {
@@ -204,11 +217,24 @@ export default function ActivatePage() {
     if (!auth) return;
     setSubmitting(true);
     setFormErr(null);
+    const provider = new GoogleAuthProvider();
     try {
-      const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
     } catch (err) {
-      setFormErr(friendlyAuthError(err));
+      const code = (err as { code?: string })?.code ?? "";
+      // Some browsers block the popup (or don't support it — e.g. an in-app webview).
+      // Fall back to a full-page redirect, which always works; we navigate away, so the
+      // spinner stays on and the result comes back via getRedirectResult/onAuthStateChanged.
+      if (code === "auth/popup-blocked" || code === "auth/operation-not-supported-in-this-environment") {
+        try {
+          await signInWithRedirect(auth, provider);
+          return;
+        } catch (e2) {
+          setFormErr(friendlyAuthError(e2));
+        }
+      } else {
+        setFormErr(friendlyAuthError(err));
+      }
     } finally {
       setSubmitting(false);
     }
