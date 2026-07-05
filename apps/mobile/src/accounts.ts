@@ -1,11 +1,12 @@
 // The set of mailboxes the user has added to this device, and which one is active.
 //
-// v1 is SAME-DOMAIN multi-mailbox: every added mailbox lives in one backend + one
-// Cognito user pool, so they all share the active DeploymentConfig — only the
-// signed-in user changes. Each mailbox's Cognito tokens already persist in
-// `cognitoStorage` (keyed by its storage username); this store only remembers the
-// *list* (email + that storage username) and the active email, so the app can
-// restore the switcher and re-point at the right session after a restart.
+// Mailboxes may span MULTIPLE domains — each domain is its own backend + Cognito user
+// pool. This store just remembers the *list* (email + the mailbox's storage username)
+// and the active email; a mailbox's Cognito tokens persist in `cognitoStorage` (keyed
+// by pool + username, so pools don't collide) and its domain's backend config lives in
+// `config.ts` (keyed by domain). So the app can restore the switcher and re-point at the
+// right session + backend after a restart. `domainOf` is how callers route a mailbox to
+// its deployment.
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const KEY = "@mailpoppy/accounts";
@@ -30,7 +31,7 @@ export function normaliseEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-/** Domain part of an address, lower-cased (v1 requires all mailboxes share one). */
+/** Domain part of an address, lower-cased — routes a mailbox to its deployment. */
 export function domainOf(email: string): string {
   return normaliseEmail(email).split("@")[1] ?? "";
 }

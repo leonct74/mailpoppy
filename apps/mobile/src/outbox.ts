@@ -58,7 +58,9 @@ export function onOutboxChange(fn: Listener): () => void {
 
 function clientFor(username: string): MailpoppyClient {
   return new MailpoppyClient({
-    apiBaseUrl: getConfig().apiBaseUrl,
+    // Send from the composing mailbox's OWN backend — it may be on a different domain
+    // than whatever's in the foreground when the undo window ends.
+    apiBaseUrl: (auth.configFor(username) ?? getConfig()).apiBaseUrl,
     getToken: () => auth.getTokenFor(username),
   });
 }

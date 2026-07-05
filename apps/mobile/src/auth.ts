@@ -9,7 +9,7 @@ import {
   AuthenticationDetails,
   type CognitoUserSession,
 } from "amazon-cognito-identity-js";
-import { getConfig, onConfigChange, clearActiveConfig } from "./config";
+import { getConfig, clearActiveConfig, type DeploymentConfig } from "./config";
 import { cognitoStorage } from "./cognitoStorage";
 
 /**
@@ -36,7 +36,12 @@ export interface SignInResult {
 }
 
 export class CognitoAuth {
-  private pool: CognitoUserPool | null = null;
+  // One Cognito pool per deployment, cached by ClientId (a pool IS its user-pool +
+  // client). Several coexist so a device can serve mailboxes across MULTIPLE domains.
+  private pools = new Map<string, CognitoUserPool>();
+  // Which deployment each mailbox session belongs to (by its storage username), so
+  // token refresh / sign-out use the RIGHT pool regardless of which domain is active.
+  private configByUsername = new Map<string, DeploymentConfig>();
   private pendingUser: CognitoUser | null = null;
   // The storage username (amazon-cognito `LastAuthUser`) of the mailbox the app is
   // currently acting as. When set, getToken() serves THIS mailbox's token even
@@ -44,30 +49,65 @@ export class CognitoAuth {
   // library's "current user" (single-session / first-restore path).
   private activeUsername: string | null = null;
 
-  constructor() {
-    // Rebuild the pool when the active deployment changes (a new domain resolved).
-    onConfigChange(() => {
-      this.pool = null;
-      this.pendingUser = null;
-    });
+  /** Bind a mailbox's session to its deployment so refresh/sign-out hit the right pool.
+   *  Call after a sign-in and for every restored mailbox at startup. */
+  registerMailbox(username: string, config: DeploymentConfig): void {
+    this.configByUsername.set(username, config);
+    this.poolFor(config); // warm the pool
+  }
+
+  /** The deployment a mailbox belongs to, if we've registered it. */
+  configFor(username: string): DeploymentConfig | null {
+    return this.configByUsername.get(username) ?? null;
+  }
+
+  /** The cached pool for a config (one per ClientId), built on first use. */
+  private poolFor(config: DeploymentConfig): CognitoUserPool {
+    let pool = this.pools.get(config.clientId);
+    if (!pool) {
+      pool = new CognitoUserPool({
+        UserPoolId: config.userPoolId,
+        ClientId: config.clientId,
+        Storage: cognitoStorage,
+      });
+      this.pools.set(config.clientId, pool);
+    }
+    return pool;
+  }
+
+  /** The pool for a specific mailbox username (its registered deployment), or the
+   *  active deployment's pool when we don't know it yet (first sign-in). */
+  private poolForUsername(username: string): CognitoUserPool {
+    return this.poolFor(this.configByUsername.get(username) ?? getConfig());
+  }
+
+  /** The pool for the ACTIVE deployment (the foreground inbox's backend). */
+  private activePool(): CognitoUserPool {
+    return this.poolFor(getConfig());
   }
 
   /** amazon-cognito's per-pool `LastAuthUser` storage key. */
-  private lastAuthKey(): string {
-    return `CognitoIdentityServiceProvider.${getConfig().clientId}.LastAuthUser`;
+  private lastAuthKeyFor(clientId: string): string {
+    return `CognitoIdentityServiceProvider.${clientId}.LastAuthUser`;
   }
 
   /** The username the last successful sign-in cached its tokens under (whatever the
-   *  library used — email or an opaque sub). Read straight after signIn to record it. */
+   *  library used — email or an opaque sub). Read straight after signIn (against the
+   *  active pool) to record it. */
   lastAuthUsername(): string | null {
-    return cognitoStorage.getItem(this.lastAuthKey());
+    return cognitoStorage.getItem(this.lastAuthKeyFor(getConfig().clientId));
   }
 
   /** Point the app at a specific mailbox's session (by its storage username). Also
-   *  syncs `LastAuthUser` so getCurrentUser()/hasSession() agree with getToken(). */
+   *  syncs that pool's `LastAuthUser` so getCurrentUser()/hasSession() agree with
+   *  getToken(). Uses the mailbox's OWN deployment (not the active one) so it's correct
+   *  even before the active domain has been switched to it. */
   setActiveUsername(username: string | null): void {
     this.activeUsername = username;
-    if (username) cognitoStorage.setItem(this.lastAuthKey(), username);
+    if (username) {
+      const clientId = (this.configByUsername.get(username) ?? getConfig()).clientId;
+      cognitoStorage.setItem(this.lastAuthKeyFor(clientId), username);
+    }
   }
 
   getActiveUsername(): string | null {
@@ -75,9 +115,10 @@ export class CognitoAuth {
   }
 
   /** A fresh ID token for a SPECIFIC mailbox (by storage username), refreshing if
-   *  needed. This is how one device serves several coexisting mailbox sessions. */
+   *  needed against THAT mailbox's pool. This is how one device serves several
+   *  coexisting mailbox sessions, even across different domains. */
   getTokenFor(username: string): Promise<string> {
-    const user = new CognitoUser({ Username: username, Pool: this.getPool(), Storage: cognitoStorage });
+    const user = new CognitoUser({ Username: username, Pool: this.poolForUsername(username), Storage: cognitoStorage });
     return new Promise((resolve, reject) => {
       user.getSession((err: Error | null, session: CognitoUserSession | null) => {
         if (err || !session) return reject(err ?? new Error("no session"));
@@ -88,26 +129,13 @@ export class CognitoAuth {
 
   /** Sign ONE mailbox out (drop just its cached tokens), leaving the others intact. */
   signOutUser(username: string): void {
-    const user = new CognitoUser({ Username: username, Pool: this.getPool(), Storage: cognitoStorage });
+    const user = new CognitoUser({ Username: username, Pool: this.poolForUsername(username), Storage: cognitoStorage });
     user.signOut();
     if (this.activeUsername === username) this.activeUsername = null;
   }
 
-  /** The Cognito pool for the active deployment, built lazily and rebuilt on change. */
-  private getPool(): CognitoUserPool {
-    if (!this.pool) {
-      const c = getConfig();
-      this.pool = new CognitoUserPool({
-        UserPoolId: c.userPoolId,
-        ClientId: c.clientId,
-        Storage: cognitoStorage,
-      });
-    }
-    return this.pool;
-  }
-
   signIn(email: string, password: string): Promise<SignInResult> {
-    const user = new CognitoUser({ Username: email, Pool: this.getPool(), Storage: cognitoStorage });
+    const user = new CognitoUser({ Username: email, Pool: this.activePool(), Storage: cognitoStorage });
     const auth = new AuthenticationDetails({ Username: email, Password: password });
     return new Promise((resolve, reject) => {
       user.authenticateUser(auth, {
@@ -145,7 +173,7 @@ export class CognitoAuth {
    * been sent; finish with confirmPasswordReset.
    */
   requestPasswordReset(email: string): Promise<void> {
-    const user = new CognitoUser({ Username: email, Pool: this.getPool(), Storage: cognitoStorage });
+    const user = new CognitoUser({ Username: email, Pool: this.activePool(), Storage: cognitoStorage });
     return new Promise((resolve, reject) => {
       user.forgotPassword({
         onSuccess: () => resolve(),
@@ -157,7 +185,7 @@ export class CognitoAuth {
 
   /** Finish a "forgot password" flow with the emailed code + the new password. */
   confirmPasswordReset(email: string, code: string, newPassword: string): Promise<void> {
-    const user = new CognitoUser({ Username: email, Pool: this.getPool(), Storage: cognitoStorage });
+    const user = new CognitoUser({ Username: email, Pool: this.activePool(), Storage: cognitoStorage });
     return new Promise((resolve, reject) => {
       user.confirmPassword(code.trim(), newPassword, {
         onSuccess: () => resolve(),
@@ -170,7 +198,7 @@ export class CognitoAuth {
    *  signed out. Serves the active mailbox when several sessions coexist. */
   getToken(): Promise<string> {
     if (this.activeUsername) return this.getTokenFor(this.activeUsername);
-    const user = this.getPool().getCurrentUser();
+    const user = this.activePool().getCurrentUser();
     if (!user) return Promise.reject(new Error("not signed in"));
     return new Promise((resolve, reject) => {
       user.getSession((err: Error | null, session: CognitoUserSession | null) => {
@@ -181,14 +209,15 @@ export class CognitoAuth {
   }
 
   signOut(): void {
-    this.getPool().getCurrentUser()?.signOut();
+    this.activePool().getCurrentUser()?.signOut();
     this.pendingUser = null;
     this.activeUsername = null;
-    clearActiveConfig(); // next sign-in re-resolves (also resets the pool via onConfigChange)
+    this.configByUsername.clear(); // forget every mailbox→deployment binding
+    clearActiveConfig(); // clears every domain's config; next sign-in re-resolves
   }
 
   hasSession(): boolean {
-    return this.getPool().getCurrentUser() != null;
+    return this.activePool().getCurrentUser() != null;
   }
 
   /** The signed-in mailbox address (from ID-token claims), or null when signed out. */

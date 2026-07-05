@@ -1,6 +1,6 @@
 # Multi-mailbox in the mobile app — design spec (draft)
 
-**Status:** proposed · **Author:** design pass · **Scope decision owed before build**
+**Status:** v1 shipped; **v2 (cross-domain) SHIPPED 2026-07-05** — see the [v2 addendum](#v2--cross-domain-mailboxes-shipped) at the end.
 
 ## 1. Why
 
@@ -142,3 +142,45 @@ cross-domain would resolve each domain separately.)
    (faster, more memory). Start simple.
 4. ~~Backend push payload~~ — **RESOLVED:** the payload already includes `data.mailbox` and the
    registry is per-mailbox, so notifications need no backend change (see §6).
+
+---
+
+## v2 — cross-domain mailboxes (SHIPPED 2026-07-05)
+
+The §2 non-goal "mailboxes across different domains" is now implemented. One app can hold mailboxes
+across **several paid domains** at once and switch between them; each domain is its own backend
+deployment (own Cognito pool + API). **Zero backend/infra/Hub changes** — the whole feature is
+client-side, because push registration + send were already per-deployment and the push payload
+already carries `data.mailbox`.
+
+**What changed (client only):**
+- **`config.ts`** — the single `active: DeploymentConfig` became a **map keyed by domain** +
+  `activeDomain`. `getConfig()` = the foreground domain's config; `getConfigForEmail/-Domain()` +
+  `knownDomains()` let per-mailbox background work (push, outbox, mark-read) resolve its OWN backend.
+  `resolveConfig(email)` stores under the domain and activates; a `legacy` var + `adoptLegacyForDomain`
+  migrate a pre-v2 single config onto its domain at first restore (new storage key
+  `@mailpoppy/deployments`; old `@mailpoppy/deployment` still read once). ResolveError (403/404) is
+  thrown **before** touching the active domain, so a rejected/unpaid domain never disturbs the
+  foreground.
+- **`auth.ts`** — one lazily-rebuilt pool became a **pool cache keyed by ClientId** + a
+  `configByUsername` registry (`registerMailbox`). `getTokenFor`/`signOutUser` refresh/sign out against
+  the mailbox's OWN pool; `setActiveUsername` writes `LastAuthUser` under that mailbox's ClientId.
+- **`AuthContext.tsx`** — dropped the same-domain guard; `addMailbox` resolves any domain, registers
+  the mailbox, and restores the previous foreground domain if the add doesn't complete (sign-in
+  failure OR new-password-required); `switchTo`/`removeMailbox` re-point the active domain; restore
+  binds every mailbox to its deployment (re-resolving any whose config didn't persist rather than
+  masking it as DEFAULT); full sign-out unregisters the device token from **every** domain's backend.
+- **`push.ts` / `outbox.ts`** — register the one device token with **each** mailbox's backend; route
+  mark-read / undo-send to the mailbox's own deployment.
+
+**Entitlement:** unchanged and already per-domain — each domain resolves independently through the
+Hub, which 403s an unpaid domain; the switcher surfaces that message. A person owning N paid domains
+is provisioned on the backend for all N.
+
+**Invariant preserved:** encryption keys stay per-email (`mailboxKeys.ts`), so adding a cross-domain
+mailbox never re-keys or orphans an existing mailbox's mail.
+
+**Verification:** TypeScript strict passes; a 5-lens adversarial review ran; its 3 confirmed findings
+(new-password-required wedging the foreground; sign-out only unregistering the active backend; restore
+masking a missing-domain config as DEFAULT) were all fixed. Desktop parity was intentionally deferred
+(desktop resolves its backend from local AWS / AgentsPoppy, not the Hub — a separate mechanism).

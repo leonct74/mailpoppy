@@ -2,16 +2,23 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import * as Notifications from "expo-notifications";
 import { auth } from "./auth";
 import { cognitoStorage } from "./cognitoStorage";
-import { hydrateDeployment, resolveConfig } from "./config";
+import {
+  hydrateDeployment,
+  resolveConfig,
+  getConfigForEmail,
+  setActiveDomain,
+  adoptLegacyForDomain,
+  knownDomains,
+} from "./config";
 import { resetContacts } from "./contacts";
 import { clearInboxCaches } from "./inboxCache";
 import { clearMessageCache } from "./messageCache";
 import { hapticSwitch } from "./haptics";
 import {
   registerForPush,
-  unregisterForPush,
   registerForPushAllMailboxes,
   unregisterForMailbox,
+  forgetRegisteredToken,
 } from "./push";
 import { mail } from "./mailClient";
 import {
@@ -40,7 +47,7 @@ interface AuthState {
   status: Status;
   /** The active mailbox address (what most screens call `email`). */
   email: string | null;
-  /** All mailboxes added on this device (v1: all on one domain). */
+  /** All mailboxes added on this device (may span several domains). */
   accounts: MailboxAccount[];
   activeEmail: string | null;
 
@@ -98,6 +105,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await cognitoStorage.hydrate();
       const persisted = await loadAccounts();
 
+      // Bind every restored mailbox to its deployment so auth refreshes/signs each out
+      // against the RIGHT Cognito pool — mailboxes may span several domains. Migration:
+      // a pre-multi-domain install stored ONE config with no domain; bind it to the
+      // active mailbox's domain (all its mailboxes shared that one domain), upgrading
+      // storage to the map format in place.
+      if (persisted.accounts.length > 0) {
+        const activeAcct = persisted.accounts.find((a) => a.email === persisted.activeEmail) ?? persisted.accounts[0]!;
+        adoptLegacyForDomain(domainOf(activeAcct.email)); // no-op on the new map format
+        const known = new Set(knownDomains());
+        for (const a of persisted.accounts) {
+          if (known.has(domainOf(a.email))) {
+            auth.registerMailbox(a.username, getConfigForEmail(a.email));
+          } else {
+            // Its backend config didn't persist (divergent writes) — don't silently bind
+            // it to the launch pool and let it fail cryptically. Re-resolve in the
+            // background and bind it then, restoring the foreground domain afterwards.
+            void resolveConfig(a.email)
+              .then((cfg) => auth.registerMailbox(a.username, cfg))
+              .catch(() => {})
+              .finally(() => setActiveDomain(domainOf(activeAcct.email)));
+          }
+        }
+        setActiveDomain(domainOf(activeAcct.email)); // foreground the active mailbox's backend
+      }
+
       // Multi-mailbox restore: point at the active mailbox and confirm its session
       // is still good before declaring signed-in.
       const active = persisted.accounts.find((a) => a.email === persisted.activeEmail);
@@ -126,6 +158,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const username = auth.lastAuthUsername();
           if (e && username) {
             const migrated = withMailbox({ accounts: [], activeEmail: null }, { email: e, username });
+            adoptLegacyForDomain(domainOf(e)); // bind the single legacy config to this domain
+            auth.registerMailbox(username, getConfigForEmail(e));
             auth.setActiveUsername(username);
             await restoreMailboxKeys([e]);
             setActiveMailboxKey(e);
@@ -147,29 +181,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const addMailbox = useCallback(
     async (em: string, pw: string) => {
       const addr = normaliseEmail(em);
-      // v1 is same-domain only — refuse a mailbox on a different domain rather than
-      // silently pointing at another backend and breaking the shared session model.
-      if (accounts.length > 0 && domainOf(addr) !== domainOf(accounts[0]!.email)) {
-        throw new Error(
-          `This version supports mailboxes on one domain (@${domainOf(accounts[0]!.email)}). ${addr} is on a different domain.`,
-        );
+      // Mailboxes on ANY paid domain are supported: resolve this domain's own backend
+      // (throws ResolveError, leaving the active domain untouched, if the domain has no
+      // active plan or isn't set up), then sign in against it.
+      const prevActiveEmail = activeEmail;
+      // resolveConfig already made addr's domain active; if the mailbox doesn't actually
+      // get added (sign-in fails, or needs a first password set elsewhere), put the
+      // foreground back where it was so the mailbox you were viewing isn't left pointed
+      // at the wrong backend.
+      const restoreForeground = () => {
+        if (prevActiveEmail && domainOf(prevActiveEmail) !== domainOf(addr)) {
+          setActiveDomain(domainOf(prevActiveEmail));
+        }
+      };
+      const cfg = await resolveConfig(addr);
+      try {
+        const res = await auth.signIn(addr, pw);
+        if (res.status === "new-password-required") {
+          pendingEmail.current = addr;
+          restoreForeground(); // not added yet — its password must be set elsewhere first
+          return "new-password-required" as const;
+        }
+        const username = auth.lastAuthUsername();
+        if (!username) throw new Error("Sign-in did not establish a session. Please try again.");
+        auth.registerMailbox(username, cfg); // bind this mailbox to its backend
+        auth.setActiveUsername(username);
+        apply(withMailbox(state(), { email: addr, username }));
+        setStatus("signed-in");
+        await establishKeys(pw, addr);
+        void registerForPush();
+        return "signed-in" as const;
+      } catch (e) {
+        restoreForeground();
+        throw e;
       }
-      await resolveConfig(addr); // resolve this domain's backend, then sign in against it
-      const res = await auth.signIn(addr, pw);
-      if (res.status === "new-password-required") {
-        pendingEmail.current = addr;
-        return "new-password-required" as const;
-      }
-      const username = auth.lastAuthUsername();
-      if (!username) throw new Error("Sign-in did not establish a session. Please try again.");
-      auth.setActiveUsername(username);
-      apply(withMailbox(state(), { email: addr, username }));
-      setStatus("signed-in");
-      await establishKeys(pw, addr);
-      void registerForPush();
-      return "signed-in" as const;
     },
-    [accounts, apply, establishKeys, state],
+    [activeEmail, apply, establishKeys, state],
   );
 
   const completeNewPassword = useCallback(
@@ -179,6 +226,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       pendingEmail.current = null;
       const username = auth.lastAuthUsername();
       if (!addr || !username) throw new Error("Couldn't finish setting up this mailbox. Please sign in again.");
+      setActiveDomain(domainOf(addr)); // foreground this mailbox's backend (add may have restored another)
+      auth.registerMailbox(username, getConfigForEmail(addr)); // its backend (resolved during add)
       auth.setActiveUsername(username);
       apply(withMailbox(state(), { email: addr, username }));
       setStatus("signed-in");
@@ -193,6 +242,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const addr = normaliseEmail(em);
       const acct = accounts.find((a) => a.email === addr);
       if (!acct || addr === activeEmail) return;
+      setActiveDomain(domainOf(acct.email)); // foreground this mailbox's backend (may be another domain)
       auth.setActiveUsername(acct.username);
       setActiveMailboxKey(acct.email); // restore this mailbox's unlocked key (or lock)
       resetContacts(); // don't carry one mailbox's autocomplete into another
@@ -219,9 +269,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         auth.signOut();
         setStatus("signed-out");
       } else if (addr === activeEmail) {
-        // it was active → move to the new active mailbox
+        // it was active → move to the new active mailbox (possibly on another domain)
         const nextActive = next.accounts.find((a) => a.email === next.activeEmail);
         if (nextActive) {
+          setActiveDomain(domainOf(nextActive.email));
           auth.setActiveUsername(nextActive.username);
           setActiveMailboxKey(nextActive.email);
           resetContacts();
@@ -245,8 +296,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(() => {
     const toSignOut = accounts.map((a) => a.username);
     const emails = accounts.map((a) => a.email);
-    // Unregister the active token while a JWT is still valid, THEN drop everything.
-    void unregisterForPush().finally(() => {
+    // Unregister the device token from EVERY mailbox's OWN backend (mailboxes can span
+    // domains, each of which pushes independently) while the JWTs + deployment bindings
+    // are still valid, THEN drop everything.
+    void Promise.allSettled(toSignOut.map((u) => unregisterForMailbox(u))).finally(() => {
+      forgetRegisteredToken();
       for (const u of toSignOut) auth.signOutUser(u);
       auth.signOut();
       clearAllMailboxKeys(emails); // wipes the keychain copies too

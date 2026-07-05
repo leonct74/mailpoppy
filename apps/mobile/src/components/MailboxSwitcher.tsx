@@ -1,5 +1,6 @@
 // The bottom-sheet mailbox switcher: pick which added mailbox is active, add
-// another (same domain), or remove one. Shared by the Inbox header and Settings.
+// another (on any paid domain), or remove one. Each row shows the full address, so
+// mailboxes across different domains are unambiguous. Shared by Inbox header + Settings.
 import { useState } from "react";
 import {
   ActivityIndicator,

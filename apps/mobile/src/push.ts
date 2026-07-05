@@ -50,7 +50,9 @@ void Notifications.setNotificationCategoryAsync(MAIL_CATEGORY_ID, [
 export async function markReadFromNotification(messageId: string, username: string): Promise<void> {
   try {
     const client = new MailpoppyClient({
-      apiBaseUrl: getConfig().apiBaseUrl,
+      // Route to the mailbox's OWN backend (it may be on a different domain than the
+      // one currently in the foreground), falling back to the active one.
+      apiBaseUrl: (auth.configFor(username) ?? getConfig()).apiBaseUrl,
       getToken: () => auth.getTokenFor(username),
     });
     await client.setFlags(messageId, { unread: false });
@@ -137,9 +139,11 @@ export async function registerForPushAllMailboxes(usernames: string[]): Promise<
     const token = await acquireToken();
     if (!token) return;
     registeredToken = token;
-    const apiBaseUrl = getConfig().apiBaseUrl;
     for (const username of usernames) {
       try {
+        // Register the one device token with EACH mailbox's OWN backend — mailboxes
+        // may span several domains (deployments), each of which pushes independently.
+        const apiBaseUrl = (auth.configFor(username) ?? getConfig()).apiBaseUrl;
         const client = new MailpoppyClient({ apiBaseUrl, getToken: () => auth.getTokenFor(username) });
         await client.registerDevice(token, platform());
       } catch (e) {
@@ -151,30 +155,21 @@ export async function registerForPushAllMailboxes(usernames: string[]): Promise<
   }
 }
 
-/**
- * Unregister this device's token (call BEFORE clearing the Cognito session, while
- * the JWT is still valid). Best-effort; a stale token is also pruned server-side
- * the next time Expo reports it as DeviceNotRegistered.
- */
-export async function unregisterForPush(): Promise<void> {
-  const token = registeredToken;
+/** Forget the last-registered device token (after a full sign-out sweep has
+ *  unregistered it from every backend), so it isn't left dangling. */
+export function forgetRegisteredToken(): void {
   registeredToken = null;
-  if (!token) return;
-  try {
-    await mail.unregisterDevice(token);
-  } catch (e) {
-    console.warn("[push] unregister failed:", e);
-  }
 }
 
-/** Unregister this device from ONE mailbox (when that mailbox is removed), leaving
- *  the others registered. Uses a throwaway client bound to that mailbox's token, so
- *  it never disturbs the active session. */
+/** Unregister this device from ONE mailbox (its own backend — mailboxes can span
+ *  domains), leaving the others registered. Uses a throwaway client bound to that
+ *  mailbox's token, so it never disturbs the active session. */
 export async function unregisterForMailbox(username: string): Promise<void> {
   const token = registeredToken;
   if (!token) return;
   try {
-    const client = new MailpoppyClient({ apiBaseUrl: getConfig().apiBaseUrl, getToken: () => auth.getTokenFor(username) });
+    const apiBaseUrl = (auth.configFor(username) ?? getConfig()).apiBaseUrl;
+    const client = new MailpoppyClient({ apiBaseUrl, getToken: () => auth.getTokenFor(username) });
     await client.unregisterDevice(token);
   } catch (e) {
     console.warn("[push] unregister mailbox failed:", e);
