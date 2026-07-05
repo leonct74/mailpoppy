@@ -34,6 +34,8 @@ import {
 interface DomainRow {
   domain: string;
   mobileActive: boolean;
+  /** Admin comp — entitled with no Stripe seat; shown as active, not offered a charge button. */
+  manualEntitlement?: boolean;
   verified: boolean;
 }
 interface AccountData {
@@ -368,7 +370,7 @@ export default function AccountPage() {
       : plan.tone === "warn"
         ? "border-danger/30 bg-danger/[0.06]"
         : "border-hairline bg-surface";
-  const activeCount = data?.domains.filter((d) => d.mobileActive).length ?? 0;
+  const activeCount = data?.domains.filter((d) => d.mobileActive || d.manualEntitlement).length ?? 0;
 
   return (
     <Shell>
@@ -455,49 +457,61 @@ export default function AccountPage() {
             back here to switch on the apps for it.
           </div>
         )}
-        {data?.domains.map((d) => (
-          <div
-            key={d.domain}
-            className="border-hairline bg-surface flex flex-wrap items-center justify-between gap-4 rounded-2xl border p-5"
-          >
-            <div className="flex items-start gap-3">
-              <span className={`mt-0.5 ${d.mobileActive ? "text-primary" : "text-dim"}`}>
-                <GlobeIcon size={20} />
-              </span>
-              <div>
-                <div className="text-text font-semibold">{d.domain}</div>
-                <div className="text-dim text-xs">
-                  {d.mobileActive
-                    ? "Everyone with a mailbox here can use the mobile & web apps"
-                    : "The apps are off for this domain"}
+        {data?.domains.map((d) => {
+          const on = d.mobileActive || d.manualEntitlement;
+          return (
+            <div
+              key={d.domain}
+              className="border-hairline bg-surface flex flex-wrap items-center justify-between gap-4 rounded-2xl border p-5"
+            >
+              <div className="flex items-start gap-3">
+                <span className={`mt-0.5 ${on ? "text-primary" : "text-dim"}`}>
+                  <GlobeIcon size={20} />
+                </span>
+                <div>
+                  <div className="text-text font-semibold">{d.domain}</div>
+                  <div className="text-dim text-xs">
+                    {on
+                      ? "Everyone with a mailbox here can use the mobile & web apps"
+                      : "The apps are off for this domain"}
+                  </div>
                 </div>
               </div>
-            </div>
-            {d.mobileActive ? (
-              <div className="flex items-center gap-3">
-                <span className="bg-primary/15 text-primary inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold">
-                  <CheckCircleIcon size={13} /> Active
-                </span>
-                <button
-                  onClick={() => act("/api/account/deactivate", d.domain)}
-                  disabled={busy === d.domain}
-                  className="text-dim hover:text-danger text-sm disabled:opacity-60"
+              {d.manualEntitlement ? (
+                // Admin comp: entitled with no Stripe seat — show it as on, but no charge/turn-off
+                // (billing for a comp isn't the admin's to manage here).
+                <span
+                  className="bg-primary/15 text-primary inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold"
+                  title="Complimentary access granted by MailPoppy — no charge"
                 >
-                  {busy === d.domain ? "…" : "Turn off"}
+                  <CheckCircleIcon size={13} /> Active · complimentary
+                </span>
+              ) : d.mobileActive ? (
+                <div className="flex items-center gap-3">
+                  <span className="bg-primary/15 text-primary inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold">
+                    <CheckCircleIcon size={13} /> Active
+                  </span>
+                  <button
+                    onClick={() => act("/api/account/deactivate", d.domain)}
+                    disabled={busy === d.domain}
+                    className="text-dim hover:text-danger text-sm disabled:opacity-60"
+                  >
+                    {busy === d.domain ? "…" : "Turn off"}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => act("/api/account/checkout", d.domain)}
+                  disabled={busy === d.domain}
+                  className="bg-primary text-primary-text inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold tracking-wide transition-opacity hover:opacity-90 disabled:opacity-60"
+                >
+                  {busy === d.domain ? "…" : "Activate"}
+                  {busy !== d.domain && <ArrowRightIcon size={15} />}
                 </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => act("/api/account/checkout", d.domain)}
-                disabled={busy === d.domain}
-                className="bg-primary text-primary-text inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold tracking-wide transition-opacity hover:opacity-90 disabled:opacity-60"
-              >
-                {busy === d.domain ? "…" : "Activate"}
-                {busy !== d.domain && <ArrowRightIcon size={15} />}
-              </button>
-            )}
-          </div>
-        ))}
+              )}
+            </div>
+          );
+        })}
       </div>
 
       <p className="text-dim mt-6 flex items-center gap-1.5 text-xs">

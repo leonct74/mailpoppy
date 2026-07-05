@@ -35,70 +35,83 @@ export async function POST(req: NextRequest) {
 
   // The admin must own this domain.
   const domSnap = await db.collection("domains").doc(domain).get();
-  if (!domSnap.exists || (domSnap.data() as DomainRecord).accountId !== user.uid) {
+  const rec = domSnap.exists ? (domSnap.data() as DomainRecord) : null;
+  if (!rec || rec.accountId !== user.uid) {
     return NextResponse.json({ error: "not_your_domain" }, { status: 403 });
   }
-  if ((domSnap.data() as DomainRecord).mobileActive) {
-    return NextResponse.json({ ok: true, mode: "already_active" });
-  }
+  // Already on — never try to charge again. An admin comp (manualEntitlement) has NO Stripe seat,
+  // so a charge attempt would be both wrong and error-prone; treat it as already active.
+  if (rec.manualEntitlement) return NextResponse.json({ ok: true, mode: "comped" });
+  if (rec.mobileActive) return NextResponse.json({ ok: true, mode: "already_active" });
 
-  // Ensure a Stripe customer for the account.
-  const acctRef = db.collection("accounts").doc(user.uid);
-  const acct = (await acctRef.get()).data() as AccountRecord | undefined;
-  let customerId = acct?.stripeCustomerId ?? null;
-  if (!customerId) {
-    const customer = await stripe.customers.create({
-      email: user.email ?? undefined,
-      metadata: { accountId: user.uid },
-    });
-    customerId = customer.id;
-    await acctRef.set({ stripeCustomerId: customerId, updatedAt: Date.now() }, { merge: true });
-  }
+  // Every Stripe interaction below can throw (network, card, API); wrap so a failure surfaces as a
+  // clean error the dashboard can show, instead of an unhandled 500.
+  try {
+    // Ensure a Stripe customer for the account.
+    const acctRef = db.collection("accounts").doc(user.uid);
+    const acct = (await acctRef.get()).data() as AccountRecord | undefined;
+    let customerId = acct?.stripeCustomerId ?? null;
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email: user.email ?? undefined,
+        metadata: { accountId: user.uid },
+      });
+      customerId = customer.id;
+      await acctRef.set({ stripeCustomerId: customerId, updatedAt: Date.now() }, { merge: true });
+    }
 
-  const subId = acct?.stripeSubscriptionId ?? null;
-  const hasActiveSub = !!subId && ACTIVE.has(acct?.subscriptionStatus ?? "");
+    const subId = acct?.stripeSubscriptionId ?? null;
+    const hasActiveSub = !!subId && ACTIVE.has(acct?.subscriptionStatus ?? "");
 
-  // Later domains: attribute to the live subscription (no redirect; reuses the saved card).
-  if (hasActiveSub && subId) {
-    // If the subscription already has an UNATTRIBUTED paid seat — a line item with no
-    // metadata.domain — bind THAT existing seat to this domain instead of creating a second
-    // charge. This is the "paid before the webhook was configured" case: the first domain's
-    // item was never tagged, so without this, activating it would double-charge. The domain is
-    // already ownership-checked above, so this only ever attributes the owner's own paid seat.
-    const sub = await stripe.subscriptions.retrieve(subId);
-    const untagged = sub.items.data.find((it) => !it.metadata?.domain);
-    if (untagged) {
-      await stripe.subscriptionItems.update(untagged.id, { metadata: { ...(untagged.metadata ?? {}), domain } });
+    // Later domains: attribute to the live subscription (no redirect; reuses the saved card).
+    if (hasActiveSub && subId) {
+      // If the subscription already has an UNATTRIBUTED paid seat — a line item with no
+      // metadata.domain — bind THAT existing seat to this domain instead of creating a second
+      // charge. This is the "paid before the webhook was configured" case: the first domain's
+      // item was never tagged, so without this, activating it would double-charge. The domain is
+      // already ownership-checked above, so this only ever attributes the owner's own paid seat.
+      const sub = await stripe.subscriptions.retrieve(subId);
+      const untagged = sub.items.data.find((it) => !it.metadata?.domain);
+      if (untagged) {
+        await stripe.subscriptionItems.update(untagged.id, { metadata: { ...(untagged.metadata ?? {}), domain } });
+        await domSnap.ref.set(
+          { stripeSubscriptionItemId: untagged.id, mobileActive: true, updatedAt: Date.now() },
+          { merge: true },
+        );
+        return NextResponse.json({ ok: true, mode: "attributed" });
+      }
+      // Every existing seat is already attributed → this is a genuinely additional paid domain.
+      const item = await stripe.subscriptionItems.create({
+        subscription: subId,
+        price: priceId,
+        quantity: 1,
+        metadata: { domain },
+      });
       await domSnap.ref.set(
-        { stripeSubscriptionItemId: untagged.id, mobileActive: true, updatedAt: Date.now() },
+        { stripeSubscriptionItemId: item.id, mobileActive: true, updatedAt: Date.now() },
         { merge: true },
       );
-      return NextResponse.json({ ok: true, mode: "attributed" });
+      return NextResponse.json({ ok: true, mode: "added" });
     }
-    // Every existing seat is already attributed → this is a genuinely additional paid domain.
-    const item = await stripe.subscriptionItems.create({
-      subscription: subId,
-      price: priceId,
-      quantity: 1,
-      metadata: { domain },
-    });
-    await domSnap.ref.set(
-      { stripeSubscriptionItemId: item.id, mobileActive: true, updatedAt: Date.now() },
-      { merge: true },
-    );
-    return NextResponse.json({ ok: true, mode: "added" });
-  }
 
-  // First domain: Stripe Checkout creates the subscription.
-  const origin = req.headers.get("origin") ?? "https://mailpoppy.com";
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    customer: customerId,
-    line_items: [{ price: priceId, quantity: 1 }],
-    subscription_data: { metadata: { accountId: user.uid } },
-    metadata: { accountId: user.uid, domain },
-    success_url: `${origin}${returnTo}?activated=${encodeURIComponent(domain)}`,
-    cancel_url: `${origin}${returnTo}`,
-  });
-  return NextResponse.json({ url: session.url });
+    // First domain (or no live subscription — e.g. a lapsed one being reactivated): Stripe Checkout
+    // creates a fresh subscription.
+    const origin = req.headers.get("origin") ?? "https://mailpoppy.com";
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      customer: customerId,
+      line_items: [{ price: priceId, quantity: 1 }],
+      subscription_data: { metadata: { accountId: user.uid } },
+      metadata: { accountId: user.uid, domain },
+      success_url: `${origin}${returnTo}?activated=${encodeURIComponent(domain)}`,
+      cancel_url: `${origin}${returnTo}`,
+    });
+    return NextResponse.json({ url: session.url });
+  } catch (e) {
+    console.error("[hub] POST /api/account/checkout failed:", e);
+    return NextResponse.json(
+      { error: "checkout_failed", detail: e instanceof Error ? e.message : String(e) },
+      { status: 500 },
+    );
+  }
 }

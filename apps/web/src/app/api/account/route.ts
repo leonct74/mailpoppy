@@ -38,7 +38,14 @@ export async function GET(req: NextRequest) {
     const ownedSnap = await db.collection("domains").where("accountId", "==", user.uid).get();
     const domains = ownedSnap.docs.map((d) => {
       const r = d.data() as DomainRecord;
-      return { domain: d.id, mobileActive: !!r.mobileActive, verified: !!r.verified };
+      // `manualEntitlement` (admin comp) entitles a domain with no Stripe seat — surface it so the
+      // dashboard shows it as on (and doesn't offer a charge button for it).
+      return {
+        domain: d.id,
+        mobileActive: !!r.mobileActive,
+        manualEntitlement: !!r.manualEntitlement,
+        verified: !!r.verified,
+      };
     });
 
     return NextResponse.json({
