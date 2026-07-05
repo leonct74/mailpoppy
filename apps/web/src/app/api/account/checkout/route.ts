@@ -58,17 +58,34 @@ export async function POST(req: NextRequest) {
   const subId = acct?.stripeSubscriptionId ?? null;
   const hasActiveSub = !!subId && ACTIVE.has(acct?.subscriptionStatus ?? "");
 
-  // Later domains: add a line item to the live subscription (no redirect; reuses the card).
+  // Later domains: attribute to the live subscription (no redirect; reuses the saved card).
   if (hasActiveSub && subId) {
+    // If the subscription already has an UNATTRIBUTED paid seat — a line item with no
+    // metadata.domain — bind THAT existing seat to this domain instead of creating a second
+    // charge. This is the "paid before the webhook was configured" case: the first domain's
+    // item was never tagged, so without this, activating it would double-charge. The domain is
+    // already ownership-checked above, so this only ever attributes the owner's own paid seat.
+    const sub = await stripe.subscriptions.retrieve(subId);
+    const untagged = sub.items.data.find((it) => !it.metadata?.domain);
+    if (untagged) {
+      await stripe.subscriptionItems.update(untagged.id, { metadata: { ...(untagged.metadata ?? {}), domain } });
+      await domSnap.ref.set(
+        { stripeSubscriptionItemId: untagged.id, mobileActive: true, updatedAt: Date.now() },
+        { merge: true },
+      );
+      return NextResponse.json({ ok: true, mode: "attributed" });
+    }
+    // Every existing seat is already attributed → this is a genuinely additional paid domain.
     const item = await stripe.subscriptionItems.create({
       subscription: subId,
       price: priceId,
       quantity: 1,
       metadata: { domain },
     });
-    await domSnap.ref.set({ stripeSubscriptionItemId: item.id, updatedAt: Date.now() }, { merge: true });
-    // The subscription.updated webhook flips mobileActive; reflect it immediately too.
-    await domSnap.ref.set({ mobileActive: true }, { merge: true });
+    await domSnap.ref.set(
+      { stripeSubscriptionItemId: item.id, mobileActive: true, updatedAt: Date.now() },
+      { merge: true },
+    );
     return NextResponse.json({ ok: true, mode: "added" });
   }
 
