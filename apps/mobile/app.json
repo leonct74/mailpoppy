@@ -11,7 +11,7 @@
       "bundleIdentifier": "com.mailpoppy.app",
       "buildNumber": "2",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": true
       }
     },
     "android": {

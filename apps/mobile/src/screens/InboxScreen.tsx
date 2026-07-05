@@ -37,6 +37,16 @@ import { colors, fonts, shortDate } from "../theme";
 type Props = NativeStackScreenProps<RootStackParamList, "Inbox">;
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
 
+/** One revealed swipe action (Delete / Restore / Junk). */
+type SwipeAction = {
+  key: string;
+  label: string;
+  icon: IconName;
+  bg: string;
+  fg: string;
+  run: (item: MessageMeta) => void;
+};
+
 const PAGE = 50;
 // Width of the action revealed when a row is held open (icon + label).
 const ACTION_WIDTH = 92;
@@ -203,29 +213,41 @@ export function InboxScreen({ navigation }: Props) {
     });
   }
 
-  // Swipe action: trash a message (or, in the trash folder, restore it to the
-  // inbox). Optimistically drop it from the list, then reconcile — re-insert and
-  // warn if the server call fails.
-  const removeItem = useCallback(
-    async (item: MessageMeta) => {
-      const target: Folder = folder === "trash" ? "inbox" : "trash";
-      setItems((prev) => prev.filter((m) => m.messageId !== item.messageId));
-      try {
-        await mail.move(item.messageId, target);
-      } catch (e) {
-        setItems((prev) =>
-          prev.some((m) => m.messageId === item.messageId)
-            ? prev
-            : [...prev, item].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
-        );
-        Alert.alert(
-          target === "trash" ? "Couldn't delete" : "Couldn't restore",
-          e instanceof Error ? e.message : String(e),
-        );
-      }
-    },
-    [folder],
-  );
+  // Move a message to another folder from a swipe: optimistically drop it from the
+  // list, then reconcile — re-insert and warn if the server call fails. Used for
+  // Delete (→trash), Restore (→inbox), and Report spam (→junk).
+  const moveItem = useCallback(async (item: MessageMeta, target: Folder, failVerb: string) => {
+    try {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    } catch {
+      /* the reflow is cosmetic; the removal still happens */
+    }
+    setItems((prev) => prev.filter((m) => m.messageId !== item.messageId));
+    try {
+      await mail.move(item.messageId, target);
+    } catch (e) {
+      setItems((prev) =>
+        prev.some((m) => m.messageId === item.messageId)
+          ? prev
+          : [...prev, item].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
+      );
+      Alert.alert(`Couldn't ${failVerb}`, e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  // The swipe actions for the current folder. The last one is what a full ("long")
+  // swipe commits; the rest are tap-only once the row snaps open. The inbox gets a
+  // "Junk" (report spam) action alongside Delete — a visible way to flag unwanted
+  // incoming mail (App Store Guideline 1.2, user-generated content).
+  const swipeActions: SwipeAction[] =
+    folder === "trash"
+      ? [{ key: "restore", label: "Restore", icon: "mail-outline", bg: colors.surfaceVariant, fg: colors.heading, run: (i) => moveItem(i, "inbox", "restore") }]
+      : folder === "inbox"
+        ? [
+            { key: "junk", label: "Junk", icon: "alert-circle", bg: colors.surfaceVariant, fg: colors.heading, run: (i) => moveItem(i, "junk", "report") },
+            { key: "delete", label: "Delete", icon: "trash", bg: colors.primaryDeep, fg: "#ffffff", run: (i) => moveItem(i, "trash", "delete") },
+          ]
+        : [{ key: "delete", label: "Delete", icon: "trash", bg: colors.primaryDeep, fg: "#ffffff", run: (i) => moveItem(i, "trash", "delete") }];
 
   // Permanently purge every message in Trash (server-side hard delete). Guarded
   // by a confirm dialog since it can't be undone.
@@ -358,7 +380,7 @@ export function InboxScreen({ navigation }: Props) {
                 item={group.latest}
                 folder={folder}
                 onPress={() => open(group.latest)}
-                onDelete={removeItem}
+                actions={swipeActions}
               />
             ) : (
               // A conversation row: no swipe (deleting "a thread" is ambiguous —
@@ -430,6 +452,8 @@ function folderIcon(f: Folder): IconName {
       return "send";
     case "drafts":
       return "document-text-outline";
+    case "junk":
+      return "alert-circle-outline";
     case "trash":
       return "trash-outline";
     default:
@@ -463,33 +487,34 @@ function NavTab({
 }
 
 /**
- * Wraps a Row in a horizontal swipe gesture. Swipe left to reveal a Delete
- * action (Restore in the trash folder); a short swipe snaps the action open so
- * it can be tapped, a long swipe commits straight away. Pure Animated +
- * PanResponder — no native gesture library — and it only claims clearly
- * horizontal drags, so vertical list scrolling and pull-to-refresh are unaffected.
+ * Wraps a Row in a horizontal swipe gesture. Swipe left to reveal one or more
+ * actions (e.g. Junk + Delete on the inbox, Restore in trash); a short swipe snaps
+ * the tray open so a button can be tapped, a long swipe commits the LAST (primary)
+ * action straight away. Pure Animated + PanResponder — no native gesture library —
+ * and it only claims clearly horizontal drags, so vertical list scrolling and
+ * pull-to-refresh are unaffected.
  */
 function SwipeableRow({
   item,
   folder,
   onPress,
-  onDelete,
+  actions,
 }: {
   item: MessageMeta;
   folder: Folder;
   onPress: () => void;
-  onDelete: (item: MessageMeta) => void;
+  actions: SwipeAction[];
 }) {
-  const restore = folder === "trash";
+  const trayWidth = actions.length * ACTION_WIDTH;
   const translateX = useRef(new Animated.Value(0)).current;
-  const offset = useRef(0); // resting position: 0 (closed) or -ACTION_WIDTH (open)
+  const offset = useRef(0); // resting position: 0 (closed) or -trayWidth (open)
   const width = useRef(Dimensions.get("window").width - 32); // list horizontal padding
 
   // Latest props for the handlers, which are created once.
   const itemRef = useRef(item);
   itemRef.current = item;
-  const onDeleteRef = useRef(onDelete);
-  onDeleteRef.current = onDelete;
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
 
   const settle = useCallback(
     (to: number) => {
@@ -499,6 +524,7 @@ function SwipeableRow({
     [translateX],
   );
 
+  // A full swipe commits the primary action (the last one — Delete, or Restore in trash).
   const commit = useCallback(() => {
     hapticDelete();
     try {
@@ -506,24 +532,33 @@ function SwipeableRow({
     } catch {
       /* reflow animation is cosmetic; removal still happens */
     }
-    Animated.timing(translateX, { toValue: -width.current, duration: 180, useNativeDriver: true }).start(() =>
-      onDeleteRef.current(itemRef.current),
-    );
+    Animated.timing(translateX, { toValue: -width.current, duration: 180, useNativeDriver: true }).start(() => {
+      const acts = actionsRef.current;
+      acts[acts.length - 1]?.run(itemRef.current);
+    });
   }, [translateX]);
 
   const pan = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4,
       onPanResponderGrant: () => translateX.stopAnimation(),
-      onPanResponderMove: (_e, g) =>
-        translateX.setValue(Math.min(0, Math.max(-width.current, offset.current + g.dx))),
+      onPanResponderMove: (_e, g) => {
+        // A single-action row tracks the finger across the whole row (a full swipe
+        // commits, so it should follow all the way); a multi-action row stops at the
+        // open tray so both buttons stay put to be tapped.
+        const dragMax = actionsRef.current.length === 1 ? width.current : trayWidth;
+        translateX.setValue(Math.min(0, Math.max(-dragMax, offset.current + g.dx)));
+      },
       onPanResponderRelease: (_e, g) => {
         const final = offset.current + g.dx;
-        if (final <= -width.current * 0.42) commit();
-        else if (final <= -ACTION_WIDTH * 0.55) settle(-ACTION_WIDTH);
+        // A full swipe commits the primary action — but only for a single-action row
+        // (with two buttons, dragging far enough to reveal both would otherwise fire
+        // Delete; there you snap the tray open and tap the button you want).
+        if (actionsRef.current.length === 1 && final <= -width.current * 0.42) commit();
+        else if (final <= -trayWidth * 0.55) settle(-trayWidth);
         else settle(0);
       },
-      onPanResponderTerminate: () => settle(offset.current <= -ACTION_WIDTH / 2 ? -ACTION_WIDTH : 0),
+      onPanResponderTerminate: () => settle(offset.current <= -trayWidth / 2 ? -trayWidth : 0),
     }),
   ).current;
 
@@ -540,22 +575,22 @@ function SwipeableRow({
         width.current = e.nativeEvent.layout.width;
       }}
     >
-      <View style={[styles.swipeAction, restore ? styles.swipeRestore : styles.swipeDelete]}>
-        <TouchableOpacity
-          style={styles.swipeActionBtn}
-          onPress={commit}
-          activeOpacity={0.8}
-          accessibilityLabel={restore ? "Restore message" : "Delete message"}
-        >
-          <Ionicons
-            name={restore ? "mail-outline" : "trash"}
-            size={22}
-            color={restore ? colors.heading : "#ffffff"}
-          />
-          <Text style={[styles.swipeActionText, { color: restore ? colors.heading : "#ffffff" }]}>
-            {restore ? "Restore" : "Delete"}
-          </Text>
-        </TouchableOpacity>
+      <View style={styles.swipeTray}>
+        {actions.map((a) => (
+          <TouchableOpacity
+            key={a.key}
+            style={[styles.swipeActionBtn, { backgroundColor: a.bg }]}
+            onPress={() => {
+              settle(0);
+              a.run(itemRef.current);
+            }}
+            activeOpacity={0.8}
+            accessibilityLabel={`${a.label} message`}
+          >
+            <Ionicons name={a.icon} size={22} color={a.fg} />
+            <Text style={[styles.swipeActionText, { color: a.fg }]}>{a.label}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
       <Animated.View style={{ transform: [{ translateX }] }} {...pan.panHandlers}>
         <Row item={item} folder={folder} onPress={handlePress} />
@@ -701,17 +736,15 @@ const styles = StyleSheet.create({
   },
   emptyTrashText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.danger },
   swipeWrap: { borderRadius: 14, overflow: "hidden" },
-  swipeAction: {
+  swipeTray: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    alignItems: "flex-end",
-    justifyContent: "center",
+    flexDirection: "row",
+    justifyContent: "flex-end",
   },
-  swipeDelete: { backgroundColor: colors.primaryDeep },
-  swipeRestore: { backgroundColor: colors.surfaceVariant },
   swipeActionBtn: { width: ACTION_WIDTH, height: "100%", alignItems: "center", justifyContent: "center", gap: 4 },
   swipeActionText: { fontFamily: fonts.semibold, fontSize: 12 },
   row: {

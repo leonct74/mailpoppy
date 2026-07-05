@@ -209,7 +209,7 @@ export function MessageScreen({ route, navigation }: Props) {
     }
   }
 
-  async function moveTo(target: "trash" | "inbox") {
+  async function moveTo(target: "trash" | "inbox" | "junk") {
     setMoving(true);
     try {
       await mail.move(messageId, target);
@@ -229,19 +229,46 @@ export function MessageScreen({ route, navigation }: Props) {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn} hitSlop={8} accessibilityLabel="Back">
           <Ionicons name="arrow-back" size={24} color={colors.textMuted} />
         </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => moveTo(inTrash ? "inbox" : "trash")}
-          style={styles.iconBtn}
-          hitSlop={8}
-          disabled={moving}
-          accessibilityLabel={inTrash ? "Restore" : "Delete"}
-        >
-          {moving ? (
-            <ActivityIndicator color={colors.textMuted} />
-          ) : (
-            <Ionicons name={inTrash ? "mail-outline" : "trash-outline"} size={22} color={colors.textMuted} />
+        <View style={styles.headerActions}>
+          {/* Report spam / move to Junk — a visible way to flag unwanted incoming mail
+              (App Store Guideline 1.2, user-generated content). Reversible: junk mail
+              lands in the Junk folder, and reading it there offers "Not spam". */}
+          {folder === "inbox" && (
+            <TouchableOpacity
+              onPress={() => moveTo("junk")}
+              style={styles.iconBtn}
+              hitSlop={8}
+              disabled={moving}
+              accessibilityLabel="Report spam"
+            >
+              <Ionicons name="alert-circle-outline" size={22} color={colors.textMuted} />
+            </TouchableOpacity>
           )}
-        </TouchableOpacity>
+          {folder === "junk" && (
+            <TouchableOpacity
+              onPress={() => moveTo("inbox")}
+              style={styles.iconBtn}
+              hitSlop={8}
+              disabled={moving}
+              accessibilityLabel="Not spam — move to Inbox"
+            >
+              <Ionicons name="checkmark-circle-outline" size={22} color={colors.textMuted} />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            onPress={() => moveTo(inTrash ? "inbox" : "trash")}
+            style={styles.iconBtn}
+            hitSlop={8}
+            disabled={moving}
+            accessibilityLabel={inTrash ? "Restore" : "Delete"}
+          >
+            {moving ? (
+              <ActivityIndicator color={colors.textMuted} />
+            ) : (
+              <Ionicons name={inTrash ? "mail-outline" : "trash-outline"} size={22} color={colors.textMuted} />
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       {locked && !email ? (
@@ -481,6 +508,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingBottom: 6,
   },
+  headerActions: { flexDirection: "row", alignItems: "center" },
   iconBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center", borderRadius: 20 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   scroll: { flex: 1 },
