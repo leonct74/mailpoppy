@@ -118,6 +118,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ domain, manualEntitlement: body.active, created: true }, { status: 200 });
   }
 
-  await ref.set({ manualEntitlement: body.active, updatedAt: now }, { merge: true });
-  return NextResponse.json({ domain, manualEntitlement: body.active, created: false }, { status: 200 });
+  // Existing domain: flip the comp flag, and — if a valid deployment is supplied — REFRESH the
+  // stored backend config too. This is the operator fix for a stale config after a teardown +
+  // redeploy (new Cognito pool/client/API), which otherwise makes resolve serve dead coordinates.
+  const update: Record<string, unknown> = { manualEntitlement: body.active, updatedAt: now };
+  const deploymentRefreshed = validDeployment(body.deployment);
+  if (deploymentRefreshed) update.deployment = body.deployment;
+  await ref.set(update, { merge: true });
+  return NextResponse.json(
+    { domain, manualEntitlement: body.active, created: false, deploymentRefreshed },
+    { status: 200 },
+  );
 }
