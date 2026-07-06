@@ -434,7 +434,9 @@ export function MessageScreen({ route, navigation }: Props) {
                 style={styles.previewPdf}
                 source={{ uri: preview.uri }}
                 originWhitelist={["file://*"]}
-                allowingReadAccessToURL={preview.uri}
+                // iOS WKWebView needs read access to the CONTAINING directory, not just the file,
+                // or a local PDF renders blank. Grant the cache dir the file lives in.
+                allowingReadAccessToURL={preview.uri.replace(/\/[^/]*$/, "/")}
                 javaScriptEnabled={false}
                 startInLoadingState
                 renderLoading={() => (
@@ -442,6 +444,14 @@ export function MessageScreen({ route, navigation }: Props) {
                     <ActivityIndicator color="#fff" />
                   </View>
                 )}
+                // If the WebView can't render it (older iOS, an odd file), don't trap the user on a
+                // blank screen — hand the file to the native share / Quick Look sheet instead.
+                onError={() => {
+                  if (!preview) return;
+                  const { uri, name, type } = preview;
+                  setPreview(null);
+                  void shareLocalFile(uri, name, type).catch(() => {});
+                }}
               />
             ))}
         </View>
