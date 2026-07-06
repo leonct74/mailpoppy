@@ -1,10 +1,12 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { Alert } from "react-native";
 import * as Notifications from "expo-notifications";
 import { auth } from "./auth";
 import { cognitoStorage } from "./cognitoStorage";
 import {
   hydrateDeployment,
   resolveConfig,
+  refreshConfigForEmail,
   getConfigForEmail,
   setActiveDomain,
   adoptLegacyForDomain,
@@ -78,6 +80,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // The email whose new-password challenge is in flight (its address isn't in the
   // token yet), so completeNewPassword knows which mailbox it's finishing.
   const pendingEmail = useRef<string | null>(null);
+  // A LIVE mirror of {accounts, activeEmail} for background callbacks (selfHealStale) so they
+  // recompute against current state instead of replaying a stale snapshot — which would clobber a
+  // mailbox the user added during the self-heal's Hub round-trip.
+  const stateRef = useRef<AccountsState>({ accounts: [], activeEmail: null });
+  useEffect(() => {
+    stateRef.current = { accounts, activeEmail };
+  }, [accounts, activeEmail]);
 
   const apply = useCallback((next: AccountsState) => {
     setAccounts(next.accounts);
@@ -104,6 +113,71 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await hydrateDeployment();
       await cognitoStorage.hydrate();
       const persisted = await loadAccounts();
+
+      // Self-heal a mailbox whose BACKEND WAS REBUILT while the app held a saved session. A
+      // teardown + redeploy makes a NEW Cognito pool, so the stored config (and the cached session
+      // under the old client) is stale: the mailbox looks signed-in but can't open mail. Re-resolve
+      // each mailbox's backend against the Hub; for any that genuinely changed, drop the dead
+      // session/key and prompt a re-login for JUST those (Cognito needs the password, so there's no
+      // seamless re-auth — but this replaces a silent break with a clear, targeted prompt, and never
+      // touches the mailboxes that are fine). Runs in the background so it never delays startup.
+      const selfHealStale = async (accts: MailboxAccount[]) => {
+        if (accts.length === 0) return;
+        // Re-resolve ONCE PER DOMAIN. Mailboxes on the same domain share one backend, and
+        // refreshConfigForEmail mutates the shared stored config — so refreshing per-email would
+        // race and miss the 2nd+ mailbox on a rebuilt domain (the first refresh already updated the
+        // config it compares against). Check each domain once, then flag all its mailboxes.
+        const oneEmailPerDomain = new Map<string, string>();
+        for (const a of accts) {
+          const d = domainOf(a.email);
+          if (!oneEmailPerDomain.has(d)) oneEmailPerDomain.set(d, a.email);
+        }
+        let changedDomains: Set<string>;
+        try {
+          const checks = await Promise.all(
+            [...oneEmailPerDomain].map(async ([d, em]) => ({ d, changed: (await refreshConfigForEmail(em)).changed })),
+          );
+          changedDomains = new Set(checks.filter((c) => c.changed).map((c) => c.d));
+        } catch {
+          return; // a resolve blip must never disturb a working session
+        }
+        const stale = accts.filter((a) => changedDomains.has(domainOf(a.email)));
+        if (stale.length === 0) return;
+        const staleSet = new Set(stale.map((a) => normaliseEmail(a.email)));
+        for (const a of stale) {
+          void unregisterForMailbox(a.username).catch(() => {});
+          auth.signOutUser(a.username);
+          forgetMailboxKey(a.email);
+        }
+        // Recompute against LIVE state (the user may have added/switched a mailbox during the
+        // background Hub round-trip): drop the stale mailboxes from the CURRENT list, never replay
+        // the restore snapshot. A mailbox added meanwhile on the same domain re-resolved its config
+        // fresh, so it isn't in staleSet and correctly survives.
+        const live = stateRef.current;
+        const remaining = live.accounts.filter((a) => !staleSet.has(normaliseEmail(a.email)));
+        if (remaining.length === 0) {
+          clearAllMailboxKeys();
+          resetContacts();
+          auth.signOut();
+          apply({ accounts: [], activeEmail: null });
+          setStatus("signed-out");
+        } else if (live.activeEmail && !staleSet.has(normaliseEmail(live.activeEmail))) {
+          // The active mailbox survived — just drop the stale ones, leave the foreground alone.
+          apply({ accounts: remaining, activeEmail: live.activeEmail });
+        } else {
+          // The active mailbox was stale — move the foreground to a surviving one.
+          const nextActive = remaining[0]!;
+          setActiveDomain(domainOf(nextActive.email));
+          auth.setActiveUsername(nextActive.username);
+          setActiveMailboxKey(nextActive.email);
+          apply({ accounts: remaining, activeEmail: nextActive.email });
+        }
+        Alert.alert(
+          stale.length === 1 ? "A mailbox needs to sign in again" : "Some mailboxes need to sign in again",
+          `${stale.map((a) => a.email).join(", ")} ${stale.length === 1 ? "was" : "were"} rebuilt on the server, so the ` +
+            `saved sign-in is no longer valid. Add ${stale.length === 1 ? "it" : "them"} again from the mailbox switcher to reconnect.`,
+        );
+      };
 
       // Bind every restored mailbox to its deployment so auth refreshes/signs each out
       // against the RIGHT Cognito pool — mailboxes may span several domains. Migration:
@@ -144,6 +218,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           apply(persisted);
           setStatus("signed-in");
           void registerForPushAllMailboxes(persisted.accounts.map((a) => a.username));
+          void selfHealStale(persisted.accounts);
           return;
         } catch {
           /* session expired → fall through */
@@ -166,6 +241,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             apply(migrated);
             setStatus("signed-in");
             void registerForPush();
+            void selfHealStale(migrated.accounts);
             return;
           }
         } catch {

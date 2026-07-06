@@ -244,3 +244,52 @@ export async function resolveConfig(email: string): Promise<DeploymentConfig> {
   setActiveConfig(domain, DEFAULT);
   return DEFAULT;
 }
+
+const stripSlash = (s: string) => (s ?? "").replace(/\/+$/, "");
+
+/** Two backend configs point at the SAME deployment. clientId/userPoolId/region are exact (Cognito
+ *  ids are case-sensitive); apiBaseUrl is trailing-slash- and case-insensitive (host casing). */
+const sameConfig = (a: DeploymentConfig, b: DeploymentConfig): boolean =>
+  a.clientId === b.clientId &&
+  a.userPoolId === b.userPoolId &&
+  a.region === b.region &&
+  stripSlash(a.apiBaseUrl).toLowerCase() === stripSlash(b.apiBaseUrl).toLowerCase();
+
+/**
+ * Re-resolve a mailbox's domain against the Hub and, if the backend has CHANGED (e.g. the domain
+ * was torn down + redeployed → a NEW Cognito pool), update the stored config and report
+ * `changed: true` so the caller can force a re-login — the cached session under the old pool is
+ * dead, so the mailbox would otherwise look signed-in but be unable to open mail.
+ *
+ * Deliberately conservative: only reports a change when a config was ALREADY stored for the domain
+ * AND the fresh one genuinely differs (client/pool/api/region). A missing config is adopted quietly
+ * (not treated as stale), and a 403 / 404 / network error leaves everything untouched — so a plan
+ * blip or being offline never disturbs a working mailbox. Does NOT change the active domain.
+ */
+export async function refreshConfigForEmail(email: string): Promise<{ changed: boolean }> {
+  const domain = domainFromEmail(email);
+  if (!domain) return { changed: false };
+  const stored = state.configs[domain];
+  try {
+    const res = await fetch(`${HUB_URL}/api/resolve?domain=${encodeURIComponent(domain)}`);
+    if (!res.ok) return { changed: false };
+    const c = await res.json();
+    if (!valid(c)) return { changed: false };
+    // A stored config that's just the DEFAULT fallback (written when a sign-in couldn't reach the
+    // Hub) is NOT a confirmed backend — adopt the real one quietly rather than mistaking the upgrade
+    // for a rebuild and force-signing-out a working mailbox. Same for a domain with no cache yet.
+    if (!stored || sameConfig(stored, DEFAULT)) {
+      state.configs[domain] = c;
+      persist();
+      return { changed: false };
+    }
+    const changed = !sameConfig(stored, c);
+    if (changed) {
+      state.configs[domain] = c;
+      persist();
+    }
+    return { changed };
+  } catch {
+    return { changed: false };
+  }
+}
