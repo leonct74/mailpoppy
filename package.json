@@ -12,7 +12,7 @@
   ],
   "scripts": {
     "typecheck": "tsc -b packages/core packages/api-client && npm run typecheck -w @mailpoppy/lambdas && npm run typecheck -w @mailpoppy/infra",
-    "test": "npm run test -w @mailpoppy/core && npm run test -w @mailpoppy/desktop",
+    "test": "npm run test -w @mailpoppy/core && npm run test -w @mailpoppy/desktop && npm run test -w @mailpoppy/desktop-sidecar",
     "desktop": "npm run dev -w @mailpoppy/desktop",
     "sidecar": "npm run dev -w @mailpoppy/desktop-sidecar",
     "synth": "npm run synth -w @mailpoppy/infra"

@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig, configDefaults } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -30,5 +30,8 @@ export default defineConfig({
     environment: "jsdom",
     globals: false,
     setupFiles: ["./src/test-setup.ts"],
+    // node-sidecar is a nested workspace with its own `node --test` suite; keep vitest out
+    // of it so its `node:test` files aren't mis-collected here.
+    exclude: [...configDefaults.exclude, "**/node-sidecar/**"],
   },
 });

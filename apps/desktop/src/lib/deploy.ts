@@ -39,8 +39,26 @@ export function deployStatus(stackName: string): Promise<DeployStatus> {
   return sidecar(`/deploy/backend/${encodeURIComponent(stackName)}/status`);
 }
 
+/** Reproducibility provenance (Verifiable Updates, Layer 2): exactly how to rebuild this
+ *  bundle from source and recompute its hashes. See docs/VERIFIABLE_UPDATES.md §5. */
+export interface UpdateBuildInfo {
+  /** Node version the manifest was built with (informational; esbuild output is Node-independent). */
+  node: string;
+  /** Pinned esbuild version — a verifier must use the same (npm ci installs it). */
+  esbuild: string;
+  /** esbuild `target` for the Lambda handlers. */
+  target: string;
+  /** Fixed archive mtime (defaults to the HEAD commit time) — makes the zip byte-reproducible. */
+  sourceDateEpoch: number;
+  /** The exact command that reproduces every hash in the manifest from `repo@commit`. */
+  command: string;
+  /** True once the backend build is reproducible (the local host binary is a separate trust root). */
+  reproducible: boolean;
+}
+
 /** Provenance for the backend code in an app build — what an update would ship, for the
- *  user (or their AI agent) to audit against the open repo. See docs/VERIFIABLE_UPDATES.md. */
+ *  user (or their AI agent) to audit against the open repo AND reproduce from source.
+ *  See docs/VERIFIABLE_UPDATES.md. */
 export interface UpdateManifest {
   poppy: string;
   /** Open repository URL (https). */
@@ -52,9 +70,13 @@ export interface UpdateManifest {
   builtAt: string;
   /** Content-addressed artifact key (the deployed Lambda bundle). */
   artifact: string;
+  /** sha256 of the exact deterministic zip deployed to S3 — reproducible on any runtime. */
+  archiveSha256: string;
   /** Human summary (the source commit's subject). */
   summary: string;
   handlers: { name: string; sha256: string }[];
+  /** How to reproduce the hashes above from source (Layer 2). */
+  build: UpdateBuildInfo;
 }
 
 export interface BackendVersion {
