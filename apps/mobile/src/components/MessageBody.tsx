@@ -17,6 +17,11 @@ import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, fonts } from "../theme";
 
+// The email renders on a light "sheet" (HTML mail is authored for a light page).
+// Not pure white — a gently cooled off-white that's far less jarring against the deep
+// navy app shell (#051424) while still reading as a clean light background for the mail.
+const SHEET_BG = "#eef1f5";
+
 // Crude "does this HTML reference remote content?" sniff — only drives whether we
 // show the "Load images" affordance; the CSP is what actually blocks loading.
 const REMOTE_ATTR = /(?:src|srcset|background|poster)\s*=\s*["']?\s*(?:https?:)?\/\//i;
@@ -37,7 +42,7 @@ function buildDoc(html: string, allowImages: boolean): string {
     // instead of forcing the app's dark theme onto it (which made forwarded mail look
     // broken / half-unstyled). This is how Gmail and Apple Mail show a message too.
     `:root{color-scheme:light;}` +
-    `html,body{margin:0;padding:0;background:#ffffff;}` +
+    `html,body{margin:0;padding:0;background:${SHEET_BG};}` +
     `body{padding:10px 12px;color:#111111;` +
     `font-family:-apple-system,Roboto,system-ui,sans-serif;font-size:16px;line-height:1.5;` +
     `overflow-wrap:break-word;-webkit-text-size-adjust:100%;}` +
@@ -135,10 +140,17 @@ export function MessageBody({ html, text }: { html: string | null; text: string 
 
 const styles = StyleSheet.create({
   text: { fontFamily: fonts.regular, fontSize: 16, lineHeight: 24, color: colors.text },
-  // The email renders on its own white sheet (a rounded card) — faithful to how the
-  // message was designed, and visually distinct from the dark app chrome around it.
-  webCard: { borderRadius: 12, overflow: "hidden", backgroundColor: "#ffffff" },
-  web: { backgroundColor: "#ffffff", width: "100%" },
+  // The email renders on its own light sheet (a rounded card) — faithful to how the
+  // message was designed, but a softened off-white with a hairline rim so it reads as a
+  // deliberate card against the navy shell instead of a harsh white slab.
+  webCard: {
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: SHEET_BG,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.10)",
+  },
+  web: { backgroundColor: SHEET_BG, width: "100%" },
   banner: {
     flexDirection: "row",
     alignItems: "center",
