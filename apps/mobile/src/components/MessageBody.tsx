@@ -33,23 +33,55 @@ function buildDoc(html: string, allowImages: boolean): string {
     `<meta name="viewport" content="width=device-width, initial-scale=1">` +
     `<meta http-equiv="Content-Security-Policy" content="${csp}">` +
     `<style>` +
-    `:root{color-scheme:dark;}` +
-    `html,body{margin:0;padding:0;}` +
-    `body{padding:4px 2px;background:${colors.bg};color:${colors.text};` +
+    // HTML email is authored for a WHITE page, so render it on its own light "sheet"
+    // instead of forcing the app's dark theme onto it (which made forwarded mail look
+    // broken / half-unstyled). This is how Gmail and Apple Mail show a message too.
+    `:root{color-scheme:light;}` +
+    `html,body{margin:0;padding:0;background:#ffffff;}` +
+    `body{padding:10px 12px;color:#111111;` +
     `font-family:-apple-system,Roboto,system-ui,sans-serif;font-size:16px;line-height:1.5;` +
-    `word-break:break-word;overflow-wrap:break-word;}` +
-    `img,video,table{max-width:100%!important;height:auto;}` +
-    `*{max-width:100%;box-sizing:border-box;}` +
-    `a{color:${colors.primary};}` +
-    `blockquote{border-left:3px solid ${colors.border};margin:0;padding-left:12px;color:${colors.textMuted};}` +
+    `overflow-wrap:break-word;-webkit-text-size-adjust:100%;}` +
+    // Stop a lone oversized image from forcing horizontal overflow, but do NOT force
+    // max-width on tables or every element — that overrides the email's intended
+    // layout and strips its formatting. Wide layouts are shrunk to fit by the injected
+    // JS below (the same "fit to width" Gmail does), which preserves the design.
+    `img{max-width:100%;height:auto;}` +
+    `a{color:#1a73e8;}` +
     `</style></head><body>${html}</body></html>`
   );
 }
 
-// Reports the content height back so the WebView can size to its content inside
-// the outer ScrollView. Runs via native injection (exempt from the page CSP);
-// re-measures a couple of times to catch late layout (e.g. images after "Load").
-const HEIGHT_JS = `(function(){function r(){try{window.ReactNativeWebView.postMessage(String(document.documentElement.scrollHeight));}catch(e){}}r();setTimeout(r,250);setTimeout(r,1200);})();true;`;
+// Shrink-to-fit + height reporter, injected natively (exempt from the page CSP).
+// First: if the email's natural content is wider than the screen (fixed-width
+// newsletter tables, etc.), rewrite the viewport so WebKit scales the WHOLE page
+// down to fit — the same "fit to width" Gmail/Apple Mail do, which preserves the
+// design instead of forcing elements to wrap. Then report the (scaled) content
+// height so the WebView sizes to it inside the outer ScrollView. Re-measures a few
+// times to catch late layout (e.g. images after "Load images").
+const FIT_HEIGHT_JS = `(function(){
+  var DEVICE_W = window.innerWidth;
+  var mv = document.querySelector('meta[name="viewport"]');
+  var fitted = false;
+  function run(){
+    try{
+      var de = document.documentElement, body = document.body;
+      if(!fitted && mv && body){
+        var contentW = Math.max(body.scrollWidth, de.scrollWidth, body.offsetWidth || 0);
+        if(contentW > DEVICE_W + 2){
+          fitted = true;
+          var scale = DEVICE_W / contentW;
+          mv.setAttribute('content','width='+contentW+', initial-scale='+scale+', maximum-scale='+scale+', user-scalable=no');
+          setTimeout(run, 80); // re-measure once the page reflows at the new width
+          return;
+        }
+      }
+      var layoutW = window.innerWidth || DEVICE_W;
+      var h = Math.ceil(de.scrollHeight * (DEVICE_W / layoutW));
+      window.ReactNativeWebView.postMessage(String(h));
+    }catch(e){}
+  }
+  run(); setTimeout(run,300); setTimeout(run,1200);
+})();true;`;
 
 export function MessageBody({ html, text }: { html: string | null; text: string }) {
   const [allowImages, setAllowImages] = useState(false);
@@ -73,13 +105,14 @@ export function MessageBody({ html, text }: { html: string | null; text: string 
           <Text style={styles.bannerText}>Remote images blocked — tap to load</Text>
         </TouchableOpacity>
       )}
+      <View style={styles.webCard}>
       <WebView
         originWhitelist={["*"]}
         source={{ html: buildDoc(html, allowImages) }}
         style={[styles.web, { height }]}
         scrollEnabled={false}
         javaScriptEnabled
-        injectedJavaScript={HEIGHT_JS}
+        injectedJavaScript={FIT_HEIGHT_JS}
         onMessage={(e) => {
           const h = Number(e.nativeEvent.data);
           if (h > 0) setHeight(Math.ceil(h));
@@ -95,13 +128,17 @@ export function MessageBody({ html, text }: { html: string | null; text: string 
           return true;
         }}
       />
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   text: { fontFamily: fonts.regular, fontSize: 16, lineHeight: 24, color: colors.text },
-  web: { backgroundColor: "transparent", width: "100%" },
+  // The email renders on its own white sheet (a rounded card) — faithful to how the
+  // message was designed, and visually distinct from the dark app chrome around it.
+  webCard: { borderRadius: 12, overflow: "hidden", backgroundColor: "#ffffff" },
+  web: { backgroundColor: "#ffffff", width: "100%" },
   banner: {
     flexDirection: "row",
     alignItems: "center",
