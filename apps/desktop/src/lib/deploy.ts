@@ -38,3 +38,27 @@ export function deployBackend(input: {
 export function deployStatus(stackName: string): Promise<DeployStatus> {
   return sidecar(`/deploy/backend/${encodeURIComponent(stackName)}/status`);
 }
+
+export interface BackendVersion {
+  stackExists: boolean;
+  /** LambdaCodeKey currently deployed on the stack. */
+  deployedKey?: string;
+  /** The code key bundled in THIS app build. */
+  currentKey: string;
+  updateAvailable: boolean;
+  /** CloudFormation StackStatus — non-`*_COMPLETE` means an operation is in flight. */
+  stackStatus?: string;
+  stackName: string;
+  region: string;
+}
+
+/** Is this app build carrying newer backend code than what's deployed? (read-only) */
+export function backendVersion(): Promise<BackendVersion> {
+  return sidecar("/deploy/backend/version");
+}
+
+/** Update the deployed backend to this build's Lambda code — code only, every other
+ *  setting preserved. Returns immediately; poll deployStatus for completion. */
+export function updateBackendCode(): Promise<DeployStarted> {
+  return sidecar("/deploy/backend/update", { method: "POST" });
+}

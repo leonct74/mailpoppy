@@ -3,6 +3,7 @@ import { resolveStackName } from "../lib/deploymentConfig";
 import { SendingAccessView } from "./SendingAccessView";
 import { SendSettingsEditor } from "./SendSettingsEditor";
 import { ResourcesView } from "./ResourcesView";
+import { BackendUpdate } from "./BackendUpdate";
 import { Card } from "../ui";
 
 // Account — the home for what's genuinely shared across the whole install rather
@@ -36,6 +37,12 @@ export function AccountView({ stackName = resolveStackName() }: { stackName?: st
           handles the no-backend state itself. Teardown is per-domain, in each
           domain's workspace. */}
       <ResourcesView stackName={stackName} />
+
+      {/* Backend updates — when a new app build ships an improved backend, apply it to
+          the stack running in the user's own AWS (it self-hides when there's no backend
+          or it's already current). This is the ONLY channel for backend fixes to reach
+          an existing install. */}
+      <BackendUpdate />
 
       {/* Sending access is an AWS account+region property (SES sandbox →
           production), not per-domain — it lives here. */}

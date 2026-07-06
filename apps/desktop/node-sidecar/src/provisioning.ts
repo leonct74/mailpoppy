@@ -643,6 +643,130 @@ export async function deployBackend(
   return { ok: true, stackName, operation, bucket, region };
 }
 
+export interface BackendVersion {
+  stackExists: boolean;
+  /** The LambdaCodeKey parameter currently deployed on the stack. */
+  deployedKey?: string;
+  /** The content-addressed code key bundled in THIS app build. */
+  currentKey: string;
+  updateAvailable: boolean;
+  /** CloudFormation StackStatus — lets the UI distinguish "up to date" from a stack
+   *  that's mid-operation (the deployed key parameter can already read the new value
+   *  while an update is still in flight or rolling back). */
+  stackStatus?: string;
+  stackName: string;
+  region: string;
+}
+
+/**
+ * Compare the app's bundled backend code (lambdaCodeKey — content-addressed, so it
+ * changes whenever any Lambda handler changes) against what's actually deployed on the
+ * stack (its LambdaCodeKey parameter). This is how the UI tells an existing install
+ * "a newer backend shipped with your app update". Read-only.
+ */
+export async function getBackendVersion(ctx: AwsContext, stackName = MAILPOPPY_STACK_NAME): Promise<BackendVersion> {
+  const { cloudformation } = clients(ctx);
+  try {
+    const out = await cloudformation.send(new DescribeStacksCommand({ StackName: stackName }));
+    const st = out.Stacks?.[0];
+    const deployedKey = st?.Parameters?.find((p) => p.ParameterKey === "LambdaCodeKey")?.ParameterValue;
+    return {
+      stackExists: !!st,
+      deployedKey,
+      currentKey: lambdaCodeKey,
+      updateAvailable: !!deployedKey && deployedKey !== lambdaCodeKey,
+      stackStatus: st?.StackStatus,
+      stackName,
+      region: ctx.region,
+    };
+  } catch (e) {
+    if (/does not exist/i.test((e as Error).message ?? "")) {
+      return { stackExists: false, currentKey: lambdaCodeKey, updateAvailable: false, stackName, region: ctx.region };
+    }
+    throw e;
+  }
+}
+
+/**
+ * Update a DEPLOYED backend to this app build's Lambda code + template, changing ONLY
+ * the code: every other stack parameter (the domain, the malware/encryption toggles) is
+ * kept at its deployed value via `UsePreviousValue`, so an update can NEVER silently
+ * flip a security setting the user chose. This is how a shipped backend improvement
+ * reaches an existing install with no teardown and no re-keying. Returns immediately;
+ * poll getDeployStatus for completion.
+ */
+export async function updateBackendCode(ctx: AwsContext, stackName = MAILPOPPY_STACK_NAME): Promise<DeployResult> {
+  const brokerTags = brokerStackTags();
+  if (isBrokerEnabled() && !brokerTags) {
+    throw new Error("AgentsPoppy broker mode is on but no approved connection — connect + approve MailPoppy before updating.");
+  }
+  const Tags = brokerTags ? [...brokerTags, { Key: "agentspoppy:managed", Value: "mailpoppy" }] : undefined;
+
+  const { s3, cloudformation } = clients(ctx);
+  const region = ctx.region;
+  const status = await stackStatus(ctx, stackName);
+  if (!status || status === "ROLLBACK_COMPLETE" || status === "REVIEW_IN_PROGRESS") {
+    throw new Error("There's no deployed backend to update yet — deploy it first from a domain's setup.");
+  }
+  // Refuse to stack an update on top of an in-flight operation (deploy/update/rollback)
+  // — CloudFormation would reject it with a raw error; give a clear message instead.
+  if (/_IN_PROGRESS$/.test(status)) {
+    throw new Error("An operation is already running on your backend — wait for it to finish, then try again.");
+  }
+  const accountId = await getAccountId(ctx);
+  const bucket = `mailpoppy-deploy-${accountId}-${region}`;
+  try {
+    await s3.send(new HeadBucketCommand({ Bucket: bucket }));
+  } catch {
+    await s3.send(
+      new CreateBucketCommand({
+        Bucket: bucket,
+        ...(region !== "us-east-1"
+          ? { CreateBucketConfiguration: { LocationConstraint: region as BucketLocationConstraint } }
+          : {}),
+      }),
+    );
+  }
+  await s3.send(new PutObjectCommand({ Bucket: bucket, Key: lambdaCodeKey, Body: Buffer.from(lambdaZipBase64, "base64") }));
+  const templateKey = `templates/${stackName}.template.json`;
+  await s3.send(new PutObjectCommand({ Bucket: bucket, Key: templateKey, Body: templateJson, ContentType: "application/json" }));
+  const templateUrl = `https://${bucket}.s3.${region}.amazonaws.com/${templateKey}`;
+
+  // ONLY the code key changes; every other parameter stays at its deployed value.
+  const Parameters = [
+    { ParameterKey: "MailDomain", UsePreviousValue: true },
+    { ParameterKey: "LambdaCodeBucket", UsePreviousValue: true },
+    { ParameterKey: "LambdaCodeKey", ParameterValue: lambdaCodeKey },
+    { ParameterKey: "EnableMalwareProtection", UsePreviousValue: true },
+    { ParameterKey: "EncryptionEnabled", UsePreviousValue: true },
+  ];
+  const Capabilities: Capability[] = ["CAPABILITY_IAM", "CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"];
+
+  let operation: DeployResult["operation"];
+  try {
+    await cloudformation.send(
+      new UpdateStackCommand({ StackName: stackName, TemplateURL: templateUrl, Parameters, Capabilities, Tags }),
+    );
+    operation = "UPDATE";
+  } catch (e) {
+    if (/No updates are to be performed/i.test((e as Error).message ?? "")) operation = "NO_CHANGE";
+    else throw e;
+  }
+
+  await record([
+    {
+      action: "created",
+      service: "CloudFormation",
+      resourceType: "Stack",
+      name: stackName,
+      region,
+      detail: `backend code update → ${lambdaCodeKey}`,
+    },
+  ]);
+
+  return { ok: true, stackName, operation, bucket, region };
+}
+
 export interface DeployStatus {
   status: string; // CloudFormation StackStatus, or "NOT_FOUND"
   complete: boolean;
@@ -677,7 +801,10 @@ export async function getDeployStatus(ctx: AwsContext, stackName: string): Promi
   for (const o of stack?.Outputs ?? []) if (o.OutputKey) outputs[o.OutputKey] = o.OutputValue ?? "";
 
   const complete = /_COMPLETE$/.test(status) && !status.startsWith("DELETE") && !status.includes("ROLLBACK");
-  const failed = /FAILED/.test(status) || status === "ROLLBACK_COMPLETE";
+  // Catch BOTH the create-rollback terminal (ROLLBACK_COMPLETE) and the update-rollback
+  // terminal (UPDATE_ROLLBACK_COMPLETE) — the latter is what a failed backend UPDATE
+  // settles at, and missing it left the updater hanging on a false "still working".
+  const failed = /FAILED/.test(status) || /ROLLBACK_COMPLETE$/.test(status);
 
   if (complete && outputs.RuleSetName) {
     // Only one receipt rule set can be active per account/region — make ours it.

@@ -625,6 +625,25 @@ app.get("/deploy/backend/:stackName/status", async (req) => {
   return prov.getDeployStatus(ctx(), stackName);
 });
 
+// Read-only: does THIS app build carry newer backend code than what's deployed?
+app.get("/deploy/backend/version", async (_req, reply) => {
+  try {
+    return await prov.getBackendVersion(ctx());
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
+// Mutating: update the deployed backend to this build's Lambda code (code only —
+// every other setting is kept via UsePreviousValue). Returns immediately; poll status.
+app.post("/deploy/backend/update", async (_req, reply) => {
+  try {
+    return await prov.updateBackendCode(ctx());
+  } catch (err) {
+    return reply.code(502).send({ ok: false, error: (err as Error).message });
+  }
+});
+
 // ---- SES sandbox / production access (DESIGN §13) ----
 
 // Read-only: sandbox vs production, review status of any in-flight request, send quota.
