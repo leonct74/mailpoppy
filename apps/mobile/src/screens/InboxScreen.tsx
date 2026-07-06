@@ -235,6 +235,37 @@ export function InboxScreen({ navigation }: Props) {
     }
   }, []);
 
+  // Move an ENTIRE conversation (every message in a collapsed thread row) at once, so a
+  // thread can be deleted / reported / restored from the inbox — not just one message.
+  // mail.move is a metadata op keyed by messageId, so it works even for a message whose
+  // body won't load (e.g. mail encrypted with a since-replaced key, or a fetch failure) —
+  // which is exactly what would otherwise leave a conversation impossible to clear.
+  const moveGroup = useCallback(async (group: ThreadGroup, target: Folder, failVerb: string) => {
+    try {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    } catch {
+      /* the reflow is cosmetic; the removal still happens */
+    }
+    const msgs = group.messages;
+    const ids = new Set(msgs.map((m) => m.messageId));
+    setItems((prev) => prev.filter((m) => !ids.has(m.messageId)));
+    const results = await Promise.allSettled(msgs.map((m) => mail.move(m.messageId, target)));
+    const failed = msgs.filter((_, i) => results[i]?.status === "rejected");
+    if (failed.length > 0) {
+      setItems((prev) => {
+        const present = new Set(prev.map((m) => m.messageId));
+        const missing = failed.filter((m) => !present.has(m.messageId));
+        return missing.length
+          ? [...prev, ...missing].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+          : prev;
+      });
+      Alert.alert(
+        `Couldn't ${failVerb}`,
+        `${failed.length} of ${msgs.length} message${msgs.length === 1 ? "" : "s"} couldn't be moved. Please try again.`,
+      );
+    }
+  }, []);
+
   // The swipe actions for the current folder. The last one is what a full ("long")
   // swipe commits; the rest are tap-only once the row snaps open. The inbox gets a
   // "Junk" (report spam) action alongside Delete — a visible way to flag unwanted
@@ -248,6 +279,18 @@ export function InboxScreen({ navigation }: Props) {
             { key: "delete", label: "Delete", icon: "trash", bg: colors.primaryDeep, fg: "#ffffff", run: (i) => moveItem(i, "trash", "delete") },
           ]
         : [{ key: "delete", label: "Delete", icon: "trash", bg: colors.primaryDeep, fg: "#ffffff", run: (i) => moveItem(i, "trash", "delete") }];
+
+  // The same actions for a collapsed CONVERSATION row: each runs over every message in
+  // the thread (ignoring the single item the swipe would otherwise pass).
+  const threadActionsFor = (group: ThreadGroup): SwipeAction[] =>
+    folder === "trash"
+      ? [{ key: "restore", label: "Restore", icon: "mail-outline", bg: colors.surfaceVariant, fg: colors.heading, run: () => moveGroup(group, "inbox", "restore") }]
+      : folder === "inbox"
+        ? [
+            { key: "junk", label: "Junk", icon: "alert-circle", bg: colors.surfaceVariant, fg: colors.heading, run: () => moveGroup(group, "junk", "report") },
+            { key: "delete", label: "Delete", icon: "trash", bg: colors.primaryDeep, fg: "#ffffff", run: () => moveGroup(group, "trash", "delete") },
+          ]
+        : [{ key: "delete", label: "Delete", icon: "trash", bg: colors.primaryDeep, fg: "#ffffff", run: () => moveGroup(group, "trash", "delete") }];
 
   // Permanently purge every message in Trash (server-side hard delete). Guarded
   // by a confirm dialog since it can't be undone.
@@ -383,12 +426,14 @@ export function InboxScreen({ navigation }: Props) {
                 actions={swipeActions}
               />
             ) : (
-              // A conversation row: no swipe (deleting "a thread" is ambiguous —
-              // individual messages are deletable from the reader), tap opens it.
-              <Row
+              // A conversation row: swipe deletes / reports / restores EVERY message in the
+              // thread at once — so a thread can be cleared from the inbox even if one of its
+              // messages won't open; tap opens the thread.
+              <SwipeableRow
                 item={group.latest}
                 folder={folder}
                 onPress={() => openThread(group)}
+                actions={threadActionsFor(group)}
                 count={group.count}
                 unreadOverride={group.unread}
               />
@@ -499,11 +544,16 @@ function SwipeableRow({
   folder,
   onPress,
   actions,
+  count,
+  unreadOverride,
 }: {
   item: MessageMeta;
   folder: Folder;
   onPress: () => void;
   actions: SwipeAction[];
+  /** >1 marks a collapsed conversation (shows the message count on the row). */
+  count?: number;
+  unreadOverride?: boolean;
 }) {
   const trayWidth = actions.length * ACTION_WIDTH;
   const translateX = useRef(new Animated.Value(0)).current;
@@ -593,7 +643,7 @@ function SwipeableRow({
         ))}
       </View>
       <Animated.View style={{ transform: [{ translateX }] }} {...pan.panHandlers}>
-        <Row item={item} folder={folder} onPress={handlePress} />
+        <Row item={item} folder={folder} onPress={handlePress} count={count} unreadOverride={unreadOverride} />
       </Animated.View>
     </View>
   );
