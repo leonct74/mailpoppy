@@ -83,6 +83,57 @@ function attachmentEntity(a: MimeAttachment): string {
   ].join(CRLF);
 }
 
+/** A minimal view of a received attachment, enough to decide whether it's safe to
+ *  drop from a reading copy. (Kept parser-agnostic so it's unit-testable in core.) */
+export interface AttachmentSummary {
+  /** Content-Disposition: "attachment" | "inline" | null/undefined. */
+  disposition?: string | null;
+  /** Content-ID, present when the body references the part via cid:. */
+  cid?: string | null;
+  /** True when the part is a `related` (inline) resource of the body. */
+  related?: boolean;
+  sizeBytes?: number;
+}
+
+/**
+ * Decide whether a message's attachments can be SAFELY stripped to a lightweight
+ * reading copy (see buildReadingEml). Only when: there's at least one attachment,
+ * NONE are inline/related/cid (those are body content and must stay so the body
+ * renders), and the total payload is big enough to be worth removing. Pure so it's
+ * unit-tested; the lambda wraps it with the actual rebuild + fail-safe fallback.
+ */
+export function canStripForReadingCopy(atts: AttachmentSummary[], minBytes: number): boolean {
+  if (atts.length === 0) return false;
+  if (atts.some((a) => a.related === true || a.disposition === "inline" || !!a.cid)) return false;
+  const total = atts.reduce((n, a) => n + (a.sizeBytes ?? 0), 0);
+  return total >= minBytes;
+}
+
+/**
+ * A lightweight "reading copy" of a received message: the SAME body (text/html) and
+ * the SAME attachment list, but each attachment reduced to a zero-byte STUB — its
+ * Content-Type + filename are kept (so the reader still lists it) while the megabytes
+ * of payload are dropped. Received attachments are stored as their own S3 objects and
+ * fetched on demand, so the copy the reader downloads to show the BODY needn't carry
+ * them. Reuses buildMimeMessage — an empty-bytes attachment IS the stub — so the output
+ * is the exact format clients already parse for Sent mail. Only safe for messages with
+ * no INLINE/cid images (those are body content); the caller gates on that.
+ */
+export function buildReadingEml(
+  m: Omit<MimeMessageInput, "attachments"> & {
+    attachments?: { filename: string; contentType: string }[];
+  },
+): string {
+  return buildMimeMessage({
+    ...m,
+    attachments: (m.attachments ?? []).map((a) => ({
+      filename: a.filename,
+      contentType: a.contentType,
+      bytes: new Uint8Array(0),
+    })),
+  });
+}
+
 /** Build a complete raw MIME message string (CRLF line endings). */
 export function buildMimeMessage(m: MimeMessageInput): string {
   const att = m.attachments ?? [];

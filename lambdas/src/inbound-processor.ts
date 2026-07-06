@@ -43,6 +43,8 @@ import {
   generateContentKey,
   encryptWithContentKey,
   wrapContentKey,
+  buildReadingEml,
+  canStripForReadingCopy,
   type Sodium,
 } from "@mailpoppy/core";
 import _sodium from "libsodium-wrappers-sumo";
@@ -304,6 +306,68 @@ function isDmarcRoleRecipient(addr: string): boolean {
 /** True if any attachment looks like a (compressed) DMARC report file. */
 function hasReportCandidate(attachments: Attachment[]): boolean {
   return attachments.some((a) => dmarcAttachmentKind(a.filename, a.contentType) !== null);
+}
+
+// Below this, stripping attachment bytes from the reading copy isn't worth the churn.
+const READ_COPY_MIN_ATTACHMENT_BYTES = 128 * 1024;
+
+function addressTexts(a: AddressObject | AddressObject[] | undefined): string[] {
+  if (!a) return [];
+  return (Array.isArray(a) ? a : [a]).map((x) => x.text).filter(Boolean);
+}
+
+/**
+ * A LIGHTWEIGHT reading copy of the raw .eml — body (text/html) intact, but each
+ * attachment reduced to a zero-byte stub — so opening a message with a big attachment
+ * doesn't force the client to download+decrypt+parse those megabytes just to show the
+ * body (the attachment bytes live in their own S3 object, fetched on demand).
+ *
+ * Fail-safe by construction: returns the FULL raw eml unchanged whenever stripping
+ * isn't provably safe — no attachments, any INLINE/cid image (those are body content
+ * and must render), a small total payload (not worth it), or the rebuilt copy isn't
+ * actually smaller. So reading can never regress; worst case it's the same as before.
+ */
+function readingCopyEml(raw: string, parsed: Awaited<ReturnType<typeof simpleParser>>, messageId: string): string {
+  try {
+    const atts = parsed.attachments ?? [];
+    // Inline images are referenced from the HTML (cid:) — keep the whole message so
+    // they still render; only strip a large, purely-real-attachment message. Gate is a
+    // pure, unit-tested helper (canStripForReadingCopy).
+    const strippable = canStripForReadingCopy(
+      atts.map((a) => ({
+        disposition: a.contentDisposition,
+        cid: a.cid,
+        related: a.related,
+        sizeBytes: a.size ?? a.content?.length ?? 0,
+      })),
+      READ_COPY_MIN_ATTACHMENT_BYTES,
+    );
+    if (!strippable) return raw;
+    const references = Array.isArray(parsed.references) ? parsed.references.join(" ") : parsed.references ?? undefined;
+    const built = buildReadingEml({
+      from: parsed.from?.text ?? "",
+      to: addressTexts(parsed.to),
+      cc: addressTexts(parsed.cc),
+      subject: parsed.subject ?? "",
+      text: parsed.text ?? "",
+      html: parsed.html || undefined,
+      // buildReadingEml re-wraps the id in <>; strip any existing brackets first.
+      messageId: (parsed.messageId ?? "").replace(/^<|>$/g, "") || messageId,
+      date: parsed.date ?? new Date(),
+      inReplyTo: parsed.inReplyTo ?? undefined,
+      references,
+      // Match the stored-row fallback name (attachment-<i>) so the chip label and the
+      // saved-file name agree for unnamed attachments; index alignment is unchanged.
+      attachments: atts.map((a, i) => ({
+        filename: a.filename ?? `attachment-${i}`,
+        contentType: a.contentType ?? "application/octet-stream",
+      })),
+    });
+    return built.length < raw.length ? built : raw;
+  } catch (e) {
+    console.warn(`readingCopyEml: keeping full raw for ${messageId}`, e);
+    return raw;
+  }
 }
 
 /** Decompress a report attachment to its XML text (gzip/zip/plain), or null. */
@@ -647,8 +711,13 @@ export async function handler(event: SESEvent): Promise<void> {
     // Seal the body by OVERWRITING the raw .eml with ciphertext (scrubs the
     // plaintext SES wrote to S3). The client fetches this object, recovers the
     // content key from its per-recipient wrap, decrypts, then parses as today.
+    // We seal a LIGHTWEIGHT reading copy (attachments already live in their own S3
+    // objects, fetched on demand) so opening a message with a big attachment doesn't
+    // download+decrypt+parse those megabytes just to show the body. readingCopyEml
+    // returns the full raw whenever stripping isn't provably safe (see below).
     if (contentKey) {
-      const sealedEml = encryptWithContentKey(sodium, contentKey, sodium.from_string(raw));
+      const readEml = readingCopyEml(raw, parsed, messageId);
+      const sealedEml = encryptWithContentKey(sodium, contentKey, sodium.from_string(readEml));
       await s3.send(
         new PutObjectCommand({ Bucket: MAIL_BUCKET, Key: key, Body: sealedEml, ContentType: "application/octet-stream" }),
       );

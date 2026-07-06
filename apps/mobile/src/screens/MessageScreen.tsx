@@ -369,9 +369,36 @@ export function MessageScreen({ route, navigation }: Props) {
           <Text style={styles.errorText}>{error}</Text>
         </View>
       ) : !email ? (
-        <View style={styles.centered}>
-          <ActivityIndicator color={colors.primary} />
-        </View>
+        // Progressive render: show the header (subject + sender, already known from the
+        // list) INSTANTLY, with a spinner where the body will land — so opening feels
+        // immediate even while the message is fetched/decrypted/parsed, instead of a
+        // blank spinner. The layout matches the loaded view so there's no visual jump.
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+          <Text style={styles.subject}>{route.params.subject || "(no subject)"}</Text>
+          <View style={styles.badgeRow}>
+            <View style={styles.chip}>
+              <Text style={styles.chipText}>{folderLabel(folder).toUpperCase()}</Text>
+            </View>
+            {encrypted && (
+              <View style={styles.encBadge}>
+                <Ionicons name="lock-closed" size={12} color={colors.primary} />
+                <Text style={styles.encBadgeText}>ENCRYPTED</Text>
+              </View>
+            )}
+          </View>
+          <View style={styles.senderCard}>
+            <Avatar label={route.params.from || "?"} />
+            <View style={styles.senderInfo}>
+              <Text style={styles.senderName} numberOfLines={1}>
+                {displayName(route.params.from || "")}
+              </Text>
+              <Text style={styles.senderMeta}>Loading message…</Text>
+            </View>
+          </View>
+          <View style={styles.bodyLoading}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        </ScrollView>
       ) : (
         <>
           <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
@@ -639,6 +666,7 @@ const styles = StyleSheet.create({
   senderName: { fontFamily: fonts.semibold, fontSize: 16, color: colors.text },
   senderMeta: { fontFamily: fonts.regular, fontSize: 12, color: colors.textMuted, marginTop: 1 },
   body: { fontFamily: fonts.regular, fontSize: 16, lineHeight: 24, color: colors.text },
+  bodyLoading: { paddingTop: 48, alignItems: "center" },
   attachments: { marginTop: 22, gap: 8 },
   attachLabel: { fontFamily: fonts.semibold, fontSize: 12, color: colors.textMuted, letterSpacing: 0.4, marginBottom: 2 },
   attachChip: {
