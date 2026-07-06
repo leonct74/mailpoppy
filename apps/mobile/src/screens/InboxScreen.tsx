@@ -567,9 +567,17 @@ function SwipeableRow({
   actionsRef.current = actions;
 
   const settle = useCallback(
-    (to: number) => {
+    (to: number, velocity?: number) => {
       offset.current = to;
-      Animated.spring(translateX, { toValue: to, useNativeDriver: true, speed: 22, bounciness: 0 }).start();
+      Animated.spring(translateX, {
+        toValue: to,
+        useNativeDriver: true,
+        speed: 22,
+        bounciness: 0,
+        // Carry the finger's velocity into the spring so a flick keeps its momentum
+        // instead of visibly re-accelerating from a standstill.
+        ...(velocity != null ? { velocity } : {}),
+      }).start();
     },
     [translateX],
   );
@@ -601,12 +609,24 @@ function SwipeableRow({
       },
       onPanResponderRelease: (_e, g) => {
         const final = offset.current + g.dx;
-        // A full swipe commits the primary action — but only for a single-action row
-        // (with two buttons, dragging far enough to reveal both would otherwise fire
-        // Delete; there you snap the tray open and tap the button you want).
-        if (actionsRef.current.length === 1 && final <= -width.current * 0.42) commit();
-        else if (final <= -trayWidth * 0.55) settle(-trayWidth);
-        else settle(0);
+        // Decide from BOTH how far the row was dragged AND how fast the finger was
+        // moving at release — a quick flick should open/commit even if it didn't
+        // travel far (a purely distance-based test forces a slow, deliberate drag,
+        // which is exactly what felt broken). vx is px/ms; ~0.35 ≈ a decisive flick.
+        const flungOpen = g.vx <= -0.35;
+        const flungShut = g.vx >= 0.35;
+        if (actionsRef.current.length === 1) {
+          // Single action (Delete / Restore): a long drag OR a leftward flick commits;
+          // a rightward flick always cancels.
+          if (!flungShut && (final <= -width.current * 0.4 || (flungOpen && final <= -24))) commit();
+          else settle(0, g.vx);
+        } else {
+          // Multi-action inbox row: reveal the tray (both buttons) on a long-enough
+          // drag OR a leftward flick — never auto-commit Delete here. A rightward
+          // flick or a short, slow drag snaps it shut.
+          if (!flungShut && (flungOpen || final <= -trayWidth * 0.4)) settle(-trayWidth, g.vx);
+          else settle(0, g.vx);
+        }
       },
       onPanResponderTerminate: () => settle(offset.current <= -trayWidth / 2 ? -trayWidth : 0),
     }),
