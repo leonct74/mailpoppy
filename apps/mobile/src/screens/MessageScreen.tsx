@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Modal,
+  BackHandler,
   Platform,
   ScrollView,
   StyleSheet,
@@ -26,6 +26,7 @@ import {
   fetchEncryptedAttachmentToCache,
   shareLocalFile,
   openInAndroidViewer,
+  looksLikePdf,
 } from "../attachments";
 import { decryptEml, MailboxLockedError } from "../mailboxKeys";
 import { loadCachedMessage, saveCachedMessage } from "../messageCache";
@@ -61,6 +62,12 @@ export function MessageScreen({ route, navigation }: Props) {
     type?: string;
     kind: "image" | "pdf";
   } | null>(null);
+  // The PDF viewer's error is shown INLINE (with an "open elsewhere" button) rather
+  // than silently dismissing — a blank auto-close hides the real cause. `pdfBox` is
+  // the measured size of the viewer's container: react-native-pdf must mount at a
+  // real, non-zero size or PDFKit renders nothing, so we wait for onLayout to mount it.
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [pdfBox, setPdfBox] = useState<{ w: number; h: number } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -111,6 +118,18 @@ export function MessageScreen({ route, navigation }: Props) {
       alive = false;
     };
   }, [messageId, encrypted, encWrappedKey, folder, attempt]);
+
+  // The full-screen preview is an in-tree overlay (not a Modal), so wire the
+  // Android hardware back button to close it instead of leaving the screen —
+  // this is the behaviour the Modal's onRequestClose used to give for free.
+  useEffect(() => {
+    if (!preview || Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      setPreview(null);
+      return true;
+    });
+    return () => sub.remove();
+  }, [preview]);
 
   // Re-signing in validates the password with the server FIRST (never guessing at
   // the key wrap), then re-establishes and keychain-persists this mailbox's key.
@@ -192,6 +211,16 @@ export function MessageScreen({ route, navigation }: Props) {
         if (pdf && Platform.OS === "android") {
           await openInAndroidViewer(uri, name, type);
         } else {
+          // For a PDF, confirm the cached bytes really start with "%PDF-" before the
+          // native viewer mounts. If not (a garbage/partial decrypt — e.g. a re-keyed
+          // mailbox), still open the overlay but show WHY, with a working "open in
+          // another app" button, instead of silently bouncing to the share sheet.
+          const badPdf = pdf && !(await looksLikePdf(uri));
+          setPreviewError(
+            badPdf
+              ? "This file doesn't start with a PDF header, so it may be corrupt or from a mailbox that was reset. You can still open it in another app."
+              : null,
+          );
           setPreview({ uri, name, type, kind: img ? "image" : "pdf" });
         }
       } else if (encrypted && encWrappedKey) {
@@ -412,45 +441,86 @@ export function MessageScreen({ route, navigation }: Props) {
 
       {/* Full-screen attachment preview: images zoom in-app; PDFs render in a native
           PDFKit view (Android PDFs never reach here — they open in the system viewer).
-          Share/save lives in the top bar. */}
-      <Modal visible={!!preview} transparent animationType="fade" onRequestClose={() => setPreview(null)}>
-        <View style={styles.previewBackdrop}>
+          Share/save lives in the top bar.
+
+          This is an absolute-fill overlay in the normal view tree, NOT a <Modal>.
+          A PDF previously "opened black then closed": react-native-pdf's Fabric
+          native view (RNPDFPdfView) fired onError on mount and our handler dismissed
+          it. Three defences here, since the exact trigger couldn't be confirmed off a
+          device: (1) render outside <Modal>, which on iOS hosts children in a separate
+          window where a Fabric child can get a zero first layout; (2) mount the <Pdf>
+          only after onLayout reports a real size, with EXPLICIT width/height (never a
+          zero-frame flex); (3) on any error, show the real message inline instead of
+          auto-dismissing, so a residual failure is diagnosable, not silent. Images
+          (pure-JS) were never affected. */}
+      {preview && (
+        <View style={styles.previewOverlay} pointerEvents="auto">
           <View style={[styles.previewBar, { paddingTop: insets.top + 6 }]}>
             <TouchableOpacity onPress={() => setPreview(null)} style={styles.iconBtn} hitSlop={8} accessibilityLabel="Close preview">
               <Ionicons name="close" size={26} color="#fff" />
             </TouchableOpacity>
             <Text style={styles.previewName} numberOfLines={1}>
-              {preview?.name}
+              {preview.name}
             </Text>
             <TouchableOpacity onPress={() => void sharePreview()} style={styles.iconBtn} hitSlop={8} accessibilityLabel="Share or save attachment">
               <Ionicons name="share-outline" size={24} color="#fff" />
             </TouchableOpacity>
           </View>
-          {preview &&
-            (preview.kind === "image" ? (
-              <ZoomableImage uri={preview.uri} />
-            ) : (
-              <Pdf
-                style={styles.previewPdf}
-                // The file is already local (decrypted to cache for sealed mail), so no
-                // network fetch — PDFKit renders it directly. fitPolicy 0 = fit width.
-                source={{ uri: preview.uri, cache: false }}
-                fitPolicy={0}
-                spacing={8}
-                trustAllCerts={false}
-                renderActivityIndicator={() => <ActivityIndicator color="#fff" />}
-                // A corrupt/unsupported file shouldn't trap the user on a blank screen —
-                // hand it to the native share / Quick Look sheet instead.
-                onError={() => {
-                  if (!preview) return;
-                  const { uri, name, type } = preview;
-                  setPreview(null);
-                  void shareLocalFile(uri, name, type).catch(() => {});
-                }}
-              />
-            ))}
+          {preview.kind === "image" ? (
+            <ZoomableImage uri={preview.uri} />
+          ) : (
+            <View
+              style={styles.previewPdf}
+              onLayout={(e) => {
+                const { width, height } = e.nativeEvent.layout;
+                // Mount the PDF only once the container has a real size — a zero-size
+                // first layout makes PDFKit render nothing (blank/black). Measure once.
+                if (width > 0 && height > 0 && !pdfBox) setPdfBox({ w: width, h: height });
+              }}
+            >
+              {previewError ? (
+                // Show the REAL failure instead of vanishing, so the cause is visible
+                // (and the user can still open it in another app). Auto-dismissing here
+                // is what hid the actual PDFKit error for so long.
+                <View style={styles.previewErrorBox}>
+                  <Ionicons name="document-outline" size={40} color="rgba(255,255,255,0.5)" />
+                  <Text style={styles.previewErrorTitle}>Can't display this PDF here</Text>
+                  <Text style={styles.previewErrorMsg}>{previewError}</Text>
+                  <TouchableOpacity style={styles.previewErrorBtn} onPress={() => void sharePreview()} activeOpacity={0.85}>
+                    <Ionicons name="share-outline" size={18} color="#fff" />
+                    <Text style={styles.previewErrorBtnText}>Open in another app</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : pdfBox ? (
+                <Pdf
+                  // Explicit measured size (never flex/zero) + a fresh instance per file.
+                  key={preview.uri}
+                  style={{ width: pdfBox.w, height: pdfBox.h, backgroundColor: "transparent" }}
+                  // The file is already local (decrypted to cache for sealed mail) and
+                  // was sanity-checked as a real PDF, so PDFKit renders it directly.
+                  source={{ uri: preview.uri }}
+                  fitPolicy={0}
+                  spacing={8}
+                  trustAllCerts={false}
+                  renderActivityIndicator={() => <ActivityIndicator color="#fff" />}
+                  onLoadComplete={() => setPreviewError(null)}
+                  onError={(err) => {
+                    const m =
+                      err && typeof err === "object" && "message" in err
+                        ? String((err as { message?: unknown }).message ?? "")
+                        : String(err ?? "");
+                    setPreviewError(m || "PDFKit couldn't open this file.");
+                  }}
+                />
+              ) : (
+                <View style={styles.previewErrorBox}>
+                  <ActivityIndicator color="#fff" />
+                </View>
+              )}
+            </View>
+          )}
         </View>
-      </Modal>
+      )}
     </View>
   );
 }
@@ -613,7 +683,18 @@ const styles = StyleSheet.create({
   },
   unlockBtnDisabled: { opacity: 0.5 },
   unlockBtnText: { fontFamily: fonts.bold, fontSize: 15, color: colors.primaryText },
-  previewBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.96)" },
+  // Absolute-fill so the in-tree overlay covers the entire screen (header included),
+  // matching what the old full-window Modal did. Opaque black backdrop.
+  previewOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.96)",
+    zIndex: 10,
+    elevation: 10,
+  },
   previewBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -624,6 +705,21 @@ const styles = StyleSheet.create({
   },
   previewName: { flex: 1, fontFamily: fonts.semibold, fontSize: 14, color: "#fff", textAlign: "center" },
   previewPdf: { flex: 1, backgroundColor: "transparent" },
+  previewErrorBox: { flex: 1, alignItems: "center", justifyContent: "center", padding: 28, gap: 12 },
+  previewErrorTitle: { fontFamily: fonts.bold, fontSize: 16, color: "#fff", marginTop: 4 },
+  previewErrorMsg: { fontFamily: fonts.regular, fontSize: 13, color: "rgba(255,255,255,0.6)", textAlign: "center", lineHeight: 19 },
+  previewErrorBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 10,
+    height: 46,
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+  },
+  previewErrorBtnText: { fontFamily: fonts.semibold, fontSize: 14, color: "#fff" },
   actionBar: {
     flexDirection: "row",
     gap: 10,

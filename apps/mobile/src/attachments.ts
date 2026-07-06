@@ -45,6 +45,29 @@ async function existing(path: string): Promise<string | null> {
   }
 }
 
+/**
+ * Cheap on-disk sanity check: does this cached file actually start with the PDF
+ * magic bytes `%PDF-`? Read as base64 so we can peek just the header. Used before
+ * handing a file to the native PDFKit view — a decrypt that produced garbage
+ * (e.g. a re-keyed mailbox / wrong wrapped key) or a 0-length/partial write would
+ * otherwise mount, flash black and error out. Returning false routes the caller
+ * to the share / Quick Look sheet instead of the in-app viewer.
+ */
+export async function looksLikePdf(fileUri: string): Promise<boolean> {
+  try {
+    // base64 of the 5 bytes "%PDF-" is "JVBERi0" (7 chars). Reading 6 bytes gives
+    // 8 base64 chars; the first 7 are what we compare, so 6 bytes is plenty.
+    const head = await FileSystem.readAsStringAsync(fileUri, {
+      encoding: FileSystem.EncodingType.Base64,
+      position: 0,
+      length: 6,
+    });
+    return head.startsWith("JVBERi0");
+  } catch {
+    return false;
+  }
+}
+
 /** Download a received attachment into the cache, returning its local file:// URI
  *  (used both to preview attachments in-app and as the staging step before sharing).
  *  A deterministic `cacheKey` makes repeat views hit the cached copy. */
@@ -79,6 +102,12 @@ export async function fetchEncryptedAttachmentToCache(
   }
   const ciphertextB64 = await (await fetch(url)).text();
   const bytes = await decryptAttachmentBytes(meta, ciphertextB64);
+  // Decryption of a re-keyed / orphaned mailbox can silently yield empty or
+  // garbage bytes. Surface that as a real error here rather than writing a
+  // non-openable file that flashes black in the PDF viewer downstream.
+  if (!bytes || bytes.length === 0) {
+    throw new Error("This attachment couldn't be decrypted on this device. Re-enter the mailbox password and try again.");
+  }
   await FileSystem.writeAsStringAsync(target, bytesToBase64(bytes), { encoding: FileSystem.EncodingType.Base64 });
   return target;
 }
