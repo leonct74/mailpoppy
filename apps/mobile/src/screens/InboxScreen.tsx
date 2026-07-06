@@ -598,7 +598,17 @@ function SwipeableRow({
 
   const pan = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4,
+      // Never claim on touch-start — a tap must still open the message. Claim on MOVE
+      // as soon as the drag is more horizontal than vertical (a LOW bar, so an ordinary
+      // swipe from anywhere on the row works — not just a dead-straight one grabbed at
+      // the far right). Also claim in the CAPTURE phase: inside a vertical FlatList the
+      // scroll view grabs the gesture first, and capturing a clearly-horizontal drag is
+      // the only reliable way to win it back.
+      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 6 && Math.abs(g.dx) >= Math.abs(g.dy),
+      onMoveShouldSetPanResponderCapture: (_e, g) => Math.abs(g.dx) > 9 && Math.abs(g.dx) > Math.abs(g.dy) * 1.3,
+      // Once we own the swipe, don't let the FlatList reclaim it mid-drag — that steal
+      // is what made a swipe "reset immediately" unless it was perfectly horizontal.
+      onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: () => translateX.stopAnimation(),
       onPanResponderMove: (_e, g) => {
         // A single-action row tracks the finger across the whole row (a full swipe
@@ -609,22 +619,19 @@ function SwipeableRow({
       },
       onPanResponderRelease: (_e, g) => {
         const final = offset.current + g.dx;
-        // Decide from BOTH how far the row was dragged AND how fast the finger was
-        // moving at release — a quick flick should open/commit even if it didn't
-        // travel far (a purely distance-based test forces a slow, deliberate drag,
-        // which is exactly what felt broken). vx is px/ms; ~0.35 ≈ a decisive flick.
-        const flungOpen = g.vx <= -0.35;
-        const flungShut = g.vx >= 0.35;
+        // Decide from BOTH distance AND velocity, with LOW bars so an ordinary swipe
+        // opens instead of snapping shut. vx is px/ms; ~0.2 ≈ a gentle flick.
+        const flungOpen = g.vx <= -0.2;
+        const flungShut = g.vx >= 0.2;
         if (actionsRef.current.length === 1) {
-          // Single action (Delete / Restore): a long drag OR a leftward flick commits;
+          // Single action (Delete / Restore): a moderate drag OR a leftward flick commits;
           // a rightward flick always cancels.
-          if (!flungShut && (final <= -width.current * 0.4 || (flungOpen && final <= -24))) commit();
+          if (!flungShut && (final <= -width.current * 0.35 || (flungOpen && final <= -20))) commit();
           else settle(0, g.vx);
         } else {
-          // Multi-action inbox row: reveal the tray (both buttons) on a long-enough
-          // drag OR a leftward flick — never auto-commit Delete here. A rightward
-          // flick or a short, slow drag snaps it shut.
-          if (!flungShut && (flungOpen || final <= -trayWidth * 0.4)) settle(-trayWidth, g.vx);
+          // Multi-action inbox row: reveal the tray on even a short drag (~30% of it) OR a
+          // flick — never auto-commit Delete here. A rightward flick snaps it shut.
+          if (!flungShut && (flungOpen || final <= -trayWidth * 0.3)) settle(-trayWidth, g.vx);
           else settle(0, g.vx);
         }
       },
