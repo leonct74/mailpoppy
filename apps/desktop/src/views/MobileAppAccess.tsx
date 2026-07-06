@@ -58,12 +58,16 @@ export function MobileAppAccess({
           </Button>
         </>
       ) : status === "current" ? (
-        <p className="mt-1.5 max-w-2xl text-sm text-on-surface-variant">
-          <span className="inline-flex items-center gap-1.5 font-medium text-secondary">
-            <CheckCircle2 className="size-4" /> The mobile &amp; web apps are on for {domain}.
-          </span>{" "}
-          Everyone with a mailbox here can sign in from anywhere.
-        </p>
+        // Subscribed/entitled + config current → a compact reminder, NOT the big sign-up panel
+        // (which reads like they haven't paid). Just confirms it's on and names the app to use.
+        <div className="mt-1.5 flex items-start gap-1.5 text-sm text-on-surface-variant">
+          <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-secondary" />
+          <span>
+            <b className="text-on-surface">On for {domain}.</b> Everyone with a mailbox here signs in with the{" "}
+            <b className="text-on-surface">MailPoppy</b> app on iPhone, Android and the web — coming soon to the App
+            Store &amp; Google Play.
+          </span>
+        </div>
       ) : (
         <>
           <p className="mt-1 max-w-2xl text-sm text-on-surface-variant">
