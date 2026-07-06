@@ -11,7 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { WebView } from "react-native-webview";
+import Pdf from "react-native-pdf";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
@@ -54,7 +54,7 @@ export function MessageScreen({ route, navigation }: Props) {
   const [unlockError, setUnlockError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0); // bump to refetch after an unlock
   // An attachment being viewed full-screen (already downloaded/decrypted to cache).
-  // kind "image" → ZoomableImage; "pdf" → WebView (iOS renders PDFs natively).
+  // kind "image" → ZoomableImage; "pdf" → react-native-pdf (native PDFKit view).
   const [preview, setPreview] = useState<{
     uri: string;
     name: string;
@@ -175,15 +175,15 @@ export function MessageScreen({ route, navigation }: Props) {
       // Content-Type + filename. Checking both stops a PDF from falling through to the share sheet.
       const img = isImage(contentType, filename) || isImage(local?.mimeType, local?.filename);
       const pdf = !img && (isPdf(contentType, filename) || isPdf(local?.mimeType, local?.filename));
-      // Give the viewer/share sheet a correct type, and name the cached file with a matching
-      // extension so WKWebView (which infers the type from the extension) renders the PDF, not a blank.
+      // Give the viewer/share sheet a correct type, and name the cached file with a
+      // matching extension so the system viewer and share sheet identify it as a PDF.
       const type = pdf ? "application/pdf" : (contentType ?? local?.mimeType);
       let name = filename ?? local?.filename ?? `attachment-${index}`;
       if (pdf && !/\.pdf$/i.test(name)) name = `${name}.pdf`;
       if (img || pdf) {
-        // Images and PDFs get previewed (encrypted ones are decrypted to the cache
-        // first); saving/sharing is a button inside the preview. Android's WebView
-        // can't render PDFs, so there they open straight in the system PDF viewer.
+        // Images and PDFs get previewed in-app (encrypted ones are decrypted to the
+        // cache first); saving/sharing is a button inside the preview. On Android, PDFs
+        // open straight in the system PDF viewer instead of the in-app PDFKit view.
         const cacheKey = `${messageId}-${index}`;
         const uri =
           encrypted && encWrappedKey
@@ -410,9 +410,9 @@ export function MessageScreen({ route, navigation }: Props) {
         </>
       )}
 
-      {/* Full-screen attachment preview: images zoom in-app; PDFs render in a WebView
-          (iOS renders them natively — Android PDFs never reach here, they open in the
-          system viewer). Share/save lives in the top bar. */}
+      {/* Full-screen attachment preview: images zoom in-app; PDFs render in a native
+          PDFKit view (Android PDFs never reach here — they open in the system viewer).
+          Share/save lives in the top bar. */}
       <Modal visible={!!preview} transparent animationType="fade" onRequestClose={() => setPreview(null)}>
         <View style={styles.previewBackdrop}>
           <View style={[styles.previewBar, { paddingTop: insets.top + 6 }]}>
@@ -430,22 +430,17 @@ export function MessageScreen({ route, navigation }: Props) {
             (preview.kind === "image" ? (
               <ZoomableImage uri={preview.uri} />
             ) : (
-              <WebView
+              <Pdf
                 style={styles.previewPdf}
-                source={{ uri: preview.uri }}
-                originWhitelist={["file://*"]}
-                // iOS WKWebView needs read access to the CONTAINING directory, not just the file,
-                // or a local PDF renders blank. Grant the cache dir the file lives in.
-                allowingReadAccessToURL={preview.uri.replace(/\/[^/]*$/, "/")}
-                javaScriptEnabled={false}
-                startInLoadingState
-                renderLoading={() => (
-                  <View style={styles.previewPdfLoading}>
-                    <ActivityIndicator color="#fff" />
-                  </View>
-                )}
-                // If the WebView can't render it (older iOS, an odd file), don't trap the user on a
-                // blank screen — hand the file to the native share / Quick Look sheet instead.
+                // The file is already local (decrypted to cache for sealed mail), so no
+                // network fetch — PDFKit renders it directly. fitPolicy 0 = fit width.
+                source={{ uri: preview.uri, cache: false }}
+                fitPolicy={0}
+                spacing={8}
+                trustAllCerts={false}
+                renderActivityIndicator={() => <ActivityIndicator color="#fff" />}
+                // A corrupt/unsupported file shouldn't trap the user on a blank screen —
+                // hand it to the native share / Quick Look sheet instead.
                 onError={() => {
                   if (!preview) return;
                   const { uri, name, type } = preview;
@@ -629,15 +624,6 @@ const styles = StyleSheet.create({
   },
   previewName: { flex: 1, fontFamily: fonts.semibold, fontSize: 14, color: "#fff", textAlign: "center" },
   previewPdf: { flex: 1, backgroundColor: "transparent" },
-  previewPdfLoading: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   actionBar: {
     flexDirection: "row",
     gap: 10,
