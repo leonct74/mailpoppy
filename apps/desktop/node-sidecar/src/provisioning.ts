@@ -108,7 +108,7 @@ import {
   waitUntilStackDeleteComplete,
   type Capability,
 } from "@aws-sdk/client-cloudformation";
-import { templateJson, lambdaZipBase64, lambdaCodeKey } from "./generated/backend-bundle";
+import { templateJson, lambdaZipBase64, lambdaCodeKey, updateManifest } from "./generated/backend-bundle";
 import {
   CognitoIdentityProviderClient,
   AdminCreateUserCommand,
@@ -532,6 +532,18 @@ export interface DeployResult {
   region: string;
 }
 
+/** Stack tags = AgentsPoppy attribution (when broker-connected) + `mailpoppy:sourceCommit`
+ *  — the open-repo commit THIS build came from. Recording it on the stack lets the
+ *  Update panel show from→to and lets a user/agent audit the deployed code against the
+ *  public source. See docs/VERIFIABLE_UPDATES.md. */
+function stackTags(
+  brokerTags: { Key: string; Value: string }[] | null | undefined,
+): { Key: string; Value: string }[] | undefined {
+  const tags = brokerTags ? [...brokerTags, { Key: "agentspoppy:managed", Value: "mailpoppy" }] : [];
+  if (updateManifest.commit) tags.push({ Key: "mailpoppy:sourceCommit", Value: updateManifest.commit });
+  return tags.length ? tags : undefined;
+}
+
 /**
  * Deploy (or update) the backend stack into the admin's account WITHOUT cdk: we
  * upload the embedded asset-free template + prebuilt Lambda zip to a per-account
@@ -556,7 +568,7 @@ export async function deployBackend(
   // taggable resource. AgentsPoppy attributes + tears down by the stable app tag
   // (`agentspoppy:app`), so this survives a connection supersede; the connection id
   // rides along only as an audit tag.
-  const Tags = brokerTags ? [...brokerTags, { Key: "agentspoppy:managed", Value: "mailpoppy" }] : undefined;
+  const Tags = stackTags(brokerTags);
 
   const { s3, cloudformation } = clients(ctx);
   const region = ctx.region;
@@ -654,6 +666,12 @@ export interface BackendVersion {
    *  that's mid-operation (the deployed key parameter can already read the new value
    *  while an update is still in flight or rolling back). */
   stackStatus?: string;
+  /** The open-repo commit currently deployed (from the mailpoppy:sourceCommit tag), so
+   *  the UI can show from→to and build the agent-audit prompt. Absent on backends
+   *  deployed before provenance tagging existed. */
+  deployedCommit?: string;
+  /** The provenance manifest for the code in THIS app build (what an update would ship). */
+  manifest: typeof updateManifest;
   stackName: string;
   region: string;
 }
@@ -670,18 +688,28 @@ export async function getBackendVersion(ctx: AwsContext, stackName = MAILPOPPY_S
     const out = await cloudformation.send(new DescribeStacksCommand({ StackName: stackName }));
     const st = out.Stacks?.[0];
     const deployedKey = st?.Parameters?.find((p) => p.ParameterKey === "LambdaCodeKey")?.ParameterValue;
+    const deployedCommit = st?.Tags?.find((t) => t.Key === "mailpoppy:sourceCommit")?.Value;
     return {
       stackExists: !!st,
       deployedKey,
       currentKey: lambdaCodeKey,
       updateAvailable: !!deployedKey && deployedKey !== lambdaCodeKey,
       stackStatus: st?.StackStatus,
+      deployedCommit,
+      manifest: updateManifest,
       stackName,
       region: ctx.region,
     };
   } catch (e) {
     if (/does not exist/i.test((e as Error).message ?? "")) {
-      return { stackExists: false, currentKey: lambdaCodeKey, updateAvailable: false, stackName, region: ctx.region };
+      return {
+        stackExists: false,
+        currentKey: lambdaCodeKey,
+        updateAvailable: false,
+        manifest: updateManifest,
+        stackName,
+        region: ctx.region,
+      };
     }
     throw e;
   }
@@ -700,7 +728,7 @@ export async function updateBackendCode(ctx: AwsContext, stackName = MAILPOPPY_S
   if (isBrokerEnabled() && !brokerTags) {
     throw new Error("AgentsPoppy broker mode is on but no approved connection — connect + approve MailPoppy before updating.");
   }
-  const Tags = brokerTags ? [...brokerTags, { Key: "agentspoppy:managed", Value: "mailpoppy" }] : undefined;
+  const Tags = stackTags(brokerTags);
 
   const { s3, cloudformation } = clients(ctx);
   const region = ctx.region;

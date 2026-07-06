@@ -1,7 +1,37 @@
 import { useEffect, useRef, useState } from "react";
-import { Server, RefreshCw, CheckCircle2 } from "lucide-react";
+import { Server, RefreshCw, CheckCircle2, GitBranch, ShieldCheck, Check, AlertTriangle } from "lucide-react";
 import { Card, Button, Spinner } from "../ui";
+import { ExtLink } from "../ui/ExtLink";
 import { backendVersion, updateBackendCode, deployStatus, type BackendVersion } from "../lib/deploy";
+
+const short = (s?: string) => (s ? s.slice(0, 12) : "");
+
+/** The self-contained prompt a user pastes into THEIR OWN agent to audit this update
+ *  against the open repo before applying it. See docs/VERIFIABLE_UPDATES.md §6. */
+function auditPrompt(ver: BackendVersion): string {
+  const m = ver.manifest;
+  const range = ver.deployedCommit ? `${ver.deployedCommit}..${m.commit}` : `at commit ${m.commit}`;
+  return [
+    "You are auditing an update a program wants to apply to MY OWN cloud infrastructure. Tell me whether it is safe to apply.",
+    "",
+    `Poppy: ${m.poppy}`,
+    `Open repository: ${m.repo}`,
+    `Update: from commit ${ver.deployedCommit ?? "(unknown)"} to ${m.commit}`,
+    `Claimed summary: "${m.summary}"`,
+    `Deployed artifact hash: ${m.artifact}`,
+    m.dirty
+      ? "NOTE: this build reports uncommitted local changes, so it may NOT exactly match the repo — treat with extra caution."
+      : "",
+    "",
+    "Please:",
+    `1. Read the diff ${range} in the repository.`,
+    "2. Confirm the code changes MATCH the summary — flag anything the summary omits.",
+    "3. Flag anything security-relevant: new outbound network calls / data egress, access to credentials or secrets, broader IAM/permissions, changes to how my data is stored or encrypted, or new third-party dependencies.",
+    "4. Give a verdict — APPLY / DO NOT APPLY / NEEDS A HUMAN — with your reasons.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
 
 // The email engine runs in the USER's own AWS. When a new app build ships an improved
 // backend (any Lambda change bumps the content-addressed code key), the deployed stack
@@ -19,6 +49,7 @@ export function BackendUpdate() {
   const [progress, setProgress] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   // Stop the poll loop from touching state after the panel unmounts (navigating away
   // mid-update). Cleared on unmount.
   const aliveRef = useRef(true);
@@ -86,8 +117,28 @@ export function BackendUpdate() {
     }
   }
 
+  async function copyPrompt() {
+    if (!ver) return;
+    try {
+      await navigator.clipboard.writeText(auditPrompt(ver));
+      setCopied(true);
+      setTimeout(() => {
+        if (aliveRef.current) setCopied(false);
+      }, 2500);
+    } catch {
+      setErr("Couldn't copy to the clipboard — select the prompt text and copy it manually.");
+    }
+  }
+
   // No deployed backend yet → nothing to update (the setup wizard handles first deploy).
   if (!loading && (!ver || !ver.stackExists)) return null;
+
+  const m = ver?.manifest;
+  const compareUrl = m
+    ? ver?.deployedCommit
+      ? `${m.repo}/compare/${ver.deployedCommit}...${m.commit}`
+      : `${m.repo}/commit/${m.commit}`
+    : "";
 
   // The stack is mid-operation (a deploy/update/rollback is running) — the deployed
   // code-key parameter can already read the new value while resources haven't settled,
@@ -128,6 +179,48 @@ export function BackendUpdate() {
             Your app was updated with backend improvements that aren't live in your account yet. Applying takes a minute
             or two and doesn't interrupt sending or receiving.
           </p>
+
+          {/* What this update IS — provenance against the open repo, so you (or your own
+              AI agent) can check it before you apply anything to your cloud. */}
+          {m && (
+            <div className="mt-3 rounded-md border border-outline-variant/20 bg-surface-container-lowest/60 p-3">
+              <div className="text-sm text-on-surface">{m.summary || "Backend code update"}</div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-on-surface-variant">
+                <span className="flex items-center gap-1">
+                  <GitBranch className="size-3.5" />
+                  {short(ver?.deployedCommit) || "unknown"} → {short(m.commit)}
+                </span>
+                {compareUrl && (
+                  <ExtLink href={compareUrl} className="text-primary hover:underline">
+                    View diff ↗
+                  </ExtLink>
+                )}
+              </div>
+              {m.dirty && (
+                <div className="mt-2 flex items-center gap-1.5 text-xs text-tertiary">
+                  <AlertTriangle className="size-3.5" />
+                  This build has uncommitted changes — it may not exactly match the repo.
+                </div>
+              )}
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                <Button variant="secondary" size="sm" onClick={() => void copyPrompt()}>
+                  {copied ? (
+                    <>
+                      <Check className="size-3.5" /> Copied
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck className="size-3.5" /> Verify with your AI agent
+                    </>
+                  )}
+                </Button>
+                <span className="text-xs text-on-surface-variant/80">
+                  Copies an audit prompt — paste it to your agent to review this change against the open source.
+                </span>
+              </div>
+            </div>
+          )}
+
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <Button onClick={() => void onUpdate()} disabled={busy}>
               {busy ? "Updating…" : "Update backend"}

@@ -57,7 +57,38 @@ async function main() {
   execFileSync("npx", ["cdk", "synth", "--quiet"], { cwd: infraDir, stdio: "inherit" });
   const templateJson = readFileSync(join(infraDir, "cdk.out", "MailpoppyMailStack.template.json"), "utf8");
 
-  // 4. Emit the embedded module the sidecar imports.
+  // 4. Build the UPDATE MANIFEST — the provenance a user (or their AI agent) uses to
+  //    audit what this backend update does against the open repo before applying it.
+  //    See docs/VERIFIABLE_UPDATES.md (Layer 1). Anchored on the source commit; the
+  //    per-handler hashes are the built-artifact provenance; `dirty` warns the working
+  //    tree had uncommitted changes (so the build may not exactly match the commit).
+  const git = (args) => {
+    try {
+      return execFileSync("git", args, { cwd: repoRoot }).toString().trim();
+    } catch {
+      return "";
+    }
+  };
+  const normalizeRepo = (url) =>
+    (url || "")
+      .replace(/^git@([^:]+):/, "https://$1/")
+      .replace(/^ssh:\/\/git@/, "https://")
+      .replace(/\.git$/, "");
+  const updateManifest = {
+    poppy: "mailpoppy",
+    repo: normalizeRepo(git(["config", "--get", "remote.origin.url"])),
+    commit: git(["rev-parse", "HEAD"]),
+    dirty: git(["status", "--porcelain"]) !== "",
+    builtAt: new Date().toISOString(),
+    artifact: lambdaCodeKey,
+    summary: git(["log", "-1", "--format=%s"]),
+    handlers: HANDLERS.map((h) => ({
+      name: h,
+      sha256: createHash("sha256").update(readFileSync(join(outDir, `${h}.js`))).digest("hex"),
+    })),
+  };
+
+  // 5. Emit the embedded module the sidecar imports.
   console.log("[3/3] generate src/generated/backend-bundle.ts");
   mkdirSync(genDir, { recursive: true });
   const zipB64 = readFileSync(zipPath).toString("base64");
@@ -68,6 +99,7 @@ async function main() {
       `export const lambdaCodeKey = ${JSON.stringify(lambdaCodeKey)};`,
       `export const lambdaZipBase64 = ${JSON.stringify(zipB64)};`,
       `export const templateJson = ${JSON.stringify(templateJson)};`,
+      `export const updateManifest = ${JSON.stringify(updateManifest)} as const;`,
       "",
     ].join("\n"),
   );

@@ -39,6 +39,24 @@ export function deployStatus(stackName: string): Promise<DeployStatus> {
   return sidecar(`/deploy/backend/${encodeURIComponent(stackName)}/status`);
 }
 
+/** Provenance for the backend code in an app build — what an update would ship, for the
+ *  user (or their AI agent) to audit against the open repo. See docs/VERIFIABLE_UPDATES.md. */
+export interface UpdateManifest {
+  poppy: string;
+  /** Open repository URL (https). */
+  repo: string;
+  /** Source commit this build came from. */
+  commit: string;
+  /** True if the build's working tree had uncommitted changes (may not match the commit). */
+  dirty: boolean;
+  builtAt: string;
+  /** Content-addressed artifact key (the deployed Lambda bundle). */
+  artifact: string;
+  /** Human summary (the source commit's subject). */
+  summary: string;
+  handlers: { name: string; sha256: string }[];
+}
+
 export interface BackendVersion {
   stackExists: boolean;
   /** LambdaCodeKey currently deployed on the stack. */
@@ -48,6 +66,10 @@ export interface BackendVersion {
   updateAvailable: boolean;
   /** CloudFormation StackStatus — non-`*_COMPLETE` means an operation is in flight. */
   stackStatus?: string;
+  /** Open-repo commit currently deployed (absent on pre-provenance backends). */
+  deployedCommit?: string;
+  /** Provenance manifest for the code THIS build would deploy. */
+  manifest: UpdateManifest;
   stackName: string;
   region: string;
 }
