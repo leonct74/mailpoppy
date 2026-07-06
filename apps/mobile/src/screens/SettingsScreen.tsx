@@ -7,6 +7,7 @@ import type { RootStackParamList } from "../navigation";
 import { useAuth } from "../AuthContext";
 import { PrivacyPolicy } from "../components/PrivacyPolicy";
 import { MailboxSwitcher } from "../components/MailboxSwitcher";
+import { BUILD_TAG } from "../buildInfo";
 import { colors, fonts } from "../theme";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Settings">;
@@ -67,8 +68,11 @@ export function SettingsScreen({ navigation }: Props) {
         </TouchableOpacity>
 
         <View style={styles.footer}>
-          <Ionicons name="cloud-outline" size={14} color={colors.textMuted} />
-          <Text style={styles.footerText}>MailPoppy · on your own AWS account</Text>
+          <View style={styles.footerRow}>
+            <Ionicons name="cloud-outline" size={14} color={colors.textMuted} />
+            <Text style={styles.footerText}>MailPoppy · on your own AWS account</Text>
+          </View>
+          <Text style={styles.buildText}>{BUILD_TAG}</Text>
         </View>
       </View>
 
@@ -128,6 +132,8 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   signOutText: { fontFamily: fonts.semibold, fontSize: 15, color: colors.danger },
-  footer: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: "auto", paddingBottom: 16 },
+  footer: { alignItems: "center", gap: 4, marginTop: "auto", paddingBottom: 16 },
+  footerRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
   footerText: { fontFamily: fonts.medium, fontSize: 12, color: colors.textMuted },
+  buildText: { fontFamily: fonts.regular, fontSize: 10, color: colors.textMuted, textAlign: "center", paddingHorizontal: 24 },
 });
