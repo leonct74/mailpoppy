@@ -68,6 +68,53 @@ export async function looksLikePdf(fileUri: string): Promise<boolean> {
   }
 }
 
+/** Delete a cached attachment file (best effort). Used to bust a stale/corrupt copy
+ *  — the cache is keyed by message+index and survives app updates, so a bad file
+ *  written by an earlier build would otherwise be served forever. */
+export async function bustCachedFile(fileUri: string): Promise<void> {
+  try {
+    await FileSystem.deleteAsync(fileUri, { idempotent: true });
+  } catch {
+    /* best effort — a missing file is fine */
+  }
+}
+
+/** A short diagnostic description of a file's first bytes: its size plus a
+ *  printable-ASCII peek at the header. Explains WHY a "PDF" won't open — e.g. an S3
+ *  error page begins "<?xml", a JSON error begins "{", double-base64 begins "JVBER",
+ *  a real (if truncated) PDF begins "%PDF-". Read via the ranged base64 API. */
+export async function describeFileHead(fileUri: string): Promise<string> {
+  try {
+    const info = await FileSystem.getInfoAsync(fileUri);
+    const size = info.exists ? (info.size ?? 0) : 0;
+    const b64 = await FileSystem.readAsStringAsync(fileUri, {
+      encoding: FileSystem.EncodingType.Base64,
+      position: 0,
+      length: 18,
+    });
+    const ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const rev: Record<string, number> = {};
+    for (let i = 0; i < ALPHA.length; i++) rev[ALPHA[i]!] = i;
+    let acc = 0;
+    let bits = 0;
+    let ascii = "";
+    for (const ch of b64) {
+      const v = rev[ch];
+      if (v === undefined) continue;
+      acc = (acc << 6) | v;
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        const c = (acc >> bits) & 0xff;
+        ascii += c >= 32 && c < 127 ? String.fromCharCode(c) : "·";
+      }
+    }
+    return `${size} bytes, begins "${ascii.slice(0, 12)}"`;
+  } catch {
+    return "file unreadable";
+  }
+}
+
 /** Download a received attachment into the cache, returning its local file:// URI
  *  (used both to preview attachments in-app and as the staging step before sharing).
  *  A deterministic `cacheKey` makes repeat views hit the cached copy. */
@@ -77,8 +124,15 @@ export async function fetchAttachmentToCache(url: string, filename: string, cach
     const hit = await existing(target);
     if (hit) return hit;
   }
-  const { uri } = await FileSystem.downloadAsync(url, target);
-  return uri;
+  const res = await FileSystem.downloadAsync(url, target);
+  if (res.status < 200 || res.status >= 300) {
+    // downloadAsync writes ANY response body to the file — including an expired
+    // presigned URL's 403 XML error page, which would then be cached as "the PDF".
+    // Delete it and surface the failure instead of caching an error page.
+    await bustCachedFile(res.uri);
+    throw new Error(`Couldn't download this attachment (server returned ${res.status}).`);
+  }
+  return res.uri;
 }
 
 /**
@@ -100,7 +154,13 @@ export async function fetchEncryptedAttachmentToCache(
     const hit = await existing(target);
     if (hit) return hit;
   }
-  const ciphertextB64 = await (await fetch(url)).text();
+  const res = await fetch(url);
+  if (!res.ok) {
+    // An expired presigned URL returns a 403 XML error body — decrypting that as
+    // ciphertext would fail confusingly. Surface the download failure directly.
+    throw new Error(`Couldn't download this attachment (server returned ${res.status}).`);
+  }
+  const ciphertextB64 = await res.text();
   const bytes = await decryptAttachmentBytes(meta, ciphertextB64);
   // Decryption of a re-keyed / orphaned mailbox can silently yield empty or
   // garbage bytes. Surface that as a real error here rather than writing a

@@ -27,6 +27,8 @@ import {
   shareLocalFile,
   openInAndroidViewer,
   looksLikePdf,
+  bustCachedFile,
+  describeFileHead,
 } from "../attachments";
 import { decryptEml, MailboxLockedError } from "../mailboxKeys";
 import { loadCachedMessage, saveCachedMessage } from "../messageCache";
@@ -204,22 +206,29 @@ export function MessageScreen({ route, navigation }: Props) {
         // cache first); saving/sharing is a button inside the preview. On Android, PDFs
         // open straight in the system PDF viewer instead of the in-app PDFKit view.
         const cacheKey = `${messageId}-${index}`;
-        const uri =
+        const fetchToCache = () =>
           encrypted && encWrappedKey
-            ? await fetchEncryptedAttachmentToCache(url, { encrypted, encWrappedKey }, name, cacheKey)
-            : await fetchAttachmentToCache(url, name, cacheKey);
+            ? fetchEncryptedAttachmentToCache(url, { encrypted, encWrappedKey }, name, cacheKey)
+            : fetchAttachmentToCache(url, name, cacheKey);
+        let uri = await fetchToCache();
         if (pdf && Platform.OS === "android") {
           await openInAndroidViewer(uri, name, type);
         } else {
-          // For a PDF, confirm the cached bytes really start with "%PDF-" before the
-          // native viewer mounts. If not (a garbage/partial decrypt — e.g. a re-keyed
-          // mailbox), still open the overlay but show WHY, with a working "open in
-          // another app" button, instead of silently bouncing to the share sheet.
-          const badPdf = pdf && !(await looksLikePdf(uri));
+          // A PDF must actually start with "%PDF-". If the cached copy doesn't, it may
+          // be a corrupt file written by an EARLIER build — the cache is keyed by
+          // message+index and survives app updates, so a bad file (e.g. from the
+          // re-key/teardown churn) would be served forever. Bust it and refetch once.
+          let badPdf = pdf && !(await looksLikePdf(uri));
+          if (badPdf) {
+            await bustCachedFile(uri);
+            uri = await fetchToCache();
+            badPdf = !(await looksLikePdf(uri));
+          }
+          // If it's STILL not a PDF, show the concrete file head so the cause is
+          // visible (S3 error XML → "<?xml", double-base64 → "JVBER", truncated real
+          // PDF → "%PDF-"), with a working "open in another app" button.
           setPreviewError(
-            badPdf
-              ? "This file doesn't start with a PDF header, so it may be corrupt or from a mailbox that was reset. You can still open it in another app."
-              : null,
+            badPdf ? `This file isn't a readable PDF (${await describeFileHead(uri)}). It may be corrupt or from a mailbox that was reset — you can still open it in another app.` : null,
           );
           setPreview({ uri, name, type, kind: img ? "image" : "pdf" });
         }
