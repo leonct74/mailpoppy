@@ -169,10 +169,17 @@ export function MessageScreen({ route, navigation }: Props) {
     try {
       const { url, filename, contentType } = await mail.getAttachmentUrl(messageId, index);
       const local = email?.attachments[index];
-      const name = filename ?? local?.filename ?? `attachment-${index}`;
-      const type = contentType ?? local?.mimeType;
-      const img = isImage(type, name);
-      const pdf = isPdf(type, name);
+      // Detect the kind from BOTH the access-API metadata AND the raw-email parse. The access API
+      // returns the STORED metadata, which can be a generic octet-stream with an extension-less name
+      // (so a real PDF/image looks like a plain download); the eml parse usually carries the true
+      // Content-Type + filename. Checking both stops a PDF from falling through to the share sheet.
+      const img = isImage(contentType, filename) || isImage(local?.mimeType, local?.filename);
+      const pdf = !img && (isPdf(contentType, filename) || isPdf(local?.mimeType, local?.filename));
+      // Give the viewer/share sheet a correct type, and name the cached file with a matching
+      // extension so WKWebView (which infers the type from the extension) renders the PDF, not a blank.
+      const type = pdf ? "application/pdf" : (contentType ?? local?.mimeType);
+      let name = filename ?? local?.filename ?? `attachment-${index}`;
+      if (pdf && !/\.pdf$/i.test(name)) name = `${name}.pdf`;
       if (img || pdf) {
         // Images and PDFs get previewed (encrypted ones are decrypted to the cache
         // first); saving/sharing is a button inside the preview. Android's WebView
@@ -183,7 +190,7 @@ export function MessageScreen({ route, navigation }: Props) {
             ? await fetchEncryptedAttachmentToCache(url, { encrypted, encWrappedKey }, name, cacheKey)
             : await fetchAttachmentToCache(url, name, cacheKey);
         if (pdf && Platform.OS === "android") {
-          await openInAndroidViewer(uri, name, type ?? "application/pdf");
+          await openInAndroidViewer(uri, name, type);
         } else {
           setPreview({ uri, name, type, kind: img ? "image" : "pdf" });
         }
