@@ -17,11 +17,6 @@ import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, fonts } from "../theme";
 
-// The email renders on a light "sheet" (HTML mail is authored for a light page).
-// Not pure white — a gently cooled off-white that's far less jarring against the deep
-// navy app shell (#051424) while still reading as a clean light background for the mail.
-const SHEET_BG = "#eef1f5";
-
 // Crude "does this HTML reference remote content?" sniff — only drives whether we
 // show the "Load images" affordance; the CSP is what actually blocks loading.
 const REMOTE_ATTR = /(?:src|srcset|background|poster)\s*=\s*["']?\s*(?:https?:)?\/\//i;
@@ -38,20 +33,23 @@ function buildDoc(html: string, allowImages: boolean): string {
     `<meta name="viewport" content="width=device-width, initial-scale=1">` +
     `<meta http-equiv="Content-Security-Policy" content="${csp}">` +
     `<style>` +
-    // HTML email is authored for a WHITE page, so render it on its own light "sheet"
-    // instead of forcing the app's dark theme onto it (which made forwarded mail look
-    // broken / half-unstyled). This is how Gmail and Apple Mail show a message too.
-    `:root{color-scheme:light;}` +
-    `html,body{margin:0;padding:0;background:${SHEET_BG};}` +
+    // HTML email is authored for a WHITE page. Render it in DARK mode so it blends with
+    // the app's dark surfaces instead of a jarring white block: invert(1)+hue-rotate(180)
+    // flips LIGHTNESS while keeping hues, so the email's whites go dark and its dark text
+    // goes light + readable; media is re-inverted so photos/logos aren't negatives. The
+    // body background is transparent, so ordinary (no-background) mail sits directly on
+    // the surface colour painted behind the WebView — visually identical to the sender
+    // and attachment cards. (Layout/formatting is untouched — we don't force max-widths;
+    // wide emails are shrunk to fit by the injected JS below, as Gmail does.)
+    `:root{color-scheme:dark;}` +
+    `html,body{margin:0;padding:0;background:transparent;}` +
     `body{padding:10px 12px;color:#111111;` +
     `font-family:-apple-system,Roboto,system-ui,sans-serif;font-size:16px;line-height:1.5;` +
-    `overflow-wrap:break-word;-webkit-text-size-adjust:100%;}` +
-    // Stop a lone oversized image from forcing horizontal overflow, but do NOT force
-    // max-width on tables or every element — that overrides the email's intended
-    // layout and strips its formatting. Wide layouts are shrunk to fit by the injected
-    // JS below (the same "fit to width" Gmail does), which preserves the design.
+    `overflow-wrap:break-word;-webkit-text-size-adjust:100%;` +
+    `filter:invert(1) hue-rotate(180deg);}` +
     `img{max-width:100%;height:auto;}` +
-    `a{color:#1a73e8;}` +
+    `img,video,picture,canvas{filter:invert(1) hue-rotate(180deg);}` +
+    `a{color:#0a58ca;}` +
     `</style></head><body>${html}</body></html>`
   );
 }
@@ -140,17 +138,10 @@ export function MessageBody({ html, text }: { html: string | null; text: string 
 
 const styles = StyleSheet.create({
   text: { fontFamily: fonts.regular, fontSize: 16, lineHeight: 24, color: colors.text },
-  // The email renders on its own light sheet (a rounded card) — faithful to how the
-  // message was designed, but a softened off-white with a hairline rim so it reads as a
-  // deliberate card against the navy shell instead of a harsh white slab.
-  webCard: {
-    borderRadius: 12,
-    overflow: "hidden",
-    backgroundColor: SHEET_BG,
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.10)",
-  },
-  web: { backgroundColor: SHEET_BG, width: "100%" },
+  // The email renders in dark mode on the app's surface colour, so the body blends with
+  // the sender/attachment cards instead of being a bright white block.
+  webCard: { borderRadius: 12, overflow: "hidden", backgroundColor: colors.surface },
+  web: { backgroundColor: colors.surface, width: "100%" },
   banner: {
     flexDirection: "row",
     alignItems: "center",
