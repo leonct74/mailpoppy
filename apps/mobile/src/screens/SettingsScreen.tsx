@@ -73,10 +73,12 @@ export function SettingsScreen({ navigation }: Props) {
             <Ionicons name="cloud-outline" size={14} color={colors.textMuted} />
             <Text style={styles.footerText}>MailPoppy · on your own AWS account</Text>
           </View>
-          {/* The REAL native build number, read at runtime — always matches what
-              TestFlight shows, unlike a number baked into a string by hand. */}
+          {/* The REAL native build number, read at runtime (always matches TestFlight);
+              omitted when the platform doesn't expose it. BUILD_TAG is a bare code
+              identifying the JS — user-visible, so no feature lists. */}
           <Text style={styles.buildText}>
-            Build {Constants.nativeBuildVersion ?? "dev"} · {BUILD_TAG}
+            {Constants.nativeBuildVersion ? `Build ${Constants.nativeBuildVersion} · ` : ""}
+            {BUILD_TAG}
           </Text>
         </View>
       </View>

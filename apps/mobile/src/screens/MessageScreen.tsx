@@ -44,6 +44,15 @@ type IconName = React.ComponentProps<typeof Ionicons>["name"];
 export function MessageScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
   const { messageId, folder, encrypted, encWrappedKey } = route.params;
+  // The RESOLVED encryption meta. Navigation params carry it from the inbox, but a
+  // NOTIFICATION tap can't (push payloads don't include it) — the load effect below
+  // resolves it from the message cache or a list lookup. Attachments MUST use this
+  // resolved value: treating an encrypted attachment as plain downloads ciphertext
+  // as if it were the file — the black-preview poison that started this whole saga.
+  const [encMeta, setEncMeta] = useState<{ encrypted?: boolean; encWrappedKey?: string }>({
+    encrypted,
+    encWrappedKey,
+  });
   const { activeEmail, signIn } = useAuth();
   const [email, setEmail] = useState<ParsedEmail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -113,6 +122,7 @@ export function MessageScreen({ route, navigation }: Props) {
         const plain = await decryptEml(enc, eml);
         const parsed = await parseEml(plain);
         if (alive) {
+          setEncMeta(enc); // attachments must decrypt with the same resolved meta as the body
           setEmail(parsed);
           setLocked(false);
         }
@@ -211,10 +221,25 @@ export function MessageScreen({ route, navigation }: Props) {
         // Images and PDFs get previewed in-app (encrypted ones are decrypted to the
         // cache first); saving/sharing is a button inside the preview. On Android, PDFs
         // open straight in the system PDF viewer instead of the in-app PDFKit view.
+        // Use the RESOLVED encryption meta (not the raw navigation params): a
+        // notification tap arrives without it, and downloading an encrypted
+        // attachment down the "plain" path caches ciphertext as the file — the
+        // permanently-poisoned black preview. If meta is somehow still unknown,
+        // refuse with a clear message instead of guessing.
+        if (encMeta.encrypted === undefined) {
+          throw new Error(
+            "This message's details are still loading. Wait for the email to finish opening, then try the attachment again.",
+          );
+        }
         const cacheKey = `${messageId}-${index}`;
         const fetchToCache = () =>
-          encrypted && encWrappedKey
-            ? fetchEncryptedAttachmentToCache(url, { encrypted, encWrappedKey }, name, cacheKey)
+          encMeta.encrypted && encMeta.encWrappedKey
+            ? fetchEncryptedAttachmentToCache(
+                url,
+                { encrypted: encMeta.encrypted, encWrappedKey: encMeta.encWrappedKey },
+                name,
+                cacheKey,
+              )
             : fetchAttachmentToCache(url, name, cacheKey);
         let uri = await fetchToCache();
         if (pdf && Platform.OS === "android") {
@@ -239,9 +264,18 @@ export function MessageScreen({ route, navigation }: Props) {
           setPreviewError(bad ? await explainUnreadableFile(uri, pdf ? "PDF" : "image") : null);
           setPreview({ uri, name, type, kind: img ? "image" : "pdf", index });
         }
-      } else if (encrypted && encWrappedKey) {
+      } else if (encMeta.encrypted && encMeta.encWrappedKey) {
         // Ciphertext on S3 — fetch, decrypt on-device, then share the plaintext.
-        await saveOrShareEncryptedAttachment(url, { encrypted, encWrappedKey }, name, type);
+        await saveOrShareEncryptedAttachment(
+          url,
+          { encrypted: encMeta.encrypted, encWrappedKey: encMeta.encWrappedKey },
+          name,
+          type,
+        );
+      } else if (encMeta.encrypted === undefined) {
+        throw new Error(
+          "This message's details are still loading. Wait for the email to finish opening, then try the attachment again.",
+        );
       } else {
         await saveOrShareAttachment(url, name, type);
       }

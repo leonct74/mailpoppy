@@ -1,7 +1,13 @@
-// A human-readable marker of WHICH mobile code is in this build. It lives in the JS
+// A short code identifying WHICH mobile JS is in this build. It lives in the JS
 // bundle, so it ALWAYS reflects the code actually running — unlike the native build
 // number, which is set by hand in Xcode and can drift out of sync (as it did before).
-// Shown in Settings so you can confirm at a glance which build is on the phone.
+// Shown small in the Settings footer. Keep it a bare date+letter code — end users see
+// it, so no feature lists or internal jargon; describe the contents HERE instead.
 //
-// Bump this string every time the app is handed off for a new TestFlight build.
-export const BUILD_TAG = "2026-07-07c — attachment self-heal, Try again, human errors, cache auto-wipe";
+// Bump the letter every time the app is handed off for a new TestFlight build.
+//
+// 2026-07-07d: notification-tap attachments decrypt correctly (resolved enc meta —
+//              THE root cause of the poisoned-cache black previews); attachment
+//              self-heal + Try again + plain-language errors; per-build attachment
+//              cache with startup sweep.
+export const BUILD_TAG = "2026-07-07d";
