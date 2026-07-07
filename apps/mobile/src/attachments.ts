@@ -7,6 +7,7 @@
 //  - uploadAttachmentToS3: PUT that local file straight to S3 via a presigned
 //    URL, so large attachments never travel through API Gateway / the Lambda.
 import { Linking } from "react-native";
+import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system/legacy";
 import * as IntentLauncher from "expo-intent-launcher";
 import * as Sharing from "expo-sharing";
@@ -29,18 +30,47 @@ function sanitize(name: string): string {
   return cleaned.slice(-120) || "attachment";
 }
 
-/** Cache GENERATION — bump whenever a build fixes a bug that could have written
- *  corrupt cache files. The deterministic key below survives app updates, so without
- *  this marker a bad file written by an OLD build is served forever: PDFs self-heal
- *  via a magic-byte check, but a stale black-rendering image had no cure. Bumping
- *  the generation makes every attachment re-fetch once under the current pipeline. */
-const CACHE_GEN = "g2";
+/** Cache GENERATION — the app's NATIVE BUILD NUMBER, so every new app build starts
+ *  from a clean attachment cache automatically. The deterministic key below survives
+ *  app updates, and a corrupt file written by an old build's pipeline would otherwise
+ *  be served forever (PDFs self-heal via a magic-byte check, but a black-rendering
+ *  image had no cure). Costs one re-download per attachment after an update; buys
+ *  never debugging a stale-cache ghost again. */
+const CACHE_GEN = `b${sanitize(Constants.nativeBuildVersion ?? "dev")}`;
+
+/** All cached attachments live under one generation-scoped directory, so stale
+ *  generations are a single directory delete (see {@link sweepStaleAttachmentCache}). */
+const CACHE_ROOT = `${FileSystem.cacheDirectory}attachments/`;
+const CACHE_DIR = `${CACHE_ROOT}${CACHE_GEN}/`;
+
+async function ensureCacheDir(): Promise<void> {
+  try {
+    await FileSystem.makeDirectoryAsync(CACHE_DIR, { intermediates: true });
+  } catch {
+    /* already exists */
+  }
+}
+
+/** Delete attachment caches written by OTHER app builds. Called once at app start;
+ *  best-effort (a failed sweep just leaves files for the OS cache janitor). */
+export async function sweepStaleAttachmentCache(): Promise<void> {
+  try {
+    const entries = await FileSystem.readDirectoryAsync(CACHE_ROOT);
+    for (const name of entries) {
+      if (name !== CACHE_GEN) {
+        await FileSystem.deleteAsync(`${CACHE_ROOT}${name}`, { idempotent: true }).catch(() => {});
+      }
+    }
+  } catch {
+    /* no cache dir yet — nothing to sweep */
+  }
+}
 
 /** The local cache path for an attachment. With a `cacheKey` (message id + index)
  *  the name is DETERMINISTIC, so the same attachment is fetched/decrypted once and
  *  every later view reuses the file; without one, a unique temp name is used. */
 function cachePath(filename: string, cacheKey?: string): string {
-  return `${FileSystem.cacheDirectory}${CACHE_GEN}-${sanitize(cacheKey ?? String(Date.now()))}_${sanitize(filename)}`;
+  return `${CACHE_DIR}${sanitize(cacheKey ?? String(Date.now()))}_${sanitize(filename)}`;
 }
 
 async function existing(path: string): Promise<string | null> {
@@ -224,6 +254,7 @@ export async function fetchAttachmentToCache(url: string, filename: string, cach
     const hit = await existing(target);
     if (hit) return hit;
   }
+  await ensureCacheDir();
   const res = await FileSystem.downloadAsync(url, target);
   if (res.status < 200 || res.status >= 300) {
     // downloadAsync writes ANY response body to the file — including an expired
@@ -276,6 +307,7 @@ export async function fetchEncryptedAttachmentToCache(
       "This attachment couldn't be unlocked on this phone. Close the email and open it again — if it keeps happening, the mailbox may have been reset by an administrator.",
     );
   }
+  await ensureCacheDir();
   await FileSystem.writeAsStringAsync(target, bytesToBase64(bytes), { encoding: FileSystem.EncodingType.Base64 });
   return target;
 }

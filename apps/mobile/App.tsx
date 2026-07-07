@@ -15,6 +15,7 @@ import {
 import type { Folder } from "@mailpoppy/core";
 import type { RootStackParamList } from "./src/navigation";
 import { AuthProvider, useAuth } from "./src/AuthContext";
+import { sweepStaleAttachmentCache } from "./src/attachments";
 import { notifyNewMail } from "./src/inboxCache";
 import { MARK_READ_ACTION, markReadFromNotification } from "./src/push";
 import { SendSnackbar } from "./src/components/SendSnackbar";
@@ -32,6 +33,12 @@ const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
 function Root() {
   const { status, switchTo, accounts, activeEmail } = useAuth();
+  // After an app update, throw away attachment caches written by older builds —
+  // their pipeline may have written files this build can't trust. One-time, async,
+  // best-effort; the current build's cache is untouched.
+  useEffect(() => {
+    void sweepStaleAttachmentCache();
+  }, []);
   // A tap that arrived before the navigator was ready (cold start, or before
   // sign-in completes) is held here and replayed once we're signed in.
   const pending = useRef<Notifications.NotificationResponse | null>(null);
