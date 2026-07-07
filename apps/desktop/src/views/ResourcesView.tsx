@@ -69,9 +69,14 @@ const consoleLink = "inline-flex items-center gap-1 text-primary hover:text-prim
 export function ResourcesView({
   stackName = resolveStackName(),
   load = defaultLoad,
+  afterSummary,
 }: {
   stackName?: string;
   load?: (stackName: string) => Promise<Inventory>;
+  /** Rendered right after the "What MailPoppy did to your account" summary card — lets
+   *  Account slot its actionable panels (backend update, send settings) ABOVE the long
+   *  stack table + change log, where the user actually sees them. */
+  afterSummary?: ReactNode;
 }) {
   const [inv, setInv] = useState<Inventory | null>(null);
   const [loading, setLoading] = useState(true);
@@ -127,6 +132,9 @@ export function ResourcesView({
           </div>
         )}
       </Card>
+
+      {/* Actionable account panels slot in here — above the long tables below. */}
+      {afterSummary}
 
       {error && (
         <Card className="border-tertiary/30 bg-tertiary-container/10">

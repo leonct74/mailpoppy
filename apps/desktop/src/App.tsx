@@ -5,6 +5,7 @@ import { DomainView } from "./views/DomainView";
 import { SetupWizard } from "./views/SetupWizard";
 import { InboxView } from "./views/InboxView";
 import { AccountView } from "./views/AccountView";
+import { BackendUpdateBanner } from "./views/BackendUpdateBanner";
 import { SendingHealthView } from "./views/SendingHealthView";
 import { MigrationView } from "./views/MigrationView";
 import { ConnectView } from "./views/ConnectView";
@@ -414,6 +415,11 @@ export function App() {
           })}
         </nav>
       </header>
+      {/* App-wide backend-update notice: an un-applied backend update can matter to the
+          health of the user's own infrastructure, so it's announced here — not only in a
+          panel at the bottom of Account. Hidden on the Account tab itself (the panel there
+          is the review surface) and mutable per-update. */}
+      <BackendUpdateBanner hidden={tab === "account"} onReview={() => go("account")} />
       <main key={reloadNonce} className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {/* Views stay mounted after first visit (only the active one is shown)
               so form data + scroll position survive tab switches. A bump to

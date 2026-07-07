@@ -32,28 +32,33 @@ export function AccountView({ stackName = resolveStackName() }: { stackName?: st
         </p>
       </div>
 
-      {/* The "what MailPoppy built in your cloud" inventory leads — it's what a user
-          most wants to see when they open this view. Read-only; self-loads and
-          handles the no-backend state itself. Teardown is per-domain, in each
-          domain's workspace. */}
-      <ResourcesView stackName={stackName} />
+      {/* The "what MailPoppy built in your cloud" summary card leads — then the
+          ACTIONABLE panels slot in immediately after it (via afterSummary), ABOVE the
+          long stack table + change log. Burying actions below hundreds of log rows made
+          them effectively invisible; a pending backend update in particular must be seen. */}
+      <ResourcesView
+        stackName={stackName}
+        afterSummary={
+          <>
+            {/* Backend updates — when a new app build ships an improved backend, apply it
+                to the stack running in the user's own AWS (self-hides when there's no
+                backend or it's already current). This is the ONLY channel for backend
+                fixes to reach an existing install, so it gets top billing. */}
+            <BackendUpdate />
 
-      {/* Backend updates — when a new app build ships an improved backend, apply it to
-          the stack running in the user's own AWS (it self-hides when there's no backend
-          or it's already current). This is the ONLY channel for backend fixes to reach
-          an existing install. */}
-      <BackendUpdate />
+            {/* Max outgoing attachment size — deployment-wide (one backend, one limit). */}
+            <Card>
+              <SendSettingsEditor stackName={stackName} />
+            </Card>
 
-      {/* Sending access is an AWS account+region property (SES sandbox →
-          production), not per-domain — it lives here. */}
-      <Card>
-        <SendingAccessView />
-      </Card>
-
-      {/* Max outgoing attachment size — deployment-wide (one backend, one limit). */}
-      <Card>
-        <SendSettingsEditor stackName={stackName} />
-      </Card>
+            {/* Sending access is an AWS account+region property (SES sandbox →
+                production), not per-domain — it lives here. */}
+            <Card>
+              <SendingAccessView />
+            </Card>
+          </>
+        }
+      />
     </div>
   );
 }

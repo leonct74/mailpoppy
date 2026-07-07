@@ -7,7 +7,16 @@ import { AccountView } from "./AccountView";
 // concerns — SES sending access + the AWS resource inventory. Mail rules and
 // retention are per-domain now and live in the domain workspace, not here.
 vi.mock("./SendingAccessView", () => ({ SendingAccessView: () => <div>SENDING STUB</div> }));
-vi.mock("./ResourcesView", () => ({ ResourcesView: () => <div>RESOURCES STUB</div> }));
+// ResourcesView hosts the actionable panels via its afterSummary slot (they must render
+// right after the summary card, above the long tables) — the stub renders the slot too.
+vi.mock("./ResourcesView", () => ({
+  ResourcesView: ({ afterSummary }: { afterSummary?: React.ReactNode }) => (
+    <div>
+      RESOURCES STUB
+      {afterSummary}
+    </div>
+  ),
+}));
 
 afterEach(() => cleanup());
 
