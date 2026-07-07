@@ -174,7 +174,9 @@ export function BackendUpdate() {
   }
 
   // No deployed backend yet → nothing to update (the setup wizard handles first deploy).
-  if (!loading && (!ver || !ver.stackExists)) return null;
+  // BUT if the version check itself FAILED (sidecar unreachable, auth, stale route), keep
+  // the panel and show the error — silently vanishing made "broken" look like "no update".
+  if (!loading && !err && (!ver || !ver.stackExists)) return null;
 
   const m = ver?.manifest;
   const compareUrl = m
@@ -316,7 +318,16 @@ export function BackendUpdate() {
           {done}
         </p>
       )}
-      {err && <p className="mt-2 text-sm text-tertiary">{err}</p>}
+      {err && (
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <p className="text-sm text-tertiary">{err}</p>
+          {!ver && !busy && (
+            <Button variant="ghost" size="sm" onClick={() => void refresh()} disabled={loading}>
+              Check again
+            </Button>
+          )}
+        </div>
+      )}
     </Card>
   );
 }
