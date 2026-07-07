@@ -29,11 +29,18 @@ function sanitize(name: string): string {
   return cleaned.slice(-120) || "attachment";
 }
 
+/** Cache GENERATION — bump whenever a build fixes a bug that could have written
+ *  corrupt cache files. The deterministic key below survives app updates, so without
+ *  this marker a bad file written by an OLD build is served forever: PDFs self-heal
+ *  via a magic-byte check, but a stale black-rendering image had no cure. Bumping
+ *  the generation makes every attachment re-fetch once under the current pipeline. */
+const CACHE_GEN = "g2";
+
 /** The local cache path for an attachment. With a `cacheKey` (message id + index)
  *  the name is DETERMINISTIC, so the same attachment is fetched/decrypted once and
  *  every later view reuses the file; without one, a unique temp name is used. */
 function cachePath(filename: string, cacheKey?: string): string {
-  return `${FileSystem.cacheDirectory}${sanitize(cacheKey ?? String(Date.now()))}_${sanitize(filename)}`;
+  return `${FileSystem.cacheDirectory}${CACHE_GEN}-${sanitize(cacheKey ?? String(Date.now()))}_${sanitize(filename)}`;
 }
 
 async function existing(path: string): Promise<string | null> {
@@ -66,6 +73,57 @@ export async function looksLikePdf(fileUri: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Read the first `byteLen` bytes of a file (via the ranged base64 API). */
+async function readHeadBytes(fileUri: string, byteLen: number): Promise<Uint8Array | null> {
+  try {
+    const b64 = await FileSystem.readAsStringAsync(fileUri, {
+      encoding: FileSystem.EncodingType.Base64,
+      position: 0,
+      length: byteLen + 2, // a little slack so the base64 decode covers byteLen bytes
+    });
+    const ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const rev: Record<string, number> = {};
+    for (let i = 0; i < ALPHA.length; i++) rev[ALPHA[i]!] = i;
+    const out: number[] = [];
+    let acc = 0;
+    let bits = 0;
+    for (const ch of b64) {
+      const v = rev[ch];
+      if (v === undefined) continue;
+      acc = (acc << 6) | v;
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        out.push((acc >> bits) & 0xff);
+        if (out.length >= byteLen) break;
+      }
+    }
+    return Uint8Array.from(out);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Does this cached file start like a real image? Same job as {@link looksLikePdf} but
+ * for images — the PDF path self-heals a corrupt cached file via its magic-byte check,
+ * while a corrupt "image" used to render as a silent black screen forever. Covers the
+ * formats mail actually carries: JPEG, PNG, GIF, WebP, HEIC/HEIF/AVIF, BMP, TIFF.
+ */
+export async function looksLikeImage(fileUri: string): Promise<boolean> {
+  const h = await readHeadBytes(fileUri, 12);
+  if (!h || h.length < 4) return false;
+  if (h[0] === 0xff && h[1] === 0xd8 && h[2] === 0xff) return true; // JPEG
+  if (h[0] === 0x89 && h[1] === 0x50 && h[2] === 0x4e && h[3] === 0x47) return true; // PNG
+  if (h[0] === 0x47 && h[1] === 0x49 && h[2] === 0x46 && h[3] === 0x38) return true; // GIF8
+  if (h[0] === 0x42 && h[1] === 0x4d) return true; // BMP
+  if ((h[0] === 0x49 && h[1] === 0x49 && h[2] === 0x2a) || (h[0] === 0x4d && h[1] === 0x4d && h[2] === 0x00)) return true; // TIFF
+  if (h[0] === 0x52 && h[1] === 0x49 && h[2] === 0x46 && h[3] === 0x46) return true; // RIFF (WebP)
+  // ISO-BMFF (HEIC/HEIF/AVIF): "ftyp" at byte 4.
+  if (h.length >= 8 && h[4] === 0x66 && h[5] === 0x74 && h[6] === 0x79 && h[7] === 0x70) return true;
+  return false;
 }
 
 /** Delete a cached attachment file (best effort). Used to bust a stale/corrupt copy

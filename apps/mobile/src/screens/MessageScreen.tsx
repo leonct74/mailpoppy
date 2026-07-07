@@ -27,6 +27,7 @@ import {
   shareLocalFile,
   openInAndroidViewer,
   looksLikePdf,
+  looksLikeImage,
   bustCachedFile,
   describeFileHead,
 } from "../attachments";
@@ -214,21 +215,27 @@ export function MessageScreen({ route, navigation }: Props) {
         if (pdf && Platform.OS === "android") {
           await openInAndroidViewer(uri, name, type);
         } else {
-          // A PDF must actually start with "%PDF-". If the cached copy doesn't, it may
-          // be a corrupt file written by an EARLIER build — the cache is keyed by
+          // The cached file must actually LOOK like what we're about to show —
+          // "%PDF-" for PDFs, a real image magic for images. If it doesn't, it may be
+          // a corrupt file written by an EARLIER build — the cache is keyed by
           // message+index and survives app updates, so a bad file (e.g. from the
-          // re-key/teardown churn) would be served forever. Bust it and refetch once.
-          let badPdf = pdf && !(await looksLikePdf(uri));
-          if (badPdf) {
+          // re-key/teardown churn) would be served forever. (Images used to skip this
+          // check, so a stale corrupt file rendered as a silent black screen while
+          // PDFs self-healed.) Bust it and refetch once.
+          const looksRight = () => (pdf ? looksLikePdf(uri) : looksLikeImage(uri));
+          let bad = !(await looksRight());
+          if (bad) {
             await bustCachedFile(uri);
             uri = await fetchToCache();
-            badPdf = !(await looksLikePdf(uri));
+            bad = !(await looksRight());
           }
-          // If it's STILL not a PDF, show the concrete file head so the cause is
-          // visible (S3 error XML → "<?xml", double-base64 → "JVBER", truncated real
+          // If it's STILL wrong, show the concrete file head so the cause is visible
+          // (S3 error XML → "<?xml", double-base64 → "JVBER", truncated real
           // PDF → "%PDF-"), with a working "open in another app" button.
           setPreviewError(
-            badPdf ? `This file isn't a readable PDF (${await describeFileHead(uri)}). It may be corrupt or from a mailbox that was reset — you can still open it in another app.` : null,
+            bad
+              ? `This file isn't a readable ${pdf ? "PDF" : "image"} (${await describeFileHead(uri)}). It may be corrupt or from a mailbox that was reset — you can still open it in another app.`
+              : null,
           );
           setPreview({ uri, name, type, kind: img ? "image" : "pdf" });
         }
@@ -502,7 +509,29 @@ export function MessageScreen({ route, navigation }: Props) {
               <Ionicons name="share-outline" size={24} color="#fff" />
             </TouchableOpacity>
           </View>
-          {preview.kind === "image" ? (
+          {previewError ? (
+            // Show the REAL failure instead of vanishing (or, for images, a silent
+            // black screen), so the cause is visible and the user can still open the
+            // file in another app. Auto-dismissing is what hid the actual PDFKit
+            // error for so long.
+            <View style={styles.previewPdf}>
+              <View style={styles.previewErrorBox}>
+                <Ionicons
+                  name={preview.kind === "image" ? "image-outline" : "document-outline"}
+                  size={40}
+                  color="rgba(255,255,255,0.5)"
+                />
+                <Text style={styles.previewErrorTitle}>
+                  Can't display this {preview.kind === "image" ? "image" : "PDF"} here
+                </Text>
+                <Text style={styles.previewErrorMsg}>{previewError}</Text>
+                <TouchableOpacity style={styles.previewErrorBtn} onPress={() => void sharePreview()} activeOpacity={0.85}>
+                  <Ionicons name="share-outline" size={18} color="#fff" />
+                  <Text style={styles.previewErrorBtnText}>Open in another app</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : preview.kind === "image" ? (
             <ZoomableImage uri={preview.uri} />
           ) : (
             <View
@@ -514,20 +543,7 @@ export function MessageScreen({ route, navigation }: Props) {
                 if (width > 0 && height > 0 && !pdfBox) setPdfBox({ w: width, h: height });
               }}
             >
-              {previewError ? (
-                // Show the REAL failure instead of vanishing, so the cause is visible
-                // (and the user can still open it in another app). Auto-dismissing here
-                // is what hid the actual PDFKit error for so long.
-                <View style={styles.previewErrorBox}>
-                  <Ionicons name="document-outline" size={40} color="rgba(255,255,255,0.5)" />
-                  <Text style={styles.previewErrorTitle}>Can't display this PDF here</Text>
-                  <Text style={styles.previewErrorMsg}>{previewError}</Text>
-                  <TouchableOpacity style={styles.previewErrorBtn} onPress={() => void sharePreview()} activeOpacity={0.85}>
-                    <Ionicons name="share-outline" size={18} color="#fff" />
-                    <Text style={styles.previewErrorBtnText}>Open in another app</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : pdfBox ? (
+              {pdfBox ? (
                 <Pdf
                   // Explicit measured size (never flex/zero) + a fresh instance per file.
                   key={preview.uri}
