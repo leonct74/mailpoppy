@@ -11,7 +11,7 @@ const MAX_SCALE = 5;
 const DOUBLE_TAP_MS = 280;
 const DOUBLE_TAP_SCALE = 2.5;
 
-export function ZoomableImage({ uri }: { uri: string }) {
+export function ZoomableImage({ uri, onError }: { uri: string; onError?: (message: string) => void }) {
   // The committed transform (as of the last completed gesture)…
   const base = useRef({ scale: 1, tx: 0, ty: 0 });
   // …the transform currently on screen (mirrors the Animated values, which can't
@@ -110,6 +110,10 @@ export function ZoomableImage({ uri }: { uri: string }) {
         source={{ uri }}
         style={[styles.fill, { transform: [{ translateX: tx }, { translateY: ty }, { scale }] }]}
         resizeMode="contain"
+        // Without this, ANY native decode failure renders as a silent black screen —
+        // indistinguishable from a corrupt file, an unsupported format, or an OOM.
+        // Surface it so the preview can show a diagnostic instead.
+        onError={(e) => onError?.(e?.nativeEvent?.error ? String(e.nativeEvent.error) : "the image failed to decode")}
       />
     </View>
   );

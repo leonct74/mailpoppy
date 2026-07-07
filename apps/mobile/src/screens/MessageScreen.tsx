@@ -532,7 +532,14 @@ export function MessageScreen({ route, navigation }: Props) {
               </View>
             </View>
           ) : preview.kind === "image" ? (
-            <ZoomableImage uri={preview.uri} />
+            <ZoomableImage
+              uri={preview.uri}
+              onError={(msg) =>
+                setPreviewError(
+                  `The image couldn't be rendered (${msg}). You can still open it in another app.`,
+                )
+              }
+            />
           ) : (
             <View
               style={styles.previewPdf}
