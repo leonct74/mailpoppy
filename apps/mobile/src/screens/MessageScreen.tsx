@@ -29,7 +29,7 @@ import {
   looksLikePdf,
   looksLikeImage,
   bustCachedFile,
-  describeFileHead,
+  explainUnreadableFile,
 } from "../attachments";
 import { decryptEml, MailboxLockedError } from "../mailboxKeys";
 import { loadCachedMessage, saveCachedMessage } from "../messageCache";
@@ -64,12 +64,17 @@ export function MessageScreen({ route, navigation }: Props) {
     name: string;
     type?: string;
     kind: "image" | "pdf";
+    /** The attachment index — lets "Try again" re-download this exact attachment. */
+    index: number;
   } | null>(null);
-  // The PDF viewer's error is shown INLINE (with an "open elsewhere" button) rather
-  // than silently dismissing — a blank auto-close hides the real cause. `pdfBox` is
-  // the measured size of the viewer's container: react-native-pdf must mount at a
-  // real, non-zero size or PDFKit renders nothing, so we wait for onLayout to mount it.
-  const [previewError, setPreviewError] = useState<string | null>(null);
+  // Preview failures are shown INLINE (with "Try again" + "open elsewhere" buttons)
+  // rather than silently dismissing — a blank auto-close hides the real cause.
+  // `message` is written for the USER (what happened + what to do); `detail` is the
+  // one-line technical fact (file size/head or the native error), rendered small so a
+  // screenshot still carries everything support needs. `pdfBox` is the measured size
+  // of the viewer's container: react-native-pdf must mount at a real, non-zero size
+  // or PDFKit renders nothing, so we wait for onLayout to mount it.
+  const [previewError, setPreviewError] = useState<{ message: string; detail?: string } | null>(null);
   const [pdfBox, setPdfBox] = useState<{ w: number; h: number } | null>(null);
 
   useEffect(() => {
@@ -229,15 +234,10 @@ export function MessageScreen({ route, navigation }: Props) {
             uri = await fetchToCache();
             bad = !(await looksRight());
           }
-          // If it's STILL wrong, show the concrete file head so the cause is visible
-          // (S3 error XML → "<?xml", double-base64 → "JVBER", truncated real
-          // PDF → "%PDF-"), with a working "open in another app" button.
-          setPreviewError(
-            bad
-              ? `This file isn't a readable ${pdf ? "PDF" : "image"} (${await describeFileHead(uri)}). It may be corrupt or from a mailbox that was reset — you can still open it in another app.`
-              : null,
-          );
-          setPreview({ uri, name, type, kind: img ? "image" : "pdf" });
+          // If it's STILL wrong, explain it in the user's language (what happened +
+          // what to do) with the technical file-head fact kept as a small detail line.
+          setPreviewError(bad ? await explainUnreadableFile(uri, pdf ? "PDF" : "image") : null);
+          setPreview({ uri, name, type, kind: img ? "image" : "pdf", index });
         }
       } else if (encrypted && encWrappedKey) {
         // Ciphertext on S3 — fetch, decrypt on-device, then share the plaintext.
@@ -259,6 +259,18 @@ export function MessageScreen({ route, navigation }: Props) {
     } catch (e) {
       Alert.alert("Couldn't share image", e instanceof Error ? e.message : String(e));
     }
+  }
+
+  /** "Try again" on a failed preview: throw away the cached copy and re-download
+   *  this exact attachment from scratch. Most preview failures (expired download
+   *  link, interrupted download, stale corrupt cache) are fixed by exactly this. */
+  async function retryPreview() {
+    if (!preview) return;
+    const { uri, index } = preview;
+    setPreview(null);
+    setPreviewError(null);
+    await bustCachedFile(uri);
+    await openAttachment(index);
   }
 
   async function moveTo(target: "trash" | "inbox" | "junk") {
@@ -510,10 +522,10 @@ export function MessageScreen({ route, navigation }: Props) {
             </TouchableOpacity>
           </View>
           {previewError ? (
-            // Show the REAL failure instead of vanishing (or, for images, a silent
-            // black screen), so the cause is visible and the user can still open the
-            // file in another app. Auto-dismissing is what hid the actual PDFKit
-            // error for so long.
+            // Show the failure in the USER's language instead of vanishing (or, for
+            // images, a silent black screen): what happened, what to do, a Try-again
+            // that actually re-downloads, and the technical fact in small print so a
+            // screenshot still tells support/debugging everything.
             <View style={styles.previewPdf}>
               <View style={styles.previewErrorBox}>
                 <Ionicons
@@ -522,22 +534,29 @@ export function MessageScreen({ route, navigation }: Props) {
                   color="rgba(255,255,255,0.5)"
                 />
                 <Text style={styles.previewErrorTitle}>
-                  Can't display this {preview.kind === "image" ? "image" : "PDF"} here
+                  Can't show this {preview.kind === "image" ? "picture" : "PDF"}
                 </Text>
-                <Text style={styles.previewErrorMsg}>{previewError}</Text>
+                <Text style={styles.previewErrorMsg}>{previewError.message}</Text>
+                <TouchableOpacity style={styles.previewErrorBtn} onPress={() => void retryPreview()} activeOpacity={0.85}>
+                  <Ionicons name="refresh-outline" size={18} color="#fff" />
+                  <Text style={styles.previewErrorBtnText}>Try again</Text>
+                </TouchableOpacity>
                 <TouchableOpacity style={styles.previewErrorBtn} onPress={() => void sharePreview()} activeOpacity={0.85}>
                   <Ionicons name="share-outline" size={18} color="#fff" />
                   <Text style={styles.previewErrorBtnText}>Open in another app</Text>
                 </TouchableOpacity>
+                {previewError.detail ? <Text style={styles.previewErrorDetail}>{previewError.detail}</Text> : null}
               </View>
             </View>
           ) : preview.kind === "image" ? (
             <ZoomableImage
               uri={preview.uri}
               onError={(msg) =>
-                setPreviewError(
-                  `The image couldn't be rendered (${msg}). You can still open it in another app.`,
-                )
+                setPreviewError({
+                  message:
+                    "This picture couldn't be shown — it may use a format this phone doesn't support, or the download was damaged. Tap “Try again”, or open it in another app.",
+                  detail: `Technical detail: ${msg}`,
+                })
               }
             />
           ) : (
@@ -568,7 +587,11 @@ export function MessageScreen({ route, navigation }: Props) {
                       err && typeof err === "object" && "message" in err
                         ? String((err as { message?: unknown }).message ?? "")
                         : String(err ?? "");
-                    setPreviewError(m || "PDFKit couldn't open this file.");
+                    setPreviewError({
+                      message:
+                        "This PDF couldn't be opened — it may be damaged, password-protected, or the download was interrupted. Tap “Try again”, or open it in another app.",
+                      detail: m ? `Technical detail: ${m}` : undefined,
+                    });
                   }}
                 />
               ) : (
@@ -768,6 +791,15 @@ const styles = StyleSheet.create({
   previewErrorBox: { flex: 1, alignItems: "center", justifyContent: "center", padding: 28, gap: 12 },
   previewErrorTitle: { fontFamily: fonts.bold, fontSize: 16, color: "#fff", marginTop: 4 },
   previewErrorMsg: { fontFamily: fonts.regular, fontSize: 13, color: "rgba(255,255,255,0.6)", textAlign: "center", lineHeight: 19 },
+  // The one-line technical fact under the buttons — small and dim: it's for a support
+  // screenshot, not for the user to parse.
+  previewErrorDetail: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: "rgba(255,255,255,0.35)",
+    textAlign: "center",
+    marginTop: 6,
+  },
   previewErrorBtn: {
     flexDirection: "row",
     alignItems: "center",

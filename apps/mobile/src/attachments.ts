@@ -137,11 +137,8 @@ export async function bustCachedFile(fileUri: string): Promise<void> {
   }
 }
 
-/** A short diagnostic description of a file's first bytes: its size plus a
- *  printable-ASCII peek at the header. Explains WHY a "PDF" won't open — e.g. an S3
- *  error page begins "<?xml", a JSON error begins "{", double-base64 begins "JVBER",
- *  a real (if truncated) PDF begins "%PDF-". Read via the ranged base64 API. */
-export async function describeFileHead(fileUri: string): Promise<string> {
+/** Size + a printable-ASCII peek at a file's first bytes (via the ranged base64 API). */
+async function headInfo(fileUri: string): Promise<{ size: number; ascii: string } | null> {
   try {
     const info = await FileSystem.getInfoAsync(fileUri);
     const size = info.exists ? (info.size ?? 0) : 0;
@@ -167,10 +164,55 @@ export async function describeFileHead(fileUri: string): Promise<string> {
         ascii += c >= 32 && c < 127 ? String.fromCharCode(c) : "·";
       }
     }
-    return `${size} bytes, begins "${ascii.slice(0, 12)}"`;
+    return { size, ascii: ascii.slice(0, 12) };
   } catch {
-    return "file unreadable";
+    return null;
   }
+}
+
+/** A short diagnostic description of a file's first bytes: its size plus a
+ *  printable-ASCII peek at the header. Explains WHY a "PDF" won't open — e.g. an S3
+ *  error page begins "<?xml", a JSON error begins "{", double-base64 begins "JVBER",
+ *  a real (if truncated) PDF begins "%PDF-". */
+export async function describeFileHead(fileUri: string): Promise<string> {
+  const h = await headInfo(fileUri);
+  return h ? `${h.size} bytes, begins "${h.ascii}"` : "file unreadable";
+}
+
+/**
+ * Explain an unreadable attachment file to a PERSON, not a developer: a plain-language
+ * `message` saying what happened and what to do, plus a one-line technical `detail`
+ * (kept small in the UI) that support/debugging can act on. The classification uses the
+ * same file-head signals as {@link describeFileHead}.
+ */
+export async function explainUnreadableFile(
+  fileUri: string,
+  expected: "PDF" | "image",
+): Promise<{ message: string; detail: string }> {
+  const h = await headInfo(fileUri);
+  const detail = `Technical detail: ${h ? `${h.size} bytes, begins "${h.ascii}"` : "file unreadable"}`;
+  if (!h || h.size === 0) {
+    return {
+      message: "The download didn't complete — the file arrived empty. This is usually a hiccup in the connection. Tap “Try again”.",
+      detail,
+    };
+  }
+  if (h.ascii.startsWith("<?xml") || h.ascii.startsWith("{")) {
+    return {
+      message: "The mail server sent an error page instead of the file — the download link probably expired. This fixes itself with a fresh download. Tap “Try again”.",
+      detail,
+    };
+  }
+  if (expected === "PDF" && h.ascii.startsWith("JVBER")) {
+    return {
+      message: "The file was saved in the wrong format on this phone. Tap “Try again” to download a clean copy.",
+      detail,
+    };
+  }
+  return {
+    message: `This doesn't look like a ${expected === "PDF" ? "PDF" : "picture"} this phone can display — the file may have been damaged. Tap “Try again” for a fresh download, or open it in another app.`,
+    detail,
+  };
 }
 
 /** Download a received attachment into the cache, returning its local file:// URI
@@ -188,7 +230,9 @@ export async function fetchAttachmentToCache(url: string, filename: string, cach
     // presigned URL's 403 XML error page, which would then be cached as "the PDF".
     // Delete it and surface the failure instead of caching an error page.
     await bustCachedFile(res.uri);
-    throw new Error(`Couldn't download this attachment (server returned ${res.status}).`);
+    throw new Error(
+      `The attachment couldn't be downloaded. Please check your connection and try again. (The server answered with error ${res.status}.)`,
+    );
   }
   return res.uri;
 }
@@ -216,15 +260,21 @@ export async function fetchEncryptedAttachmentToCache(
   if (!res.ok) {
     // An expired presigned URL returns a 403 XML error body — decrypting that as
     // ciphertext would fail confusingly. Surface the download failure directly.
-    throw new Error(`Couldn't download this attachment (server returned ${res.status}).`);
+    throw new Error(
+      `The attachment couldn't be downloaded. Please check your connection and try again. (The server answered with error ${res.status}.)`,
+    );
   }
   const ciphertextB64 = await res.text();
   const bytes = await decryptAttachmentBytes(meta, ciphertextB64);
   // Decryption of a re-keyed / orphaned mailbox can silently yield empty or
   // garbage bytes. Surface that as a real error here rather than writing a
   // non-openable file that flashes black in the PDF viewer downstream.
+  // (Deliberately does NOT tell the user to re-enter their password — feeding an
+  // unverified password into key setup can re-key the mailbox and orphan old mail.)
   if (!bytes || bytes.length === 0) {
-    throw new Error("This attachment couldn't be decrypted on this device. Re-enter the mailbox password and try again.");
+    throw new Error(
+      "This attachment couldn't be unlocked on this phone. Close the email and open it again — if it keeps happening, the mailbox may have been reset by an administrator.",
+    );
   }
   await FileSystem.writeAsStringAsync(target, bytesToBase64(bytes), { encoding: FileSystem.EncodingType.Base64 });
   return target;
