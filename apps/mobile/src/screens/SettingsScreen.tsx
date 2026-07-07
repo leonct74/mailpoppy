@@ -7,6 +7,7 @@ import type { RootStackParamList } from "../navigation";
 import { useAuth } from "../AuthContext";
 import { PrivacyPolicy } from "../components/PrivacyPolicy";
 import { MailboxSwitcher } from "../components/MailboxSwitcher";
+import Constants from "expo-constants";
 import { BUILD_TAG } from "../buildInfo";
 import { colors, fonts } from "../theme";
 
@@ -72,7 +73,11 @@ export function SettingsScreen({ navigation }: Props) {
             <Ionicons name="cloud-outline" size={14} color={colors.textMuted} />
             <Text style={styles.footerText}>MailPoppy · on your own AWS account</Text>
           </View>
-          <Text style={styles.buildText}>{BUILD_TAG}</Text>
+          {/* The REAL native build number, read at runtime — always matches what
+              TestFlight shows, unlike a number baked into a string by hand. */}
+          <Text style={styles.buildText}>
+            Build {Constants.nativeBuildVersion ?? "dev"} · {BUILD_TAG}
+          </Text>
         </View>
       </View>
 
