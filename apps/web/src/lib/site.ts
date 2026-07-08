@@ -8,10 +8,11 @@ export const SITE_TAGLINE = "Email you own — in your own AWS";
 export const SITE_DESCRIPTION =
   "MailPoppy is a desktop app for Mac and Windows that turns your own AWS account into a private email service for your domain. Connect AWS once, then create unlimited mailboxes in seconds with no per-seat fees — and read your mail on the web, iPhone and Android. Every message lives only in your AWS, and the engine that runs it is open source, so its privacy is verifiable — not just promised.";
 
-// The public, source-available engine repo. While the repo is still private,
+// The public, source-available repo (the full monorepo — the old "engine" split
+// was never executed). While the repo is still private,
 // keep REPO_PUBLIC = false: the "Open & verifiable" section still tells the story
 // but renders no dead GitHub links. Flip to true the moment the repo goes public.
-export const REPO_URL = "https://github.com/leonct74/mailpoppy-engine";
+export const REPO_URL = "https://github.com/leonct74/mailpoppy";
 export const REPO_PUBLIC = false;
 
 export const FAQS: { q: string; a: string }[] = [

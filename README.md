@@ -7,6 +7,15 @@ per-seat subscription, no lock-in.
 > **Docs:** [`DESIGN.md`](./DESIGN.md) (source of truth) · [`CLAUDE.md`](./CLAUDE.md)
 > (build guide) · [`phase0-derisk.md`](./phase0-derisk.md) (proven AWS sequence + PASS result).
 
+## Runs on AgentsPoppy
+
+MailPoppy is a **poppy** — an app whose backend lives in **your own AWS account**, installed and
+supervised by [AgentsPoppy](https://agentspoppy-web--agentspoppy.europe-west4.hosted.app), the
+local-first permission broker. The desktop app ships through AgentsPoppy's curated directory:
+one click installs it, and every update arrives explained, diffable, and verifiable before you
+choose to apply it. **AgentsPoppy launches publicly in the coming days** — this repository opens
+first, so anyone (or anyone's AI agent) can read exactly what MailPoppy does before installing it.
+
 ## Monorepo (npm workspaces)
 
 ```
