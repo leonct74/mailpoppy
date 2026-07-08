@@ -42,7 +42,7 @@ export interface ExtensionManifest {
 }
 
 /** The Tauri/extension version — must match src-tauri/tauri.conf.json. */
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 
 /**
  * The host-spawned backend binary name. The sidecar is built per Rust target triple
@@ -73,7 +73,7 @@ export function buildExtensionManifest(): ExtensionManifest {
     name: APP.name,
     version: VERSION,
     description: "Run your own private mail backend on your AWS account — deploy, manage, and tear it down.",
-    icon: "frontend/mailpoppy.svg",
+    icon: "frontend/mailpoppy-icon.png",
     permissionSet: permissionSet(),
     frontend: { entry: "frontend/index.html" },
     backend: { entry: `backend/${BACKEND_BINARY}`, transport: "http" },

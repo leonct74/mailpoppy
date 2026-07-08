@@ -1,9 +1,9 @@
 {
   "id": "com.mailpoppy.desktop",
   "name": "MailPoppy",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Run your own private mail backend on your AWS account — deploy, manage, and tear it down.",
-  "icon": "frontend/mailpoppy.svg",
+  "icon": "frontend/mailpoppy-icon.png",
   "permissionSet": {
     "id": "mailpoppy-backend",
     "name": "MailPoppy backend",
