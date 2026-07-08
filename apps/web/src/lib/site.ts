@@ -10,10 +10,10 @@ export const SITE_DESCRIPTION =
 
 // The public, source-available repo (the full monorepo — the old "engine" split
 // was never executed). While the repo is still private,
-// keep REPO_PUBLIC = false: the "Open & verifiable" section still tells the story
-// but renders no dead GitHub links. Flip to true the moment the repo goes public.
+// REPO_PUBLIC is true: the repo went public on 2026-07-08 — the "Open &
+// verifiable" section now links straight to the source.
 export const REPO_URL = "https://github.com/leonct74/mailpoppy";
-export const REPO_PUBLIC = false;
+export const REPO_PUBLIC = true;
 
 export const FAQS: { q: string; a: string }[] = [
   {
