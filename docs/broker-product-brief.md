@@ -146,7 +146,7 @@ engine was the wrong vehicle, because that repo *is* mail code.
 **What was done:**
 - The cosmetic AgentsPoppy rebrand of `mailpoppy-engine` was **reverted** — that repo is
   MailPoppy's private mail engine again (single commit, not pushed).
-- New repo scaffolded **locally** at `/Users/mt/Projects/agentspoppy` (`agentspoppy`,
+- New repo scaffolded **locally** at `~/Projects/agentspoppy` (`agentspoppy`,
   FSL-1.1-Apache-2.0): meta (README/NOTICE/TRADEMARK/LICENSE) + `brand/` logo + `packages/core`
   — the agnostic domain model, per-app inventory/ledger helpers (generalised from MailPoppy),
   and the consent/permission model with enforceable tag-attribution. **17 tests + typecheck

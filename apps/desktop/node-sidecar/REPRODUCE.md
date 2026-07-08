@@ -8,7 +8,7 @@ that it matches what the app will deploy.** A match is a cryptographic proof tha
 deployed backend code is that open source, with no trust in our build machine.
 
 This is Layer 2 of the [Verifiable Updates](https://github.com/leonct74/agentspoppy/blob/main/docs/VERIFIABLE_UPDATES.md)
-design. Layer 1 (already shipped) lets you *read the diff* of what changed; Layer 2 (this
+design *(the AgentsPoppy repo opens in stages — if that link 404s today, it hasn't gone public yet)*. Layer 1 (already shipped) lets you *read the diff* of what changed; Layer 2 (this
 doc) lets you *prove the bytes*.
 
 ## What is — and isn't — reproducible

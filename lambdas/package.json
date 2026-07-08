@@ -1,9 +1,12 @@
 {
   "name": "@mailpoppy/lambdas",
   "version": "0.0.0",
+  "license": "FSL-1.1-Apache-2.0",
   "private": true,
   "type": "module",
-  "scripts": { "typecheck": "tsc --noEmit" },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "@mailpoppy/core": "*",
     "@aws-sdk/client-cognito-identity-provider": "^3.700.0",

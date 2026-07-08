@@ -8,9 +8,9 @@ archive). Two new local repos were produced and verified.
 
 | Local path | Repo | Visibility (intended) | History |
 |---|---|---|---|
-| `/Users/mt/Projects/mailpoppy` | original monorepo | private (unchanged) | full — keep as archive |
-| `/Users/mt/Projects/mailpoppy-engine` | **open engine** | → public (Phase 2, yours) | fresh, 1 commit (squashed — no leaked account-id/test-domain history) |
-| `/Users/mt/Projects/mailpoppy-app` | **closed admin app** | private | fresh, 1 commit |
+| `~/Projects/mailpoppy` | original monorepo | private (unchanged) | full — keep as archive |
+| `~/Projects/mailpoppy-engine` | **open engine** | → public (Phase 2, yours) | fresh, 1 commit (squashed — no leaked account-id/test-domain history) |
+| `~/Projects/mailpoppy-app` | **closed admin app** | private | fresh, 1 commit |
 
 ## The cut line (verified against the build graph)
 

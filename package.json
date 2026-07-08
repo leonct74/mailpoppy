@@ -1,6 +1,7 @@
 {
   "name": "mailpoppy",
   "version": "0.0.0",
+  "license": "FSL-1.1-Apache-2.0",
   "private": true,
   "description": "Host email for your own domains inside your own AWS account.",
   "workspaces": [
@@ -17,5 +18,7 @@
     "sidecar": "npm run dev -w @mailpoppy/desktop-sidecar",
     "synth": "npm run synth -w @mailpoppy/infra"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }

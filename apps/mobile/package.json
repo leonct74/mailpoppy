@@ -1,6 +1,7 @@
 {
   "name": "mailpoppy-mobile",
   "version": "1.0.0",
+  "license": "FSL-1.1-Apache-2.0",
   "main": "index.ts",
   "dependencies": {
     "@expo-google-fonts/hanken-grotesk": "^0.4.3",

@@ -35,3 +35,9 @@ To wrap the desktop frontend as a native **Tauri v2** app, see `apps/desktop/REA
 - ⏭️ **Phase 1 (setup wizard)** in progress — this scaffold. The wizard automates the
   validated sequence in `phase0-derisk.md` (now translated to TS in
   `apps/desktop/node-sidecar/src/provisioning.ts`).
+
+## License
+
+MailPoppy is source-available under the [Functional Source License (FSL-1.1-Apache-2.0)](./LICENSE):
+read it, run it, build on it — just don't ship a competing product with it. Each release becomes
+Apache-2.0 two years on. The MailPoppy name and brand are not licensed with the code.

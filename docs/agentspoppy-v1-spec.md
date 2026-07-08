@@ -204,7 +204,7 @@ Poppies", "No poppies connected yet"). NB this is the generic-noun device; "Agen
 
 ## Build status (2026-06-18)
 
-Scaffolded locally at `/Users/mt/Projects/agentspoppy` (FSL, **no remote, not published**):
+Scaffolded locally at `~/Projects/agentspoppy` (FSL, **no remote, not published**):
 `packages/core` (model + inventory/ledger + consent), `packages/broker` (local API on
 127.0.0.1, AWS seams stubbed), `app/` (React UI — connected poppies, per-app footprint,
 consent, pause/revoke/teardown). 38 tests + typecheck + vite build green. **Next:** real AWS
