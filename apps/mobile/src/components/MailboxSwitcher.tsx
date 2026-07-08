@@ -3,7 +3,7 @@
 // mailboxes across different domains are unambiguous. Shared by Inbox header + Settings.
 import { useState } from "react";
 import {
-  ActivityIndicator,
+
   Alert,
   KeyboardAvoidingView,
   Modal,
@@ -15,6 +15,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { PoppySpinner } from "./PoppySpinner";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../AuthContext";
@@ -166,7 +167,7 @@ export function MailboxSwitcher({ visible, onClose }: { visible: boolean; onClos
                   disabled={!email || !password || busy}
                 >
                   {busy ? (
-                    <ActivityIndicator size="small" color={colors.primaryText} />
+                    <PoppySpinner size="small" color={colors.primaryText} />
                   ) : (
                     <Text style={styles.addText}>Add mailbox</Text>
                   )}

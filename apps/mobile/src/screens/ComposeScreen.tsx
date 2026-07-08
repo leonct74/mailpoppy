@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
+
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { PoppySpinner } from "../components/PoppySpinner";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
@@ -240,7 +241,7 @@ export function ComposeScreen({ route, navigation }: Props) {
   if (loadingDraft) {
     return (
       <View style={styles.loading}>
-        <ActivityIndicator color={colors.primary} />
+        <PoppySpinner color={colors.primary} />
       </View>
     );
   }
@@ -255,7 +256,7 @@ export function ComposeScreen({ route, navigation }: Props) {
         <Text style={styles.headerTitle}>{params?.draftId ? "Edit Message" : "New Message"}</Text>
         <TouchableOpacity onPress={saveDraft} disabled={!canSave} style={styles.iconBtn} hitSlop={8} accessibilityLabel="Save draft">
           {saving ? (
-            <ActivityIndicator color={colors.textMuted} />
+            <PoppySpinner color={colors.textMuted} />
           ) : (
             <Ionicons name="save-outline" size={22} color={canSave ? colors.text : colors.textMuted} />
           )}
@@ -396,7 +397,7 @@ export function ComposeScreen({ route, navigation }: Props) {
       <View style={[styles.actionBar, { paddingBottom: insets.bottom + 10 }]}>
         <TouchableOpacity onPress={promptAttach} disabled={busy} style={styles.attachBtn} hitSlop={8} accessibilityLabel="Attach">
           {picking ? (
-            <ActivityIndicator color={colors.textMuted} />
+            <PoppySpinner color={colors.textMuted} />
           ) : (
             <Ionicons name="attach" size={24} color={colors.textMuted} />
           )}

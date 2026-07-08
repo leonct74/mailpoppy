@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
+
   Alert,
   Animated,
   Dimensions,
@@ -18,6 +18,7 @@ import {
   UIManager,
   View,
 } from "react-native";
+import { PoppySpinner } from "../components/PoppySpinner";
 import { useFocusEffect } from "@react-navigation/native";
 import * as Notifications from "expo-notifications";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -380,7 +381,7 @@ export function InboxScreen({ navigation }: Props) {
             accessibilityLabel="Empty Trash"
           >
             {emptying ? (
-              <ActivityIndicator size="small" color={colors.danger} />
+              <PoppySpinner size="small" color={colors.danger} />
             ) : (
               <Ionicons name="trash" size={18} color={colors.danger} />
             )}
@@ -391,7 +392,7 @@ export function InboxScreen({ navigation }: Props) {
 
       {loading && items.length === 0 ? (
         <View style={styles.centered}>
-          <ActivityIndicator color={colors.primary} />
+          <PoppySpinner color={colors.primary} />
         </View>
       ) : (
         <FlatList
@@ -407,7 +408,7 @@ export function InboxScreen({ navigation }: Props) {
             if (!q && cursor && !loadingMore && !loading) void load("more");
           }}
           ListFooterComponent={
-            loadingMore ? <ActivityIndicator style={styles.footer} color={colors.primary} /> : null
+            loadingMore ? <PoppySpinner style={styles.footer} color={colors.primary} /> : null
           }
           ListEmptyComponent={
             <View style={styles.empty}>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
+
   Alert,
   BackHandler,
   Platform,
@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { PoppySpinner } from "../components/PoppySpinner";
 import Pdf from "react-native-pdf";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -361,7 +362,7 @@ export function MessageScreen({ route, navigation }: Props) {
             accessibilityLabel={inTrash ? "Restore" : "Delete"}
           >
             {moving ? (
-              <ActivityIndicator color={colors.textMuted} />
+              <PoppySpinner color={colors.textMuted} />
             ) : (
               <Ionicons name={inTrash ? "mail-outline" : "trash-outline"} size={22} color={colors.textMuted} />
             )}
@@ -410,7 +411,7 @@ export function MessageScreen({ route, navigation }: Props) {
             activeOpacity={0.85}
           >
             {unlocking ? (
-              <ActivityIndicator color={colors.primaryText} />
+              <PoppySpinner color={colors.primaryText} />
             ) : (
               <Text style={styles.unlockBtnText}>Unlock mailbox</Text>
             )}
@@ -449,7 +450,7 @@ export function MessageScreen({ route, navigation }: Props) {
             </View>
           </View>
           <View style={styles.bodyLoading}>
-            <ActivityIndicator color={colors.primary} />
+            <PoppySpinner color={colors.primary} />
           </View>
         </ScrollView>
       ) : (
@@ -509,7 +510,7 @@ export function MessageScreen({ route, navigation }: Props) {
                         {a.filename}
                       </Text>
                       {opening === i ? (
-                        <ActivityIndicator size="small" color={colors.primary} />
+                        <PoppySpinner size="small" color={colors.primary} />
                       ) : (
                         <Ionicons name={viewable ? "eye-outline" : "download-outline"} size={18} color={colors.textMuted} />
                       )}
@@ -614,7 +615,7 @@ export function MessageScreen({ route, navigation }: Props) {
                   fitPolicy={0}
                   spacing={8}
                   trustAllCerts={false}
-                  renderActivityIndicator={() => <ActivityIndicator color="#fff" />}
+                  renderActivityIndicator={() => <PoppySpinner color="#fff" />}
                   onLoadComplete={() => setPreviewError(null)}
                   onError={(err) => {
                     const m =
@@ -630,7 +631,7 @@ export function MessageScreen({ route, navigation }: Props) {
                 />
               ) : (
                 <View style={styles.previewErrorBox}>
-                  <ActivityIndicator color="#fff" />
+                  <PoppySpinner color="#fff" />
                 </View>
               )}
             </View>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
+
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { PoppySpinner } from "../components/PoppySpinner";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../AuthContext";
@@ -362,7 +363,7 @@ function PrimaryButton({
       activeOpacity={0.85}
     >
       {busy ? (
-        <ActivityIndicator color={colors.primaryText} />
+        <PoppySpinner color={colors.primaryText} />
       ) : (
         <>
           <Text style={styles.buttonText}>{label}</Text>

@@ -3,7 +3,8 @@
 // Undo button, then the send progress/result; a failed send says it was recovered
 // into Drafts.
 import { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { PoppySpinner } from "./PoppySpinner";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { onOutboxChange, undoSend, dismissOutbox, type OutboxState, type OutboxJob } from "../outbox";
@@ -38,7 +39,7 @@ export function SendSnackbar({ onUndo }: { onUndo: (job: OutboxJob) => void }) {
         )}
         {state.phase === "sending" && (
           <>
-            <ActivityIndicator size="small" color={colors.primary} />
+            <PoppySpinner size="small" color={colors.primary} />
             <Text style={styles.text}>Sending…</Text>
           </>
         )}

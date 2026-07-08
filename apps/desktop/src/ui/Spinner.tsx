@@ -38,17 +38,39 @@ function register(node: HTMLElement): () => void {
   };
 }
 
+const PETAL =
+  "M 0 -52 C -66 -74, -92 -152, -54 -196 C -22 -232, 22 -232, 54 -196 C 92 -152, 66 -74, 0 -52 Z";
+
+// The loading spinner: the poppy mark (this app IS a poppy) turning continuously, tinted with the
+// app's own colour via `currentColor`. Same shared-rAF rotation as before, so it never freezes.
 export function Spinner({ className }: { className?: string }) {
   const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => (ref.current ? register(ref.current) : undefined), []);
   return (
-    <span
-      ref={ref}
-      aria-hidden
-      className={cn(
-        "inline-block size-4 rounded-full border-2 border-surface-container-highest border-t-primary align-[-3px]",
-        className,
-      )}
-    />
+    <span ref={ref} aria-hidden className={cn("inline-block size-4 text-primary align-[-3px]", className)}>
+      <svg
+        viewBox="0 0 512 512"
+        className="size-full"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={30}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <g transform="translate(256 256) rotate(-10)">
+          <path d={PETAL} />
+          <path d={PETAL} transform="rotate(90)" />
+          <path d={PETAL} transform="rotate(180)" />
+          <path d={PETAL} transform="rotate(270)" />
+          <circle r={30} strokeWidth={26} />
+          <g strokeWidth={22}>
+            <line x1={40} y1={-40} x2={56} y2={-56} />
+            <line x1={40} y1={40} x2={56} y2={56} />
+            <line x1={-40} y1={40} x2={-56} y2={56} />
+            <line x1={-40} y1={-40} x2={-56} y2={-56} />
+          </g>
+        </g>
+      </svg>
+    </span>
   );
 }

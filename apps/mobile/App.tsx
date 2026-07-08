@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { StatusBar } from "expo-status-bar";
-import { ActivityIndicator, View } from "react-native";
+import { View } from "react-native";
+import { PoppySpinner } from "./src/components/PoppySpinner";
 import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -127,7 +128,7 @@ function Root() {
   if (status === "loading") {
     return (
       <View style={styles.loading}>
-        <ActivityIndicator color={colors.primary} />
+        <PoppySpinner color={colors.primary} />
       </View>
     );
   }
@@ -194,7 +195,7 @@ export default function App() {
         </AuthProvider>
       ) : (
         <View style={styles.loading}>
-          <ActivityIndicator color={colors.primary} />
+          <PoppySpinner color={colors.primary} />
         </View>
       )}
     </SafeAreaProvider>
