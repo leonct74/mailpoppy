@@ -254,7 +254,17 @@ async function getRaw(messageId: string, owned: string[]): Promise<APIGatewayPro
     new GetObjectCommand({ Bucket: MAIL_BUCKET, Key: String(row.s3Key) }),
   );
   const eml = await obj.Body!.transformToString();
-  return json(200, { eml });
+  // Return the encryption meta WITH the bytes so a client opening this message from
+  // a push notification (which can't carry the wrapped key) never has to scan the
+  // inbox list to learn whether the body is sealed — the scan can miss on a stale or
+  // paginated list and then the client would try to parse ciphertext as plaintext.
+  // `encrypted` is ALWAYS a boolean here (never omitted) so a client can distinguish
+  // "clear mail" (false) from "an old backend that doesn't send meta" (field absent).
+  return json(200, {
+    eml,
+    encrypted: row.encrypted === true,
+    encWrappedKey: typeof row.encWrappedKey === "string" ? row.encWrappedKey : undefined,
+  });
 }
 
 async function getAttachment(

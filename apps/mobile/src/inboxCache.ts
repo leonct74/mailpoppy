@@ -30,6 +30,17 @@ export function saveInboxCache(email: string, folder: Folder, items: MessageMeta
   ).catch(() => {});
 }
 
+/** Drop the cached inbox listing for ONE mailbox — used when a push says it got new
+ *  mail while it wasn't the mailbox on screen, so switching to it can't show a stale
+ *  list that's missing the just-arrived message (the fresh load then repopulates it). */
+export async function invalidateInboxCache(email: string): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(key(email, "inbox"));
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** Wipe every mailbox's cached listings (full sign-out). */
 export async function clearInboxCaches(): Promise<void> {
   try {

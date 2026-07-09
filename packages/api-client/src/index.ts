@@ -162,7 +162,11 @@ export class MailpoppyClient {
     if (opts.cursor) q.set("cursor", opts.cursor);
     return this.req<ListResult>(`/messages?${q.toString()}`);
   }
-  getRaw(messageId: string): Promise<{ eml: string }> {
+  // Returns the raw EML plus the encryption meta, so a caller that opened the
+  // message from a notification (no meta in hand) can decrypt without a list scan.
+  // `encrypted`/`encWrappedKey` are absent for mail stored in clear, and absent from
+  // an older backend that predates this — callers must treat them as best-effort.
+  getRaw(messageId: string): Promise<{ eml: string; encrypted?: boolean; encWrappedKey?: string }> {
     return this.req(`/messages/${encodeURIComponent(messageId)}/raw`);
   }
   getAttachmentUrl(

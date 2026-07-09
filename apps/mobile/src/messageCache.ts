@@ -58,6 +58,19 @@ export async function saveCachedMessage(messageId: string, msg: CachedMessage): 
   }
 }
 
+/** Drop ONE cached message — used to self-heal a poisoned entry (e.g. a sealed body
+ *  that a pre-fix build cached with the wrong/blank encryption meta), so the next
+ *  open re-fetches it cleanly instead of failing forever from the bad cache. */
+export async function removeCachedMessage(messageId: string): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(entryKey(messageId));
+    const index = await loadIndex();
+    await AsyncStorage.setItem(INDEX_KEY, JSON.stringify(index.filter((id) => id !== messageId)));
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** Drop every cached message (full sign-out). */
 export async function clearMessageCache(): Promise<void> {
   try {

@@ -28,7 +28,7 @@ import type { MessageMeta, Folder } from "@mailpoppy/core";
 import type { RootStackParamList } from "../navigation";
 import { FOLDERS, folderLabel } from "../folders";
 import { mail } from "../mailClient";
-import { loadInboxCache, saveInboxCache, onNewMail } from "../inboxCache";
+import { loadInboxCache, saveInboxCache, onNewMail, invalidateInboxCache } from "../inboxCache";
 import { hapticDelete } from "../haptics";
 import { groupByThread, ungrouped, type ThreadGroup } from "../threads";
 import { MailboxSwitcher } from "../components/MailboxSwitcher";
@@ -149,10 +149,13 @@ export function InboxScreen({ navigation }: Props) {
   );
 
   // A push arriving while the app is open = new mail in some mailbox. If it's the
-  // one on screen, reload quietly so the message just appears in the list.
+  // one on screen, reload quietly so the message just appears in the list; if it's a
+  // DIFFERENT mailbox, drop its cached listing so switching to it later can't show a
+  // stale list missing the new message (the focus-effect load then repopulates it).
   useEffect(() => {
     return onNewMail((mailbox) => {
       if (mailbox === activeEmailRef.current && folder === "inbox") void load("silent");
+      else void invalidateInboxCache(mailbox);
     });
   }, [folder, load]);
 

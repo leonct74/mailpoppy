@@ -33,7 +33,7 @@ import {
   explainUnreadableFile,
 } from "../attachments";
 import { decryptEml, MailboxLockedError } from "../mailboxKeys";
-import { loadCachedMessage, saveCachedMessage } from "../messageCache";
+import { loadCachedMessage, saveCachedMessage, removeCachedMessage } from "../messageCache";
 import { MessageBody } from "../components/MessageBody";
 import { ZoomableImage } from "../components/ZoomableImage";
 import { folderLabel } from "../folders";
@@ -91,40 +91,64 @@ export function MessageScreen({ route, navigation }: Props) {
     let alive = true;
     void mail.setFlags(messageId, { unread: false }).catch(() => {});
     void (async () => {
-      try {
-        // An email is immutable once received, so a cached copy is authoritative:
-        // a hit means no network at all (instant re-open, offline reading). The
-        // cache stores the EML as fetched — ciphertext for encrypted mail — plus
-        // the encryption meta, so a notification tap needs no metadata lookup.
+      // Fetch the raw EML and — crucially — its encryption meta, then decrypt+parse.
+      // `fromCache` lets us self-heal: if a CACHED copy fails to open (e.g. a pre-fix
+      // build cached a sealed body with blank meta and poisoned it), we drop that
+      // entry and retry once from the network instead of failing forever.
+      const load = async (allowCache: boolean): Promise<{ enc: { encrypted?: boolean; encWrappedKey?: string }; parsed: ParsedEmail; fromCache: boolean }> => {
         let enc: { encrypted?: boolean; encWrappedKey?: string } = { encrypted, encWrappedKey };
-        let eml: string;
-        const cached = await loadCachedMessage(messageId);
+        const cached = allowCache ? await loadCachedMessage(messageId) : null;
         if (cached) {
-          eml = cached.eml;
-          enc = { encrypted: cached.encrypted, encWrappedKey: cached.encWrappedKey };
-        } else {
-          ({ eml } = await mail.getRaw(messageId));
-          // A notification tap carries only messageId (the encryption fields can't
-          // travel through the push service), so `encrypted === undefined` means we
-          // were opened from a notification — look up this message's metadata
-          // before decrypting. From the inbox, the fields are passed in directly.
-          if (encrypted === undefined) {
-            try {
-              const { items } = await mail.list({ folder, limit: 100 });
-              const m = items.find((x) => x.messageId === messageId);
-              if (m) enc = { encrypted: m.encrypted, encWrappedKey: m.encWrappedKey };
-            } catch {
-              /* leave as-is; a sealed body simply won't parse and shows as empty */
-            }
-          }
-          void saveCachedMessage(messageId, { eml, encrypted: enc.encrypted, encWrappedKey: enc.encWrappedKey });
+          const plain = await decryptEml({ encrypted: cached.encrypted, encWrappedKey: cached.encWrappedKey }, cached.eml);
+          return { enc: { encrypted: cached.encrypted, encWrappedKey: cached.encWrappedKey }, parsed: await parseEml(plain), fromCache: true };
         }
-        // Decrypt before parsing — a no-op for mail stored in clear.
-        const plain = await decryptEml(enc, eml);
+        // The raw endpoint now returns the encryption meta WITH the bytes, so a
+        // notification tap (which can't carry the wrapped key) no longer needs a
+        // metadata lookup. From the inbox the route params are authoritative; if
+        // neither is available (an old backend + notification tap) we fall back to a
+        // best-effort list scan, but we NEVER persist a copy whose meta we couldn't
+        // resolve — that mislabels ciphertext as plaintext and poisons re-opens.
+        const raw = await mail.getRaw(messageId);
+        let metaKnown = false;
+        if (encrypted !== undefined) {
+          enc = { encrypted, encWrappedKey };
+          metaKnown = true;
+        } else if (typeof raw.encrypted === "boolean") {
+          enc = { encrypted: raw.encrypted || undefined, encWrappedKey: raw.encWrappedKey };
+          metaKnown = true;
+        } else {
+          try {
+            const { items } = await mail.list({ folder, limit: 100 });
+            const m = items.find((x) => x.messageId === messageId);
+            if (m) {
+              enc = { encrypted: m.encrypted, encWrappedKey: m.encWrappedKey };
+              metaKnown = true;
+            }
+          } catch {
+            /* leave unknown; handled below */
+          }
+        }
+        const plain = await decryptEml(enc, raw.eml);
         const parsed = await parseEml(plain);
+        // Only cache once we're confident about the meta AND the parse succeeded, so
+        // a cache entry can never be a sealed body labelled as clear.
+        if (metaKnown) void saveCachedMessage(messageId, { eml: raw.eml, encrypted: enc.encrypted, encWrappedKey: enc.encWrappedKey });
+        return { enc, parsed, fromCache: false };
+      };
+
+      try {
+        let result;
+        try {
+          result = await load(true);
+        } catch (e) {
+          // A cached copy that won't open is likely poisoned — evict it and retry fresh.
+          if (e instanceof MailboxLockedError) throw e;
+          await removeCachedMessage(messageId);
+          result = await load(false);
+        }
         if (alive) {
-          setEncMeta(enc); // attachments must decrypt with the same resolved meta as the body
-          setEmail(parsed);
+          setEncMeta(result.enc); // attachments must decrypt with the same resolved meta as the body
+          setEmail(result.parsed);
           setLocked(false);
         }
       } catch (e) {
