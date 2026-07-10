@@ -54,28 +54,38 @@ by hand; they audit and install inside AgentsPoppy.
 (Patch bumps for fixes: `0.1.3 → 0.1.4`. The bundle version is read from `tauri.conf.json`; the
 Rust crate's own `Cargo.toml` version is unrelated and stays as-is.)
 
-### 2. Build the app
+### 2. Build the artifacts the package needs
+The AgentsPoppy package is **NOT the `.app` bundle** — it's the *extension layout* (see below), which
+needs only the **built frontend (`dist/`)** and the **sidecar binary**:
 ```bash
 cd apps/desktop
-npm run tauri:build      # beforeBuildCommand rebuilds the sidecar + frontend, then bundles
+npm run build:sidecar    # → src-tauri/binaries/mailpoppy-sidecar-<triple>  (+ regenerates extension.json)
+npm run build            # → dist/  (vite build)
 ```
-Produces, under `src-tauri/target/release/bundle/`:
-- `macos/Mailpoppy.app`
-- `dmg/Mailpoppy_<v>_aarch64.dmg`
+(`npm run tauri:build` also produces both, plus a standalone `.app`/`.dmg` — but the `.app`/`.dmg`
+are for hand-distribution only; the directory installer never uses them.)
 
-Sanity: `du -sh macos/Mailpoppy.app` (~130 MB — the embedded sidecar is ~123 MB) and
-`/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" macos/Mailpoppy.app/Contents/Info.plist`
-should print the new version.
+Sanity: `node -e "console.log(require('./extension.json').version)"` prints the new version, and
+`dist/index.html` + `src-tauri/binaries/mailpoppy-sidecar-aarch64-apple-darwin` both exist.
 
-### 3. Package the `.app` as the AgentsPoppy release asset
-The asset name is load-bearing — AgentsPoppy downloads `com.mailpoppy.desktop-<v>-darwin-arm64.zip`.
-Use **`ditto`**, not `zip` (ditto preserves the `.app`'s macOS metadata + ad-hoc code signature;
-plain `zip` can corrupt the bundle):
+### 3. Package with the DIRECTORY PACKER — never `ditto`/`zip`
+AgentsPoppy directory packages are a fixed layout, written **STORE / uncompressed** (deterministic,
+byte-reproducible — the sha256 is the whole trust story):
+```
+extension.json          ← the manifest, at the zip root
+frontend/…              ← the Vite dist
+backend/mailpoppy-sidecar-<triple>   ← the SEA sidecar
+```
+So you MUST use the directory's packer (it emits STORE + this layout + the sha256 + a catalog entry).
+A `ditto`/`zip` of `Mailpoppy.app` is **rejected by the installer** ("directory packages are stored
+uncompressed … compression method 8") — that was the v0.1.4 install failure.
 ```bash
-cd src-tauri/target/release/bundle
-ditto -c -k --keepParent macos/Mailpoppy.app com.mailpoppy.desktop-<v>-darwin-arm64.zip
-shasum -a 256 com.mailpoppy.desktop-<v>-darwin-arm64.zip   # note this — it goes in the notes
+node ../../../agentspoppy/scripts/pack-extension.mjs --src "$PWD"
+# → apps/desktop/release/com.mailpoppy.desktop-<v>-darwin-arm64.zip  (STORE, ~126 MB)
+# → prints the sha256 AND a ready-to-paste catalog entry — copy the sha256 for step 7
 ```
+The asset name `com.mailpoppy.desktop-<v>-darwin-arm64.zip` is produced by the packer and is
+load-bearing (the catalog references it by URL).
 
 ### 4. Commit, tag, push
 The release tag must point at the committed source so the audit's compare link works.
@@ -138,7 +148,11 @@ trust root) and installs.
 
 - **All three version files must match.** A mismatch means AgentsPoppy and the sidecar disagree
   about what version is running.
-- **`ditto`, never `zip`.** Plain `zip` mangles the `.app` bundle (signature/symlinks) → won't launch.
+- **Package with `pack-extension.mjs`, NEVER `ditto`/`zip`/the `.app`.** The directory installer
+  requires its own layout (extension.json + frontend/ + backend/) written **STORE/uncompressed**. A
+  compressed zip, or a zip of `Mailpoppy.app`, is rejected ("directory packages are stored
+  uncompressed … compression method 8"). Red flag: a pack-extension darwin-arm64 package is ~126 MB
+  (uncompressed); if your zip is ~45 MB it's compressed and wrong.
 - **Ad-hoc signing only.** `codesign -dv` shows `Signature=adhoc`, `TeamIdentifier=not set`.
   Notarization is Phase 5, so Gatekeeper will warn on a manual open — AgentsPoppy handles the
   install path. This is consistent across all releases so far; don't "fix" it ad hoc.
@@ -158,11 +172,14 @@ trust root) and installs.
 
 ## Worked example — v0.1.4 (2026-07-10)
 
-The three-file bump `0.1.3 → 0.1.4`, `npm run tauri:build`, `ditto` →
-`com.mailpoppy.desktop-0.1.4-darwin-arm64.zip` (44.87 MB, sha256
-`e95f9462f65d0802c9fe4775e95df9e68d4512d30d6c7b1e51ab3f568a154d6f`), commit `895d5b0`, tag `v0.1.4`,
-release <https://github.com/leonct74/mailpoppy/releases/tag/v0.1.4>. **Step 7 (initially missed):**
-`agentspoppy-web` catalog bumped in commit `f70d9df` — that's what made AgentsPoppy finally show it.
+The three-file bump `0.1.3 → 0.1.4`, build, then `pack-extension.mjs` →
+`com.mailpoppy.desktop-0.1.4-darwin-arm64.zip` (**126.2 MB, STORE**, sha256
+`359de9f665d720807e998935129551071b19b22d4a826bc86077475abfae64cc`), commit `895d5b0`, tag `v0.1.4`,
+release <https://github.com/leonct74/mailpoppy/releases/tag/v0.1.4>; catalog bumped in
+`agentspoppy-web` (commits `f70d9df` + `178d385`). **Two mistakes made along the way, both now in the
+gotchas:** (1) I first packaged with `ditto` (compressed `.app`, 44.9 MB) → the installer rejected it
+("compression method 8"); re-packaged with `pack-extension`. (2) I first forgot the catalog bump
+entirely → AgentsPoppy showed no update. Do steps 3 and 7 exactly.
 
 ## Related pipelines (not this file)
 
