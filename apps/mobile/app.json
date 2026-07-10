@@ -9,7 +9,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.mailpoppy.app",
-      "buildNumber": "25"
+      "buildNumber": "24"
     },
     "android": {
       "package": "com.mailpoppy.app",

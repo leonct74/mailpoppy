@@ -32,6 +32,17 @@ the desktop admin app (separate repo: `github.com/leonct74/mailpoppy`).
 - `src/config.ts` holds PUBLIC deployment IDs (safe to commit); override with
   `EXPO_PUBLIC_*` env vars.
 
+## Release pipeline (iOS) — the human archives in Xcode; Claude does NOT build
+The division of labour is fixed:
+- **Claude's job ends at code:** update the JS/TS, bump `src/buildInfo.ts` `BUILD_TAG`
+  (the JS identifier shown in the Settings footer — this IS Claude's to bump), commit + push.
+- **The human then** opens `ios/MailPoppy.xcworkspace` in **Xcode**, bumps the **native build
+  number** (Xcode-managed), **archives**, and **distributes**.
+- **Do NOT** tell the user to run `npx expo run:ios` / `eas build`, and **do NOT** edit `app.json`
+  `buildNumber` — the native build number lives in Xcode (it has already drifted past `app.json`),
+  and editing `app.json` can clobber the real number on a `prebuild`. Leave `app.json` alone.
+- `store/RUNBOOK.md` describes an EAS flow that is NOT the one in use — this Xcode-archive flow is.
+
 ## Git workflow
 - Push direct to `main`, no PRs (matches the desktop repo's convention).
 - This repo is **private**.
