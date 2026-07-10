@@ -549,3 +549,8 @@ solo admin needs zero config.
 
 - `DESIGN.md` — full architecture, data model, flows, pricing, risk register, phase detail.
 - `phase0-derisk.md` — proven, copy-pasteable AWS sequence + the logged PASS result.
+- **`apps/desktop/RELEASE.md` — how to SHIP a desktop update: version-bump (3 files) → `tauri:build`
+  → package as `com.mailpoppy.desktop-<v>-darwin-arm64.zip` → commit/tag → `gh release create` →
+  AgentsPoppy detects + user audits/installs. Read this before publishing a desktop version.**
+- `apps/desktop/node-sidecar/REPRODUCE.md` — the *audit* side (verify/reproduce an update before applying).
+- `apps/mobile/store/RUNBOOK.md` — the mobile app release pipeline (EAS / Xcode).
