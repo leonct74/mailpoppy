@@ -28,6 +28,7 @@ import type { MessageMeta, Folder } from "@mailpoppy/core";
 import type { RootStackParamList } from "../navigation";
 import { FOLDERS, folderLabel } from "../folders";
 import { mail } from "../mailClient";
+import { refreshConfigForEmail } from "../config";
 import { loadInboxCache, saveInboxCache, onNewMail, invalidateInboxCache } from "../inboxCache";
 import { hapticDelete } from "../haptics";
 import { groupByThread, ungrouped, type ThreadGroup } from "../threads";
@@ -37,6 +38,29 @@ import { colors, fonts, shortDate } from "../theme";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Inbox">;
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
+
+/**
+ * Is this failure a DEAD SESSION (the mailbox lost its connection), rather than a
+ * transient network/server blip? A dead session — an expired Cognito refresh token, or
+ * a backend the stored token no longer belongs to — needs the user to sign in again; a
+ * blip just needs a retry. We must NEVER silently swallow the former (the "inbox failed
+ * silently" bug), so detect it: a 401/403 from the API, or a Cognito session error
+ * (getSession rejects with "no session" / "not authorized" / "refresh token expired").
+ */
+function isReconnectError(e: unknown): boolean {
+  // The api-client throws an error carrying the HTTP `status` (401/403 = auth failure).
+  const status = (e as { status?: unknown } | null)?.status;
+  if (status === 401 || status === 403) return true;
+  const m = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return (
+    m.includes("no session") ||
+    m.includes("not authorized") ||
+    m.includes("notauthorized") ||
+    m.includes("refresh token") ||
+    m.includes("token has expired") ||
+    m.includes("token expired")
+  );
+}
 
 /** One revealed swipe action (Delete / Restore / Junk). */
 type SwipeAction = {
@@ -60,7 +84,7 @@ if (Platform.OS === "android") {
 
 export function InboxScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
-  const { activeEmail } = useAuth();
+  const { activeEmail, signIn } = useAuth();
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [folder, setFolder] = useState<Folder>("inbox");
   const [items, setItems] = useState<MessageMeta[]>([]);
@@ -69,6 +93,12 @@ export function InboxScreen({ navigation }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // This mailbox's session died (expired token / rebuilt backend) — the inbox can't
+  // load and must reconnect. Surfaced (never swallowed) so it can't fail silently.
+  const [disconnected, setDisconnected] = useState(false);
+  const [reconnectPw, setReconnectPw] = useState("");
+  const [reconnecting, setReconnecting] = useState(false);
+  const [reconnectErr, setReconnectErr] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [foldersOpen, setFoldersOpen] = useState(false);
   const [emptying, setEmptying] = useState(false);
@@ -108,6 +138,7 @@ export function InboxScreen({ navigation }: Props) {
         }
         setItems((prev) => (mode === "more" ? [...prev, ...res.items] : res.items));
         setCursor(res.cursor);
+        setDisconnected(false); // a successful load clears any prior "disconnected" state
         if (mode !== "more" && requestedFor) saveInboxCache(requestedFor, folder, res.items);
         // Keep the app-icon badge in sync with the inbox's unread count whenever
         // the inbox (re)loads — open app / pull-to-refresh / focus. (Closed-app
@@ -116,8 +147,30 @@ export function InboxScreen({ navigation }: Props) {
           void Notifications.setBadgeCountAsync(res.items.filter((m) => m.flags.unread).length).catch(() => {});
         }
       } catch (e) {
-        // A failed background refresh keeps showing the cached list quietly.
-        if (mode !== "silent" && activeEmailRef.current === requestedFor) {
+        if (activeEmailRef.current !== requestedFor) return; // switched away mid-flight
+        if (isReconnectError(e)) {
+          // A DEAD SESSION — NEVER swallow this, even on a silent background refresh, or the
+          // mailbox fails silently forever (the reported bug). First a cheap self-heal:
+          // re-resolve the backend (in case it was rebuilt) and retry ONCE. If it still
+          // can't authenticate, the token is genuinely dead → surface the reconnect prompt.
+          let healed = false;
+          try {
+            if (requestedFor) await refreshConfigForEmail(requestedFor);
+            const res = await mail.list({ folder, limit: PAGE });
+            if (activeEmailRef.current === requestedFor && folderRef.current === folder) {
+              setItems(res.items);
+              setCursor(res.cursor);
+              setDisconnected(false);
+              if (requestedFor) saveInboxCache(requestedFor, folder, res.items);
+              healed = true;
+            }
+          } catch {
+            /* still broken — fall through to the reconnect prompt */
+          }
+          if (!healed && activeEmailRef.current === requestedFor) setDisconnected(true);
+        } else if (mode !== "silent") {
+          // A transient network/server blip: a silent refresh keeps the cached list
+          // quietly; an explicit load surfaces a friendly, retryable error.
           setError(e instanceof Error ? e.message : String(e));
         }
       } finally {
@@ -323,6 +376,26 @@ export function InboxScreen({ navigation }: Props) {
     );
   }
 
+  // Re-establish a dead mailbox session with a fresh sign-in (its refresh token expired,
+  // or its backend was rebuilt). Re-resolves the backend first so a rebuild is picked up,
+  // then signs in and reloads — the in-app equivalent of the manual remove + re-add.
+  async function reconnect() {
+    if (!activeEmail || !reconnectPw || reconnecting) return;
+    setReconnecting(true);
+    setReconnectErr(null);
+    try {
+      await refreshConfigForEmail(activeEmail);
+      await signIn(activeEmail, reconnectPw);
+      setReconnectPw("");
+      setDisconnected(false);
+      await load("initial");
+    } catch (e) {
+      setReconnectErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReconnecting(false);
+    }
+  }
+
   return (
     <View style={styles.container}>
       {/* Header — the active mailbox (tap to switch) + folders */}
@@ -349,6 +422,46 @@ export function InboxScreen({ navigation }: Props) {
           <Ionicons name="filter" size={22} color={colors.textMuted} />
         </TouchableOpacity>
       </View>
+
+      {/* Disconnected mailbox — its session died and new mail can't load. Surfaced (never
+          silent) with an inline reconnect, so the user doesn't have to remove + re-add. */}
+      {disconnected && (
+        <View style={styles.reconnectBanner}>
+          <View style={styles.reconnectRow}>
+            <Ionicons name="cloud-offline-outline" size={18} color={colors.primary} />
+            <Text style={styles.reconnectTitle}>This mailbox lost its connection</Text>
+          </View>
+          <Text style={styles.reconnectText}>
+            Its session expired, so new mail can&apos;t load right now. Sign in again to reconnect — nothing is lost.
+          </Text>
+          <TextInput
+            style={styles.reconnectInput}
+            placeholder={`Password for ${activeEmail ?? "this mailbox"}`}
+            placeholderTextColor={colors.textMuted}
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+            value={reconnectPw}
+            onChangeText={setReconnectPw}
+            editable={!reconnecting}
+            onSubmitEditing={() => void reconnect()}
+            returnKeyType="go"
+          />
+          {reconnectErr && <Text style={styles.reconnectError}>{reconnectErr}</Text>}
+          <TouchableOpacity
+            style={[styles.reconnectBtn, (!reconnectPw || reconnecting) && styles.reconnectBtnDisabled]}
+            onPress={() => void reconnect()}
+            disabled={!reconnectPw || reconnecting}
+            activeOpacity={0.85}
+          >
+            {reconnecting ? (
+              <PoppySpinner color={colors.primaryText} />
+            ) : (
+              <Text style={styles.reconnectBtnText}>Reconnect</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Search */}
       <View style={styles.searchWrap}>
@@ -761,6 +874,38 @@ function Avatar({ label, seed }: { label: string; seed: string }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  reconnectBanner: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    gap: 10,
+  },
+  reconnectRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  reconnectTitle: { fontFamily: fonts.semibold, fontSize: 15, color: colors.text },
+  reconnectText: { fontFamily: fonts.regular, fontSize: 13, color: colors.textMuted, lineHeight: 18 },
+  reconnectInput: {
+    backgroundColor: colors.surfaceHigh,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontFamily: fonts.regular,
+    fontSize: 15,
+    color: colors.text,
+  },
+  reconnectError: { fontFamily: fonts.regular, fontSize: 13, color: colors.primary },
+  reconnectBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  reconnectBtnDisabled: { opacity: 0.5 },
+  reconnectBtnText: { fontFamily: fonts.semibold, fontSize: 15, color: colors.primaryText },
   list: { flex: 1 },
   listContent: { paddingHorizontal: 16, paddingBottom: 120, gap: 8 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },

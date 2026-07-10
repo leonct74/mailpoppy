@@ -14,4 +14,9 @@
 //              rebuilt — the app self-heals the stale config and refetches, and shows a
 //              plain-language "domain may not be active" message + Try again instead of a
 //              cryptic error.
-export const BUILD_TAG = "2026-07-10a";
+// 2026-07-10b: the INBOX no longer fails silently when a mailbox's session dies (expired
+//              token / rebuilt backend) while push still arrives. It now detects the dead
+//              session (even on the background refresh), auto-heals what it can, and — if the
+//              token is truly dead — surfaces a "lost its connection" banner with an inline
+//              password reconnect, instead of a silent empty inbox needing a remove + re-add.
+export const BUILD_TAG = "2026-07-10b";
