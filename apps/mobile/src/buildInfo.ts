@@ -10,4 +10,8 @@
 //              THE root cause of the poisoned-cache black previews); attachment
 //              self-heal + Try again + plain-language errors; per-build attachment
 //              cache with startup sweep.
-export const BUILD_TAG = "2026-07-07d";
+// 2026-07-10a: opening a message no longer fails silently when its domain's backend was
+//              rebuilt — the app self-heals the stale config and refetches, and shows a
+//              plain-language "domain may not be active" message + Try again instead of a
+//              cryptic error.
+export const BUILD_TAG = "2026-07-10a";

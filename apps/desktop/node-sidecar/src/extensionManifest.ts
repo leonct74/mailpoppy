@@ -42,7 +42,7 @@ export interface ExtensionManifest {
 }
 
 /** The Tauri/extension version — must match src-tauri/tauri.conf.json. */
-const VERSION = "0.1.3";
+const VERSION = "0.1.4";
 
 /**
  * The host-spawned backend binary name. The sidecar is built per Rust target triple

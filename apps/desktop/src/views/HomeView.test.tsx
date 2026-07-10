@@ -2,7 +2,10 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor, act } from "@testing-library/react";
 import { HomeView } from "./HomeView";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 
 const ready = {
   listMailboxes: async () => ({
@@ -43,6 +46,59 @@ describe("HomeView", () => {
     // Health badges resolve asynchronously (one per domain).
     expect((await screen.findAllByText("DKIM verified")).length).toBe(2);
     expect(screen.getAllByText("MAIL FROM aligned").length).toBe(2);
+  });
+
+  it("warns when a domain is set up in AWS but not reachable by the apps (never silent)", async () => {
+    // A live backend must be known so the Hub check can run (and tell current from stale).
+    localStorage.setItem(
+      "mailpoppy.deployment",
+      JSON.stringify({
+        apiBaseUrl: "https://h7poaooahc.execute-api.eu-west-1.amazonaws.com",
+        userPoolId: "eu-west-1_cj7e4w3sZ",
+        clientId: "63cs9fep5jbsk7rcb98rs8eln4",
+        region: "eu-west-1",
+      }),
+    );
+    // boxord.com is dark to the apps (the "reinstall lost my domain" case); example.org is fine.
+    const checkHub = vi.fn(async (domain: string) =>
+      domain === "boxord.com" ? ("unregistered" as const) : ("current" as const),
+    );
+    const open = vi.fn();
+
+    render(<HomeView {...ready} checkHub={checkHub} open={open} />);
+
+    // The broken domain is flagged, loudly and specifically…
+    expect(await screen.findByText("Not activated for apps")).toBeInTheDocument();
+    // …and the healthy one reads active — so the warning is meaningful, not blanket.
+    expect(await screen.findByText("Apps active")).toBeInTheDocument();
+    expect(checkHub).toHaveBeenCalledWith("boxord.com", expect.objectContaining({ userPoolId: "eu-west-1_cj7e4w3sZ" }));
+
+    // …and an always-on, account-level banner names the affected domain so the drift
+    // (e.g. after a reinstall/rebuild) can never hide.
+    expect(await screen.findByText(/1 domain isn't reachable by the mobile & web apps/)).toBeInTheDocument();
+    expect(screen.getByText("boxord.com", { selector: "span" })).toBeInTheDocument();
+
+    // …with a one-click Re-activate that opens the domain's pre-filled activation page.
+    const reactivate = await screen.findByRole("button", { name: /Re-activate/ });
+    fireEvent.click(reactivate);
+    expect(open).toHaveBeenCalledWith(expect.stringMatching(/\/activate\?domain=boxord\.com/));
+  });
+
+  it("shows no app-access banner when every domain is active in the apps", async () => {
+    localStorage.setItem(
+      "mailpoppy.deployment",
+      JSON.stringify({
+        apiBaseUrl: "https://h7poaooahc.execute-api.eu-west-1.amazonaws.com",
+        userPoolId: "eu-west-1_cj7e4w3sZ",
+        clientId: "63cs9fep5jbsk7rcb98rs8eln4",
+        region: "eu-west-1",
+      }),
+    );
+    render(<HomeView {...ready} checkHub={async () => "current" as const} />);
+
+    expect(await screen.findByText("boxord.com")).toBeInTheDocument();
+    expect((await screen.findAllByText("Apps active")).length).toBe(2);
+    expect(screen.queryByText(/reachable by the mobile & web apps/)).not.toBeInTheDocument();
   });
 
   it("does NOT offer to remove infrastructure while domains exist", async () => {

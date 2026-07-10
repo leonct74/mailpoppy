@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
 
   Alert,
@@ -19,6 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import type { RootStackParamList } from "../navigation";
 import { mail } from "../mailClient";
 import { useAuth } from "../AuthContext";
+import { refreshConfigForEmail } from "../config";
 import { parseEml, type ParsedEmail } from "../eml";
 import {
   saveOrShareAttachment,
@@ -67,6 +68,7 @@ export function MessageScreen({ route, navigation }: Props) {
   const [unlocking, setUnlocking] = useState(false);
   const [unlockError, setUnlockError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0); // bump to refetch after an unlock
+  const healedRef = useRef(false); // self-heal a stale backend config at most once per open
   // An attachment being viewed full-screen (already downloaded/decrypted to cache).
   // kind "image" → ZoomableImage; "pdf" → react-native-pdf (native PDFKit view).
   const [preview, setPreview] = useState<{
@@ -153,8 +155,26 @@ export function MessageScreen({ route, navigation }: Props) {
         }
       } catch (e) {
         if (!alive) return;
-        if (e instanceof MailboxLockedError) setLocked(true);
-        else setError(e instanceof Error ? e.message : String(e));
+        if (e instanceof MailboxLockedError) {
+          setLocked(true);
+          return;
+        }
+        // A rebuilt backend (teardown+redeploy → new Cognito pool/API) leaves this
+        // mailbox's stored config pointing at dead coordinates, so the fetch fails
+        // cryptically. Self-heal the config ONCE and refetch before surfacing an error —
+        // a redeploy must not silently strand the reader. If it still fails (e.g. the
+        // domain is no longer active in MailPoppy), show a plain-language, actionable
+        // message rather than a raw HTTP/Cognito error.
+        if (activeEmail && !healedRef.current) {
+          healedRef.current = true;
+          const healed = await refreshConfigForEmail(activeEmail).catch(() => ({ changed: false }));
+          if (!alive) return;
+          if (healed.changed) {
+            setAttempt((n) => n + 1); // refetch against the refreshed backend
+            return;
+          }
+        }
+        setError(e instanceof Error ? e.message : String(e));
       }
     })();
     return () => {
@@ -444,7 +464,22 @@ export function MessageScreen({ route, navigation }: Props) {
       ) : error ? (
         <View style={styles.centered}>
           <Text style={styles.errorTitle}>Couldn't open this message</Text>
-          <Text style={styles.errorText}>{error}</Text>
+          <Text style={styles.errorText}>
+            This mailbox may be temporarily unreachable, or its email domain isn&apos;t active in
+            MailPoppy right now. If this keeps happening, ask whoever manages your email.
+          </Text>
+          <Text style={[styles.errorText, { fontSize: 12, opacity: 0.7 }]}>{error}</Text>
+          <TouchableOpacity
+            style={[styles.unlockBtn, { marginTop: 20 }]}
+            onPress={() => {
+              healedRef.current = false; // allow another self-heal attempt
+              setError(null);
+              setAttempt((n) => n + 1);
+            }}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.unlockBtnText}>Try again</Text>
+          </TouchableOpacity>
         </View>
       ) : !email ? (
         // Progressive render: show the header (subject + sender, already known from the

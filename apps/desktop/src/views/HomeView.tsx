@@ -14,6 +14,7 @@ import {
   ChevronUp,
   Trash2,
   Cloud,
+  ExternalLink,
 } from "lucide-react";
 import type { SesAccountStatus, MailFromState } from "@mailpoppy/core";
 import { resolveStackName, loadDeploymentConfig, clearDeploymentConfig } from "../lib/deploymentConfig";
@@ -30,6 +31,8 @@ import { getSesAccount as defaultGetAccount } from "../lib/sesAccount";
 import { getMailFromStatus as defaultGetMailFrom } from "../lib/mailFrom";
 import { REGION_CHANGED_EVENT } from "../lib/region";
 import { getDomainIdentityStatus as defaultGetDomainStatus, type DomainIdentityStatus } from "../lib/provision";
+import { checkHubDomain as defaultCheckHub, activationUrl, type HubDomainStatus } from "../lib/hubAccount";
+import { openExternal as defaultOpenExternal } from "../lib/openExternal";
 import { Card, Button, Spinner, cn } from "../ui";
 
 // Home — a multi-domain overview. A MailPoppy admin typically runs several
@@ -72,6 +75,8 @@ export function HomeView({
   getAccount = defaultGetAccount,
   getDomainStatus = defaultGetDomainStatus,
   getMailFrom = defaultGetMailFrom,
+  checkHub = defaultCheckHub,
+  open = defaultOpenExternal,
   teardown = defaultTeardown,
 }: {
   stackName?: string;
@@ -85,6 +90,10 @@ export function HomeView({
   getAccount?: () => Promise<SesAccountStatus>;
   getDomainStatus?: (domain: string) => Promise<DomainIdentityStatus>;
   getMailFrom?: (domain: string) => Promise<MailFromState>;
+  /** Compare a domain's Hub (mobile/web app) registration against the live backend. */
+  checkHub?: typeof defaultCheckHub;
+  /** Opens the pre-filled Hub activation page for a domain (injected for tests). */
+  open?: (url: string) => Promise<boolean> | void;
   teardown?: (input: { domain?: string; stackName?: string; deleteDeployBucket?: boolean }) => Promise<TeardownResult>;
 }) {
   type Phase = "loading" | "no-backend" | "ready" | "error";
@@ -104,6 +113,11 @@ export function HomeView({
   const [region, setRegion] = useState<string | null>(null);
   const [domStatus, setDomStatus] = useState<Record<string, DomainIdentityStatus | "error">>({});
   const [mailFrom, setMailFrom] = useState<Record<string, MailFromState | "error">>({});
+  // Per-domain Hub (mobile & web app) registration health. A domain can be fully
+  // set up in AWS yet not activated for the apps, or point at an old backend after
+  // a teardown+redeploy — both make its mail invisible in the apps and must NOT
+  // fail silently (this is the "reinstall lost my domain" case).
+  const [hubStatus, setHubStatus] = useState<Record<string, HubDomainStatus>>({});
   const [reloadKey, setReloadKey] = useState(0);
 
   // Re-list when the active region changes (the picker sets the sidecar's region elsewhere) —
@@ -122,6 +136,7 @@ export function HomeView({
     setBackendDeployed(false);
     setDomStatus({});
     setMailFrom({});
+    setHubStatus({});
     setCloudDomains([]);
     // Pre-existing/managed SES domains in the active region — loaded INDEPENDENTLY
     // of the main overview so a slow probe never delays it. Shown even when there's
@@ -174,6 +189,11 @@ export function HomeView({
 
       // Per-domain badges, best-effort and independent so one slow/failed domain
       // doesn't block the rest.
+      // The live backend every domain on this stack SHOULD resolve to — lets the Hub
+      // check tell "current" apart from "stale after a rebuild". All domains on one
+      // stack share it. Absent (e.g. right after a reinstall) → we can still detect
+      // unregistered/inactive, just not stale, so we mark those "unknown".
+      const liveDeployment = loadDeploymentConfig();
       for (const d of domainList) {
         getDomainStatus(d)
           .then((s) => !cancelled && setDomStatus((m) => ({ ...m, [d]: s })))
@@ -181,12 +201,21 @@ export function HomeView({
         getMailFrom(d)
           .then((s) => !cancelled && setMailFrom((m) => ({ ...m, [d]: s })))
           .catch(() => !cancelled && setMailFrom((m) => ({ ...m, [d]: "error" })));
+        // Hub / app-access health — warn when a domain is set up in AWS but not
+        // reachable by the mobile & web apps, so it can never fail silently.
+        if (liveDeployment) {
+          checkHub(d, liveDeployment)
+            .then((s) => !cancelled && setHubStatus((m) => ({ ...m, [d]: s })))
+            .catch(() => !cancelled && setHubStatus((m) => ({ ...m, [d]: "unknown" })));
+        } else {
+          setHubStatus((m) => ({ ...m, [d]: "unknown" }));
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [stackName, reloadKey, listMailboxes, listDomains, listCloudDomains, getAccount, getDomainStatus, getMailFrom]);
+  }, [stackName, reloadKey, listMailboxes, listDomains, listCloudDomains, getAccount, getDomainStatus, getMailFrom, checkHub]);
 
   // ---- Loading ----
   if (phase === "loading") {
@@ -256,6 +285,19 @@ export function HomeView({
   const managedSet = new Set(domains);
   const unmanaged = cloudDomains.filter((c) => !managedSet.has(c.name));
 
+  // Domains set up in AWS but NOT reachable by the mobile & web apps — aggregated
+  // into one loud, always-on banner so app-access drift from any cause (a reinstall,
+  // a backend rebuild, or a never-activated domain) is impossible to miss. "unknown"
+  // is deliberately NOT flagged: we only warn on a confirmed problem, never a guess.
+  const appAccessIssues = domains.filter((d) => {
+    const s = hubStatus[d];
+    return s === "unregistered" || s === "stale" || s === "inactive";
+  });
+  // The live backend to encode into each domain's one-click activation URL. Present
+  // whenever there are issues (the Hub check only runs, and only flags a problem, when
+  // a deployment config is known), but guard anyway.
+  const activationDeployment = loadDeploymentConfig();
+
   return (
     <div className="flex flex-col gap-6">
       {/* Intro + add-domain */}
@@ -275,6 +317,51 @@ export function HomeView({
           )}
         </div>
       </div>
+
+      {/* App-access drift — a domain can be fully set up in AWS yet dark to the mobile
+          & web apps (after a reinstall/rebuild, or if it was never activated). Surface it
+          loudly and always, so it can never fail silently. */}
+      {appAccessIssues.length > 0 && (
+        <Card className="border-warn/40 bg-warn/10">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 size-5 shrink-0 text-warn" />
+            <div className="min-w-0 flex-1 text-sm">
+              <p className="font-semibold text-on-surface">
+                {appAccessIssues.length === 1
+                  ? "1 domain isn't reachable by the mobile & web apps"
+                  : `${appAccessIssues.length} domains aren't reachable by the mobile & web apps`}
+              </p>
+              <p className="mt-1 leading-relaxed text-on-surface-variant">
+                Set up in your AWS but not active in the apps — this can happen after reinstalling
+                MailPoppy or rebuilding the backend, so their mail won't appear in the MailPoppy mobile
+                or web apps. One click per domain opens its pre-filled activation page:
+              </p>
+              <div className="mt-3 flex flex-col gap-2">
+                {appAccessIssues.map((d) => (
+                  <div
+                    key={d}
+                    className="flex items-center justify-between gap-3 rounded-lg bg-surface-container-highest/40 px-3 py-2"
+                  >
+                    <span className="truncate font-mono text-on-surface">{d}</span>
+                    {activationDeployment ? (
+                      <Button variant="secondary" onClick={() => void open(activationUrl(d, activationDeployment))}>
+                        <ExternalLink className="size-4" /> Re-activate
+                      </Button>
+                    ) : (
+                      <button
+                        onClick={() => (onOpenDomain ? onOpenDomain(d) : onGoToSetup?.())}
+                        className="shrink-0 text-sm text-primary underline-offset-2 hover:underline"
+                      >
+                        Manage →
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Account-level posture (one backend per install). */}
       <Card>
@@ -345,6 +432,7 @@ export function HomeView({
             const count = mailboxes.filter((m) => domainOf(m.email) === d).length;
             const ds = domStatus[d];
             const mf = mailFrom[d];
+            const hs = hubStatus[d];
             return (
               <Card key={d} className="flex flex-col gap-4">
                 <div className="flex items-center justify-between gap-3">
@@ -387,6 +475,29 @@ export function HomeView({
                     <Pill tone="warn">MAIL FROM pending</Pill>
                   ) : (
                     <Pill tone="muted">MAIL FROM not set</Pill>
+                  )}
+
+                  {/* Mobile & web app access (Hub registration). A domain can be fully
+                      set up in AWS yet dark to the apps — after a reinstall/redeploy, or
+                      if it was never activated. Surface it here so it's never silent. */}
+                  {hs === undefined ? (
+                    <Pill tone="muted">Apps …</Pill>
+                  ) : hs === "current" ? (
+                    <Pill tone="ok">Apps active</Pill>
+                  ) : hs === "unregistered" ? (
+                    <Pill tone="warn">
+                      <AlertTriangle className="size-3" /> Not activated for apps
+                    </Pill>
+                  ) : hs === "stale" ? (
+                    <Pill tone="warn">
+                      <AlertTriangle className="size-3" /> Apps need re-activation
+                    </Pill>
+                  ) : hs === "inactive" ? (
+                    <Pill tone="warn">
+                      <AlertTriangle className="size-3" /> Plan inactive
+                    </Pill>
+                  ) : (
+                    <Pill tone="muted">Apps unknown</Pill>
                   )}
                 </div>
 

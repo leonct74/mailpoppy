@@ -6,6 +6,7 @@ import { deployBackend, deployStatus, type DeployStatus } from "../lib/deploy";
 import { validateTestRecipient } from "../lib/deliverability";
 import { saveDeploymentConfig, loadDeploymentConfig, resolveStackName, DEFAULT_STACK_NAME } from "../lib/deploymentConfig";
 import { MailboxStorageRow } from "./MailboxStorageRow";
+import { AppAccessDriftNotice } from "./AppAccessDriftNotice";
 import { MailFromSetup } from "./MailFromSetup";
 import { RegionPicker } from "./RegionPicker";
 import { AwsOnboarding } from "./AwsOnboarding";
@@ -887,6 +888,22 @@ export function SetupWizard({
                   <Button onClick={provisionDomain} disabled={busy}>
                     <Globe className="size-4" /> Set up email for this domain
                   </Button>
+                  {/* If this was a REBUILD (new backend ids), any other domain that was
+                      active in the apps now points at the dead old backend — reconcile and
+                      warn right here, at the moment the drift is introduced. */}
+                  {deploy.outputs.UserPoolId && deploy.outputs.UserPoolClientId && (
+                    <div className="mt-3">
+                      <AppAccessDriftNotice
+                        deployment={{
+                          apiBaseUrl: deploy.outputs.ApiBaseUrl,
+                          userPoolId: deploy.outputs.UserPoolId,
+                          clientId: deploy.outputs.UserPoolClientId,
+                          region: deploy.outputs.DeployRegion || "eu-west-1",
+                        }}
+                        stackName={DEFAULT_STACK_NAME}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
             </div>

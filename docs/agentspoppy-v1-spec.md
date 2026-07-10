@@ -79,6 +79,46 @@ another app's — so "show what it made / wipe what it made" is guaranteed, not 
 - **Tear down** — delete the app's stack(s) + sweep its tagged out-of-stack resources +
   reverse ledger'd mutations. Shows progress; double-confirm. This is the per-app version of
   MailPoppy's "remove everything."
+- **Uninstall (local) ≠ tear down.** Removing the poppy app from the user's machine is a
+  *local* action — it maps to Revoke/remove-local, **never** to teardown. The stack, the user's
+  data, and every **off-stack linkage** the poppy set up (DNS, directory/registration/activation
+  state — e.g. MailPoppy's Hub domain record) MUST survive. A later **reinstall** must then
+  *rediscover and reconcile* the existing infra from the durable sources of truth —
+  CloudFormation (`DescribeStackResources`), tags (Resource Groups Tagging API), and any external
+  registry — **not** from lost local state — and return to a fully working service with no data
+  loss. Anything it cannot auto-restore MUST be surfaced as a visible warning; it must **never**
+  fail silently.
+
+### Lifecycle test requirements (mandatory for poppy authors)
+
+A poppy is trusted with the user's cloud, so these lifecycle invariants are **not optional** —
+every poppy MUST ship automated tests covering them. They exist because of a real MailPoppy
+incident (2026-07): after an **uninstall + reinstall** (compounded by a separate backend
+redeploy), a domain was left unregistered in the app directory (Hub) while the poppy's own UI
+still showed it *fully set up* — so mail silently stopped appearing in the mobile/web apps, with
+no warning. That is exactly the class of failure these tests must catch. (MailPoppy's fix — the
+per-domain app-access badge in [`HomeView.tsx`](../apps/desktop/src/views/HomeView.tsx) driven by
+[`checkHubDomain`](../apps/desktop/src/lib/hubAccount.ts) — is the reference pattern.)
+
+- **Uninstall (no teardown) — nothing is destroyed.** Assert that uninstalling triggers **zero**
+  destructive AWS calls (spy the teardown/AWS client: no `DeleteStack`, no resource/identity/DNS/
+  registry deletes). The stack, mailboxes/data, and every off-stack linkage remain intact.
+- **Reinstall — rediscover, reconcile, and WORK.** A fresh install with **no local state**
+  rediscovers the existing infra from the durable sources, re-attaches the connection, and
+  reaches a fully working service **end-to-end** (e.g. mail flows in *and* out) without
+  re-provisioning. Every off-stack linkage is reconciled; any missing/inconsistent one renders a
+  **visible warning** — assert the warning appears. Regression anchor: provision a service, drop
+  its registry/linkage record out of band, reinstall → the overview must **flag** it, not show it
+  healthy.
+- **Update / redeploy — no silent breakage.** Applying a poppy update (or a redeploy that changes
+  IDs — new pool/API/endpoint) leaves every existing service and its linkage working, **or** flags
+  the drift. Assert that a rebuilt backend whose registry record still points at the old
+  coordinates is detected as **stale** and warned. The update path must also pass the
+  "nothing destroyed / orphaned" assertions above.
+
+**The invariant to encode:** a service that is set up must never *look* set up while being
+silently non-functional. Every reconcile — on launch, reinstall, and update — either restores the
+working state or raises a warning the user can act on.
 
 ## The basic API (v1, localhost only)
 
