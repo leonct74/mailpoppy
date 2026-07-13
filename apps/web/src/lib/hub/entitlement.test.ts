@@ -90,4 +90,18 @@ describe("isDomainEntitled", () => {
     expect(isDomainEntitled({ manualEntitlement: false, mobileActive: false }, active, NOW)).toBe(false);
     expect(isDomainEntitled({ manualEntitlement: false, mobileActive: true }, active, NOW)).toBe(true);
   });
+
+  it("agentspoppyEntitled (bought via AgentsPoppy) bypasses Stripe activation + account standing", () => {
+    // Entitled with no activation, no account, and even a canceled account — AgentsPoppy is the truth.
+    expect(isDomainEntitled({ agentspoppyEntitled: true }, null, NOW)).toBe(true);
+    expect(isDomainEntitled({ agentspoppyEntitled: true, mobileActive: false }, null, NOW)).toBe(true);
+    expect(
+      isDomainEntitled({ agentspoppyEntitled: true }, { subscriptionStatus: "canceled", currentPeriodEnd: null }, NOW),
+    ).toBe(true);
+  });
+
+  it("agentspoppyEntitled false falls back to the legacy Stripe gate", () => {
+    expect(isDomainEntitled({ agentspoppyEntitled: false, mobileActive: false }, active, NOW)).toBe(false);
+    expect(isDomainEntitled({ agentspoppyEntitled: false, mobileActive: true }, active, NOW)).toBe(true);
+  });
 });

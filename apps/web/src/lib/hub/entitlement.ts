@@ -38,16 +38,22 @@ export function accountInGoodStanding(
   }
 }
 
-/** Is THIS domain's client access entitled right now? An admin comp (`manualEntitlement`)
- *  bypasses the paywall entirely; otherwise it must be activated AND its account in good
- *  standing. */
+/** Is THIS domain's client access entitled right now? In precedence:
+ *  1. `manualEntitlement` — admin comp, bypasses everything (testing/partners).
+ *  2. `agentspoppyEntitled` — the domain was purchased through AgentsPoppy's in-app checkout
+ *     (the current model — a one-time-per-domain `domain-access` buy). This mirror is set by the
+ *     AgentsPoppy purchase webhook / a live entitlement check (see agentspoppy.ts); AgentsPoppy is
+ *     the source of truth, so it needs no local Stripe account/standing.
+ *  3. LEGACY per-domain Stripe: activated (`mobileActive`) AND the owning account in good standing.
+ *     Kept so any pre-migration subscriber keeps working during the cutover. */
 export function isDomainEntitled(
-  domain: { mobileActive?: boolean; manualEntitlement?: boolean } | null | undefined,
+  domain: { mobileActive?: boolean; manualEntitlement?: boolean; agentspoppyEntitled?: boolean } | null | undefined,
   account: AccountStanding | null | undefined,
   nowMs: number,
   graceDays: number = GRACE_DAYS_DEFAULT,
 ): boolean {
   if (domain?.manualEntitlement) return true; // admin comp — no Stripe/account required
+  if (domain?.agentspoppyEntitled) return true; // paid via AgentsPoppy in-app purchase
   if (!domain?.mobileActive) return false;
   return accountInGoodStanding(account, nowMs, graceDays);
 }

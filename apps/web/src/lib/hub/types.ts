@@ -43,6 +43,12 @@ export interface DomainRecord {
    *  partners) without a subscription. Set via the admin API (POST /api/admin/domains). Kept
    *  separate from `mobileActive` so Stripe reconciliation never clobbers a comp. */
   manualEntitlement?: boolean;
+  /** AGENTSPOPPY IN-APP PURCHASE: mirror of "this domain was bought through AgentsPoppy's checkout"
+   *  (the `domain-access` product, target = this domain). Set by the AgentsPoppy purchase webhook
+   *  (POST /api/agentspoppy/purchase) or a live entitlement check during resolve. AgentsPoppy is the
+   *  source of truth; this is a cached copy so the resolve gate stays a fast Firestore read. Kept
+   *  separate from the legacy Stripe `mobileActive` so the two paths don't clobber each other. */
+  agentspoppyEntitled?: boolean;
 }
 
 export type ResolveResult =

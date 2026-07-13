@@ -8,6 +8,7 @@
 import type { Firestore } from "firebase-admin/firestore";
 import { getDb } from "./firestore";
 import { isDomainEntitled } from "./entitlement";
+import { fetchAgentsPoppyDomainEntitled } from "./agentspoppy";
 import type { AccountRecord, DeploymentConfig, DomainRecord, ResolveResult } from "./types";
 
 // Zero-infra quickstart: add your launch domain(s) here to resolve without Firestore.
@@ -71,12 +72,27 @@ export async function resolveDomain(input: string): Promise<ResolveResult> {
     // Admin comp bypasses the paywall (and needs no account lookup).
     if (rec.manualEntitlement === true) return { ok: true, deployment: rec.deployment };
 
-    // The gate: the domain must be activated AND its account in good standing.
+    // The gate: entitled via AgentsPoppy's cached mirror, or (legacy) activated + account in good
+    // standing. The mirror keeps this a pure Firestore read on the happy path.
     const account = await readAccount(db, rec.accountId);
-    if (!isDomainEntitled(rec, account, Date.now())) {
-      return { ok: false, reason: "inactive_subscription" };
+    if (isDomainEntitled(rec, account, Date.now())) {
+      return { ok: true, deployment: rec.deployment };
     }
-    return { ok: true, deployment: rec.deployment };
+
+    // Not entitled by anything we've stored — do ONE live check against AgentsPoppy (the source of
+    // truth) to self-heal a purchase whose webhook we never received. Only on the negative path, so
+    // it can't slow down or couple the common case. If it says yes, persist the mirror and allow.
+    const live = await fetchAgentsPoppyDomainEntitled(domain);
+    if (live === true) {
+      await db
+        .collection("domains")
+        .doc(domain)
+        .set({ agentspoppyEntitled: true }, { merge: true })
+        .catch((e) => console.warn("[hub] failed to persist agentspoppyEntitled mirror:", e));
+      return { ok: true, deployment: rec.deployment };
+    }
+
+    return { ok: false, reason: "inactive_subscription" };
   } catch (e) {
     console.warn("[hub] resolve lookup failed:", e);
     return { ok: false, reason: "unknown_domain" };

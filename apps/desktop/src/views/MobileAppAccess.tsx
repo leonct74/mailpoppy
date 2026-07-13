@@ -2,17 +2,26 @@ import { useEffect, useState } from "react";
 import { Smartphone, AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react";
 import { Card, Button } from "../ui";
 import { openExternal } from "../lib/openExternal";
+import { startDomainCheckout } from "../lib/commerce";
 import { activationUrl, checkHubDomain, type DeploymentForHub, type HubDomainStatus } from "../lib/hubAccount";
 
-// Per-domain "activate the mobile app" panel. It does NOT sign anyone in or take payment — it just
-// opens the website's pricing/activation page for this domain (carrying the domain's public backend
-// config), where the admin signs in or signs up, sees the price + terms, and subscribes.
+// Per-domain "activate the mobile app" panel. Buying access runs through AgentsPoppy's in-app
+// checkout (the `domain-access` product, scoped to this domain) — the desktop opens the hosted
+// checkout in the browser; once paid, AgentsPoppy tells the Hub and the domain switches on.
 //
 // It also checks the Hub for a STALE config: if the domain is entitled but the Hub points at an old
 // backend (e.g. this domain was torn down + redeployed → new Cognito pool), mobile sign-in breaks
 // with a cryptic "user pool client does not exist". We surface that and offer a one-click refresh —
-// which re-registers the LIVE config through the same activation funnel (signing in re-registers; no
-// new charge for an already-active domain, handled on the /activate page).
+// which re-registers the LIVE config (no new charge for an already-active domain).
+
+/** Turn an /api/checkout error code into one calm sentence. */
+function friendlyCheckoutError(code: string): string {
+  if (code === "not_for_sale" || code === "listing_incomplete")
+    return "Mobile access isn’t on sale yet — it hasn’t been set up in the store.";
+  if (code === "network_error" || code.startsWith("checkout_failed"))
+    return "Couldn’t reach the store. Check your connection and try again.";
+  return "Couldn’t start checkout. Please try again.";
+}
 export function MobileAppAccess({
   domain,
   deployment,
@@ -21,6 +30,9 @@ export function MobileAppAccess({
   deployment: DeploymentForHub | null;
 }) {
   const [status, setStatus] = useState<HubDomainStatus | "loading">("loading");
+  const [buying, setBuying] = useState(false);
+  const [buyErr, setBuyErr] = useState<string | null>(null);
+  const [buyUrl, setBuyUrl] = useState<string | null>(null); // fallback link if the OS hand-off failed
 
   useEffect(() => {
     if (!deployment) return;
@@ -34,7 +46,19 @@ export function MobileAppAccess({
     };
   }, [domain, deployment]);
 
+  // Stale-config refresh: re-register the LIVE backend via the activation page (NOT a payment).
   const open = () => deployment && void openExternal(activationUrl(domain, deployment));
+
+  // Buy this domain's access through AgentsPoppy's in-app checkout.
+  const buy = async () => {
+    setBuying(true);
+    setBuyErr(null);
+    setBuyUrl(null);
+    const r = await startDomainCheckout(domain);
+    setBuying(false);
+    if (!r.ok) setBuyErr(friendlyCheckoutError(r.error));
+    else if (!r.opened) setBuyUrl(r.url); // browser didn't open — offer the link
+  };
 
   return (
     <Card>
@@ -72,11 +96,18 @@ export function MobileAppAccess({
         <>
           <p className="mt-1 max-w-2xl text-sm text-on-surface-variant">
             Activate the MailPoppy mobile app for <b className="text-on-surface">{domain}</b>, so the people with
-            mailboxes here can sign in from anywhere.
+            mailboxes here can sign in from anywhere. You pay once for this domain, through AgentsPoppy.
           </p>
-          <Button className="mt-3" disabled={!deployment} onClick={open}>
-            See the pricing →
+          <Button className="mt-3" disabled={buying} onClick={() => void buy()}>
+            {buying ? "Opening checkout…" : "Set up mobile access →"}
           </Button>
+          {buyErr && <p className="mt-2 text-sm text-warn-bright">{buyErr}</p>}
+          {buyUrl && (
+            <div className="mt-2 text-sm text-on-surface-variant">
+              <p>Couldn’t open your browser automatically. Copy this link to finish your purchase:</p>
+              <code className="mt-1 block break-all rounded bg-surface-container p-2 text-xs text-on-surface">{buyUrl}</code>
+            </div>
+          )}
         </>
       )}
     </Card>

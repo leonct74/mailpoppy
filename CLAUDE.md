@@ -391,6 +391,42 @@ cloud, pay once per domain, unlimited mailboxes, no per-seat subscription, no lo
     purged the ancient trash + inbox rows (rows gone + S3 404) while a *now*-dated row survived and
     **marco@ stayed at 12 messages** (real mail untouched). Test rows + the retention doc cleaned up.
 
+- 🚧 **Paywall migrated onto AgentsPoppy in-app purchase (2026-07-13, code done; live-verify pending)** —
+  MailPoppy's per-domain mobile/web access is now sold through **AgentsPoppy's checkout** (the
+  first-party `domain-access` product, `target = <domain>`), not MailPoppy's own Stripe. This kills the
+  desktop's external-steering paywall (MailPoppy finally obeys the AgentsPoppy anti-steering rule) and
+  gives **one checkout to manage** for MailPoppy + future first-party apps. Pieces:
+  - **Hub gate** (`apps/web/src/lib/hub/`): `entitlement.ts::isDomainEntitled` gained an
+    `agentspoppyEntitled` branch (precedence: manual comp → AgentsPoppy purchase → legacy Stripe
+    `mobileActive`+standing, kept as a transition fallback). `agentspoppy.ts` = live entitlement fetch
+    (`GET agentspoppy.com/api/entitlement?…&target=<domain>`) + pure `verifyPurchaseSignature` (HMAC,
+    unit-tested, mirrors AgentsPoppy's `notify.ts`). `directory.ts::resolveDomain` reads the cached
+    `domains/{domain}.agentspoppyEntitled` mirror on the happy path, and on a NEGATIVE gate does ONE
+    live AgentsPoppy check that self-heals a missed webhook (persists the mirror + allows).
+  - **Purchase webhook** `POST /api/agentspoppy/purchase` (`app/api/agentspoppy/purchase/route.ts`):
+    signature-verified (`AGENTSPOPPY_NOTIFY_SECRET`), mirrors `entitled` onto the domain doc (merge,
+    idempotent). Inert 503 until the secret is set.
+  - **Desktop** (`apps/desktop/src/lib/commerce.ts`): `startDomainCheckout(domain)` POSTs
+    `/api/checkout` → opens the hosted Stripe URL via `openExternal` (works standalone + in the
+    AgentsPoppy container); `isDomainPurchased`. `MobileAppAccess.tsx`'s "See the pricing →" is now
+    "Set up mobile access →" → `startDomainCheckout` (the stale-config "Update mobile settings" path,
+    which is re-registration not payment, is unchanged).
+  - **Mobile: no change** — it already reads `/api/resolve`, which now honours `agentspoppyEntitled`.
+  - Green: `npm --prefix apps/web run typecheck`/`test` (34, +5 signature +4 gate tests); desktop
+    `tsc --noEmit` + 227 tests. **The AgentsPoppy side (first-party 0%-on-platform checkout + the
+    signed purchase-notification webhook) is built in `agentspoppy-web`** (see its commerce plane).
+  - **Pending (user/live steps, NOT done):** (1) in the AgentsPoppy `/admin` → First-party products,
+    create `com.mailpoppy.desktop` / `domain-access` (one-time, "pay once per domain") + set the notify
+    URL to `https://mailpoppy.com/api/agentspoppy/purchase` (copy the signing secret); (2) set
+    `AGENTSPOPPY_NOTIFY_SECRET` in this Hub's env; (3) in Stripe create a **second "Your account"
+    webhook** → `agentspoppy.com/api/stripe/webhook` (same event set as the connected one — the
+    checkout.session.completed + async_payment_succeeded + customer.subscription.* [incl. paused/
+    resumed] + account.updated the handler acts on; or just "all events") and set its secret as
+    `STRIPE_PLATFORM_WEBHOOK_SECRET` in agentspoppy-web (first-party charges fire on the platform
+    account, not the connected-accounts webhook); (4) deploy both, then live-verify a domain buy →
+    resolve 200. **Stage 2 (separate):** retire MailPoppy's own Stripe/`/activate` funnel + fix the
+    `/activate` page for AgentsPoppy-entitled domains. The legacy path still works meanwhile.
+
 ## Architecture (concise)
 
 ```
