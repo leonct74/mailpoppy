@@ -19,6 +19,21 @@ const AGENTSPOPPY_BASE = (
 const POPPY_ID = "com.mailpoppy.desktop";
 const DOMAIN_ACCESS_PRODUCT = "domain-access";
 
+// A stable, OPAQUE per-install buyer id (mirrors the AgentsPoppy host). It's unguessable, which
+// matters: it's the capability that lets this install open its own billing portal. (A guessable id
+// like the domain would let anyone open — and cancel — someone else's subscription.) Entitlement is
+// still checked by `target` = the domain, so this id never gates access; it only ties billing to
+// this install.
+const BUYER_KEY = "mailpoppy.buyerId";
+function buyerId(): string {
+  let id = localStorage.getItem(BUYER_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(BUYER_KEY, id);
+  }
+  return id;
+}
+
 export type CheckoutResult =
   | { ok: true; url: string; opened: boolean }
   | { ok: false; error: string };
@@ -39,11 +54,34 @@ export async function startDomainCheckout(domain: string): Promise<CheckoutResul
         poppyId: POPPY_ID,
         productId: DOMAIN_ACCESS_PRODUCT,
         target: domain,
-        buyerId: `domain:${domain}`,
+        buyerId: buyerId(),
       }),
     });
     const j = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
     if (!res.ok || !j.url) return { ok: false, error: j.error || `checkout_failed_${res.status}` };
+    url = j.url;
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
+  }
+  const opened = await openExternal(url);
+  return { ok: true, url, opened };
+}
+
+/**
+ * Open the buyer's billing portal (Stripe-hosted) so they can cancel the subscription, update their
+ * card, or see invoices. Keyed by this install's opaque buyerId. Returns the portal URL + whether it
+ * opened (so a caller can show a fallback link if the OS hand-off failed).
+ */
+export async function openBillingPortal(): Promise<CheckoutResult> {
+  let url: string;
+  try {
+    const res = await fetch(`${AGENTSPOPPY_BASE}/api/billing-portal`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ poppyId: POPPY_ID, buyerId: buyerId() }),
+    });
+    const j = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+    if (!res.ok || !j.url) return { ok: false, error: j.error || `portal_failed_${res.status}` };
     url = j.url;
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "network_error" };

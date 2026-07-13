@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Smartphone, AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react";
 import { Card, Button } from "../ui";
 import { openExternal } from "../lib/openExternal";
-import { startDomainCheckout } from "../lib/commerce";
+import { startDomainCheckout, openBillingPortal } from "../lib/commerce";
 import { activationUrl, checkHubDomain, type DeploymentForHub, type HubDomainStatus } from "../lib/hubAccount";
 
 // Per-domain "activate the mobile app" panel. Buying access runs through AgentsPoppy's in-app
@@ -60,6 +60,30 @@ export function MobileAppAccess({
     else if (!r.opened) setBuyUrl(r.url); // browser didn't open — offer the link
   };
 
+  // Open the Stripe billing portal (cancel / update card / invoices) for this domain's subscription.
+  const manage = async () => {
+    setBuying(true);
+    setBuyErr(null);
+    setBuyUrl(null);
+    const r = await openBillingPortal();
+    setBuying(false);
+    if (!r.ok) setBuyErr("Couldn’t open the billing portal. Please try again.");
+    else if (!r.opened) setBuyUrl(r.url);
+  };
+
+  // The "browser didn't open" fallback + error, shared by buy and manage.
+  const feedback = (
+    <>
+      {buyErr && <p className="mt-2 text-sm text-warn-bright">{buyErr}</p>}
+      {buyUrl && (
+        <div className="mt-2 text-sm text-on-surface-variant">
+          <p>Couldn’t open your browser automatically. Copy this link to continue:</p>
+          <code className="mt-1 block break-all rounded bg-surface-container p-2 text-xs text-on-surface">{buyUrl}</code>
+        </div>
+      )}
+    </>
+  );
+
   return (
     <Card>
       <div className="flex items-center gap-2">
@@ -84,14 +108,25 @@ export function MobileAppAccess({
       ) : status === "current" ? (
         // Subscribed/entitled + config current → a compact reminder, NOT the big sign-up panel
         // (which reads like they haven't paid). Just confirms it's on and names the app to use.
-        <div className="mt-1.5 flex items-start gap-1.5 text-sm text-on-surface-variant">
-          <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-secondary" />
-          <span>
-            <b className="text-on-surface">On for {domain}.</b> Everyone with a mailbox here signs in with the{" "}
-            <b className="text-on-surface">MailPoppy</b> app on iPhone, Android and the web — coming soon to the App
-            Store &amp; Google Play.
-          </span>
-        </div>
+        <>
+          <div className="mt-1.5 flex items-start gap-1.5 text-sm text-on-surface-variant">
+            <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-secondary" />
+            <span>
+              <b className="text-on-surface">On for {domain}.</b> Everyone with a mailbox here signs in with the{" "}
+              <b className="text-on-surface">MailPoppy</b> app on iPhone, Android and the web — coming soon to the App
+              Store &amp; Google Play.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void manage()}
+            disabled={buying}
+            className="mt-2 text-sm text-on-surface-variant underline hover:text-on-surface disabled:opacity-60"
+          >
+            {buying ? "Opening…" : "Manage subscription"}
+          </button>
+          {feedback}
+        </>
       ) : (
         <>
           <p className="mt-1 max-w-2xl text-sm text-on-surface-variant">
@@ -101,13 +136,7 @@ export function MobileAppAccess({
           <Button className="mt-3" disabled={buying} onClick={() => void buy()}>
             {buying ? "Opening checkout…" : "Set up mobile access →"}
           </Button>
-          {buyErr && <p className="mt-2 text-sm text-warn-bright">{buyErr}</p>}
-          {buyUrl && (
-            <div className="mt-2 text-sm text-on-surface-variant">
-              <p>Couldn’t open your browser automatically. Copy this link to finish your purchase:</p>
-              <code className="mt-1 block break-all rounded bg-surface-container p-2 text-xs text-on-surface">{buyUrl}</code>
-            </div>
-          )}
+          {feedback}
         </>
       )}
     </Card>
