@@ -1,18 +1,17 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Smartphone, AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react";
 import { Card, Button } from "../ui";
 import { openExternal } from "../lib/openExternal";
-import { startDomainCheckout, openBillingPortal } from "../lib/commerce";
+import { startDomainCheckout, openBillingPortal, isDomainPurchased } from "../lib/commerce";
 import { activationUrl, checkHubDomain, type DeploymentForHub, type HubDomainStatus } from "../lib/hubAccount";
 
-// Per-domain "activate the mobile app" panel. Buying access runs through AgentsPoppy's in-app
-// checkout (the `domain-access` product, scoped to this domain) — the desktop opens the hosted
-// checkout in the browser; once paid, AgentsPoppy tells the Hub and the domain switches on.
-//
-// It also checks the Hub for a STALE config: if the domain is entitled but the Hub points at an old
-// backend (e.g. this domain was torn down + redeployed → new Cognito pool), mobile sign-in breaks
-// with a cryptic "user pool client does not exist". We surface that and offer a one-click refresh —
-// which re-registers the LIVE config (no new charge for an already-active domain).
+// Per-domain "mobile app" panel. Access is bought through AgentsPoppy's in-app checkout (the
+// `domain-access` product, scoped to this domain). This panel reflects TWO facts:
+//   • purchased? — the AgentsPoppy entitlement for this domain (did they pay / is it comped upstream);
+//   • hub status — whether the Hub has this domain's LIVE backend registered (so mobile can resolve it).
+// A domain can be paid-for but not yet linked to the Hub (registration is a separate one-time sign-in),
+// so we guide "purchased but not linked" → "Finish setup". It re-checks whenever you return to the app,
+// so the panel updates after you pay or link in the browser without a manual reload.
 
 /** Turn an /api/checkout error code into one calm sentence. */
 function friendlyCheckoutError(code: string): string {
@@ -22,6 +21,7 @@ function friendlyCheckoutError(code: string): string {
     return "Couldn’t reach the store. Check your connection and try again.";
   return "Couldn’t start checkout. Please try again.";
 }
+
 export function MobileAppAccess({
   domain,
   deployment,
@@ -30,55 +30,97 @@ export function MobileAppAccess({
   deployment: DeploymentForHub | null;
 }) {
   const [status, setStatus] = useState<HubDomainStatus | "loading">("loading");
-  const [buying, setBuying] = useState(false);
-  const [buyErr, setBuyErr] = useState<string | null>(null);
-  const [buyUrl, setBuyUrl] = useState<string | null>(null); // fallback link if the OS hand-off failed
+  const [purchased, setPurchased] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [fallbackUrl, setFallbackUrl] = useState<string | null>(null); // shown if the OS hand-off failed
+
+  // Read both truths: the AgentsPoppy purchase state (target = domain) and the Hub's registration
+  // status for the live backend. Both are best-effort — a failure leaves the safe default.
+  const refresh = useCallback(async () => {
+    const [p, s] = await Promise.all([
+      isDomainPurchased(domain).catch(() => false),
+      deployment
+        ? checkHubDomain(domain, deployment).catch((): HubDomainStatus => "unknown")
+        : Promise.resolve<HubDomainStatus>("unknown"),
+    ]);
+    setPurchased(p);
+    setStatus(s);
+  }, [domain, deployment]);
 
   useEffect(() => {
-    if (!deployment) return;
     let cancelled = false;
     setStatus("loading");
-    void checkHubDomain(domain, deployment).then((s) => {
-      if (!cancelled) setStatus(s);
-    });
+    void (async () => {
+      const [p, s] = await Promise.all([
+        isDomainPurchased(domain).catch(() => false),
+        deployment
+          ? checkHubDomain(domain, deployment).catch((): HubDomainStatus => "unknown")
+          : Promise.resolve<HubDomainStatus>("unknown"),
+      ]);
+      if (!cancelled) {
+        setPurchased(p);
+        setStatus(s);
+      }
+    })();
     return () => {
       cancelled = true;
     };
   }, [domain, deployment]);
 
-  // Stale-config refresh: re-register the LIVE backend via the activation page (NOT a payment).
-  const open = () => deployment && void openExternal(activationUrl(domain, deployment));
+  // Re-check when the user returns to the app (after paying or linking in the system browser), so the
+  // panel updates without a manual reload.
+  useEffect(() => {
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refresh]);
 
   // Buy this domain's access through AgentsPoppy's in-app checkout.
   const buy = async () => {
-    setBuying(true);
-    setBuyErr(null);
-    setBuyUrl(null);
+    setBusy(true);
+    setErr(null);
+    setFallbackUrl(null);
     const r = await startDomainCheckout(domain);
-    setBuying(false);
-    if (!r.ok) setBuyErr(friendlyCheckoutError(r.error));
-    else if (!r.opened) setBuyUrl(r.url); // browser didn't open — offer the link
+    setBusy(false);
+    if (!r.ok) setErr(friendlyCheckoutError(r.error));
+    else if (!r.opened) setFallbackUrl(r.url);
   };
 
-  // Open the Stripe billing portal (cancel / update card / invoices) for this domain's subscription.
+  // Link the domain to the Hub (register its live backend) via a quick sign-in — needed once so the
+  // mobile/web apps can resolve this domain. Also the "stale config" refresh path.
+  const linkDomain = async () => {
+    if (!deployment) return;
+    setBusy(true);
+    setErr(null);
+    setFallbackUrl(null);
+    const url = activationUrl(domain, deployment);
+    const opened = await openExternal(url);
+    setBusy(false);
+    if (!opened) setFallbackUrl(url);
+  };
+
+  // Open the Stripe billing portal (manage / cancel / invoices) for this domain.
   const manage = async () => {
-    setBuying(true);
-    setBuyErr(null);
-    setBuyUrl(null);
+    setBusy(true);
+    setErr(null);
+    setFallbackUrl(null);
     const r = await openBillingPortal();
-    setBuying(false);
-    if (!r.ok) setBuyErr("Couldn’t open the billing portal. Please try again.");
-    else if (!r.opened) setBuyUrl(r.url);
+    setBusy(false);
+    if (!r.ok) setErr("Couldn’t open the billing portal. Please try again.");
+    else if (!r.opened) setFallbackUrl(r.url);
   };
 
-  // The "browser didn't open" fallback + error, shared by buy and manage.
+  // Shared "browser didn't open" fallback + error.
   const feedback = (
     <>
-      {buyErr && <p className="mt-2 text-sm text-warn-bright">{buyErr}</p>}
-      {buyUrl && (
+      {err && <p className="mt-2 text-sm text-warn-bright">{err}</p>}
+      {fallbackUrl && (
         <div className="mt-2 text-sm text-on-surface-variant">
           <p>Couldn’t open your browser automatically. Copy this link to continue:</p>
-          <code className="mt-1 block break-all rounded bg-surface-container p-2 text-xs text-on-surface">{buyUrl}</code>
+          <code className="mt-1 block break-all rounded bg-surface-container p-2 text-xs text-on-surface">
+            {fallbackUrl}
+          </code>
         </div>
       )}
     </>
@@ -91,7 +133,9 @@ export function MobileAppAccess({
         <h3 className="font-semibold text-on-surface">MailPoppy mobile app</h3>
       </div>
 
-      {status === "stale" ? (
+      {status === "loading" ? (
+        <p className="mt-2 text-sm text-on-surface-variant">Checking…</p>
+      ) : status === "stale" ? (
         <>
           <div className="mt-2 flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/10 p-3 text-sm text-warn-bright">
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
@@ -101,13 +145,13 @@ export function MobileAppAccess({
               sign in until you refresh it. It takes a few seconds and won&apos;t charge you again.
             </span>
           </div>
-          <Button className="mt-3" disabled={!deployment} onClick={open}>
+          <Button className="mt-3" disabled={!deployment || busy} onClick={() => void linkDomain()}>
             <RefreshCw className="size-4" /> Update mobile settings
           </Button>
+          {feedback}
         </>
       ) : status === "current" ? (
-        // Subscribed/entitled + config current → a compact reminder, NOT the big sign-up panel
-        // (which reads like they haven't paid). Just confirms it's on and names the app to use.
+        // Registered + entitled → confirm it's on, and offer billing management.
         <>
           <div className="mt-1.5 flex items-start gap-1.5 text-sm text-on-surface-variant">
             <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-secondary" />
@@ -120,22 +164,40 @@ export function MobileAppAccess({
           <button
             type="button"
             onClick={() => void manage()}
-            disabled={buying}
+            disabled={busy}
             className="mt-2 text-sm text-on-surface-variant underline hover:text-on-surface disabled:opacity-60"
           >
-            {buying ? "Opening…" : "Manage subscription"}
+            {busy ? "Opening…" : "Manage billing"}
           </button>
           {feedback}
         </>
+      ) : purchased ? (
+        // Paid for in AgentsPoppy, but the Hub doesn't have this domain's backend yet → one-time link.
+        <>
+          <div className="mt-2 flex items-start gap-2 rounded-lg border border-secondary/30 bg-secondary/10 p-3 text-sm">
+            <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-secondary" />
+            <span className="text-on-surface-variant">
+              <b className="text-on-surface">Purchased — one step left.</b> Mobile access for <b>{domain}</b> is paid
+              for. Link the domain so the apps can find your backend — a quick one-time sign-in.
+            </span>
+          </div>
+          <Button className="mt-3" disabled={!deployment || busy} onClick={() => void linkDomain()}>
+            {busy ? "Opening…" : "Finish setup →"}
+          </Button>
+          <p className="mt-2 text-xs text-on-surface-variant">Updates here automatically when you come back.</p>
+          {feedback}
+        </>
       ) : (
+        // Not purchased → the in-app purchase.
         <>
           <p className="mt-1 max-w-2xl text-sm text-on-surface-variant">
             Activate the MailPoppy mobile app for <b className="text-on-surface">{domain}</b>, so the people with
             mailboxes here can sign in from anywhere. You pay once for this domain, through AgentsPoppy.
           </p>
-          <Button className="mt-3" disabled={buying} onClick={() => void buy()}>
-            {buying ? "Opening checkout…" : "Set up mobile access →"}
+          <Button className="mt-3" disabled={busy} onClick={() => void buy()}>
+            {busy ? "Opening checkout…" : "Set up mobile access →"}
           </Button>
+          <p className="mt-2 text-xs text-on-surface-variant">Updates here automatically when you come back.</p>
           {feedback}
         </>
       )}
