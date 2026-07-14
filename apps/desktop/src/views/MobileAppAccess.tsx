@@ -22,6 +22,19 @@ function friendlyCheckoutError(code: string): string {
   return "Couldn’t start checkout. Please try again.";
 }
 
+/** Turn an /api/billing-portal error code into one calm sentence. */
+function friendlyPortalError(code: string): string {
+  // No Stripe customer for this buyer yet — usually "hasn't actually paid on THIS machine" (e.g. the
+  // purchase was made on a different install before the buyer id became durable).
+  if (code === "no_customer")
+    return "No billing account is linked to this app yet. If you just purchased, wait a moment and try again — if it keeps happening, the purchase was made from a different install.";
+  if (code.startsWith("portal_failed") || code === "stripe_not_configured" || code === "unavailable")
+    return "The billing portal isn’t available right now. Please try again in a moment.";
+  if (code === "network_error")
+    return "Couldn’t reach the billing service. Check your connection and try again.";
+  return "Couldn’t open the billing portal. Please try again.";
+}
+
 export function MobileAppAccess({
   domain,
   deployment,
@@ -107,7 +120,7 @@ export function MobileAppAccess({
     setFallbackUrl(null);
     const r = await openBillingPortal();
     setBusy(false);
-    if (!r.ok) setErr("Couldn’t open the billing portal. Please try again.");
+    if (!r.ok) setErr(friendlyPortalError(r.error));
     else if (!r.opened) setFallbackUrl(r.url);
   };
 

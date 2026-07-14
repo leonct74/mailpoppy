@@ -12,6 +12,7 @@ import * as prov from "./provisioning";
 import * as migration from "./migration";
 import * as mailboxImport from "./mailboxImport";
 import { readLedger } from "./ledger";
+import { getOrCreateBuyerId } from "./buyerId";
 import { writeMailpoppyProfile, mailpoppyProfileExists, MAILPOPPY_PROFILE } from "./awsProfile";
 import { checkCapabilities } from "./capabilities";
 import { beginBrokerConnect, refreshBrokerStatus, disconnectBroker, brokerRegion, brokerPort } from "./agentspoppyBroker";
@@ -214,6 +215,16 @@ app.post("/config/region", async (req, reply) => {
   }
   currentRegion = b.region;
   return { ok: true, region: currentRegion };
+});
+
+// This machine's durable, opaque AgentsPoppy buyer id — the capability that later opens the buyer's
+// Stripe billing portal. Persisted in ~/.mailpoppy so it survives updates/reinstalls and is shared
+// between the standalone webview and the AgentsPoppy container (webview localStorage is neither).
+// An optional `seed` lets the frontend hand up an id it minted earlier in localStorage so a buyer who
+// already paid under it keeps their billing link. See node-sidecar/src/buyerId.ts.
+app.post("/commerce/buyer-id", async (req) => {
+  const { seed } = (req.body ?? {}) as { seed?: string };
+  return { buyerId: await getOrCreateBuyerId(seed) };
 });
 
 // Step 0: is this environment able to provision at all? (credentials + per-service

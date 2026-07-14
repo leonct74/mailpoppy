@@ -7,6 +7,7 @@
 // completion AgentsPoppy writes the entitlement (target = domain) and pushes it to the Hub, which
 // flips the domain on — so the desktop needs no callback; its Hub status poll reflects it.
 import { openExternal } from "./openExternal";
+import { sidecar } from "./sidecar";
 
 // Where the AgentsPoppy commerce plane lives. Override for staging via localStorage.
 const AGENTSPOPPY_BASE = (
@@ -19,19 +20,48 @@ const AGENTSPOPPY_BASE = (
 const POPPY_ID = "com.mailpoppy.desktop";
 const DOMAIN_ACCESS_PRODUCT = "domain-access";
 
-// A stable, OPAQUE per-install buyer id (mirrors the AgentsPoppy host). It's unguessable, which
-// matters: it's the capability that lets this install open its own billing portal. (A guessable id
-// like the domain would let anyone open — and cancel — someone else's subscription.) Entitlement is
-// still checked by `target` = the domain, so this id never gates access; it only ties billing to
-// this install.
+// A stable, OPAQUE buyer id. It's unguessable, which matters: it's the capability that lets this
+// buyer open their own billing portal (cancel / update card / invoices). (A guessable id like the
+// domain would let anyone open — and cancel — someone else's subscription.) Entitlement is still
+// checked by `target` = the domain, so this id never gates access; it only ties billing to this buyer.
+//
+// It's persisted by the sidecar in ~/.mailpoppy (`GET/POST /commerce/buyer-id`), NOT in webview
+// localStorage: localStorage doesn't survive reinstalls and differs between the standalone webview and
+// the AgentsPoppy container (different origins), so a buyer who paid in one context would hit
+// "no billing account" in another. The sidecar store is one id per machine, shared by every context
+// and surviving updates. We keep a localStorage copy purely as (a) a *seed* the sidecar adopts on
+// first use — so anyone who already paid under an old localStorage id keeps their billing link — and
+// (b) a last-resort fallback if the sidecar is briefly unreachable.
 const BUYER_KEY = "mailpoppy.buyerId";
-function buyerId(): string {
+
+function localBuyerId(): string {
   let id = localStorage.getItem(BUYER_KEY);
   if (!id) {
     id = crypto.randomUUID();
     localStorage.setItem(BUYER_KEY, id);
   }
   return id;
+}
+
+let cachedBuyerId: string | null = null;
+
+async function buyerId(): Promise<string> {
+  if (cachedBuyerId) return cachedBuyerId;
+  const seed = localStorage.getItem(BUYER_KEY) ?? undefined;
+  try {
+    const { buyerId: id } = await sidecar<{ buyerId: string }>("/commerce/buyer-id", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ seed }),
+    });
+    cachedBuyerId = id;
+    localStorage.setItem(BUYER_KEY, id); // mirror for the fallback path below
+    return id;
+  } catch {
+    // Sidecar briefly unreachable — fall back to the local id so checkout/portal still function. It's
+    // the same value the sidecar would have adopted as the seed, so they converge once it's reachable.
+    return localBuyerId();
+  }
 }
 
 export type CheckoutResult =
@@ -54,7 +84,7 @@ export async function startDomainCheckout(domain: string): Promise<CheckoutResul
         poppyId: POPPY_ID,
         productId: DOMAIN_ACCESS_PRODUCT,
         target: domain,
-        buyerId: buyerId(),
+        buyerId: await buyerId(),
       }),
     });
     const j = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
@@ -78,7 +108,7 @@ export async function openBillingPortal(): Promise<CheckoutResult> {
     const res = await fetch(`${AGENTSPOPPY_BASE}/api/billing-portal`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ poppyId: POPPY_ID, buyerId: buyerId() }),
+      body: JSON.stringify({ poppyId: POPPY_ID, buyerId: await buyerId() }),
     });
     const j = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
     if (!res.ok || !j.url) return { ok: false, error: j.error || `portal_failed_${res.status}` };
