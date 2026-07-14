@@ -121,7 +121,9 @@ export function LoginScreen() {
     <SafeAreaView style={styles.safe}>
       {/* Ambient crimson glow behind the card */}
       <View style={styles.glow} pointerEvents="none" />
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      {/* "padding" on Android too: with edge-to-edge the window doesn't shrink for the
+          keyboard, so without it the lower fields hide under the keyboard. */}
+      <KeyboardAvoidingView style={styles.flex} behavior="padding">
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <Logo size="lg" style={styles.logo} />
           <Text style={styles.heading}>{resetting ? "Reset your password" : "Welcome Back"}</Text>

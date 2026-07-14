@@ -87,8 +87,9 @@ export function MailboxSwitcher({ visible, onClose }: { visible: boolean; onClos
     <Modal visible={visible} transparent animationType="fade" onRequestClose={close}>
       <Pressable style={styles.scrim} onPress={close}>
         {/* Lift the bottom sheet above the keyboard, or typing in the add-mailbox form
-            happens invisibly underneath it. (Android resizes the window itself.) */}
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
+            happens invisibly underneath it. Android needs this too: the RN Modal gets
+            its own window, which does NOT adjustResize like the activity window does. */}
+        <KeyboardAvoidingView behavior="padding">
         <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
           <View style={styles.grabber} />
           <Text style={styles.title}>Mailboxes</Text>

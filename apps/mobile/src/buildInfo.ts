@@ -29,4 +29,10 @@
 //              "mail" notification channel bumped DEFAULT → HIGH so new-mail notifications
 //              show a heads-up banner instead of sound-only. Pairs with the backend sending
 //              pushes at priority "high" (Samsung-style app freezers defer normal priority).
-export const BUILD_TAG = "2026-07-14b";
+// 2026-07-14c: Android — the add-mailbox bottom sheet no longer hides under the
+//              keyboard (KeyboardAvoidingView now pads on Android too; RN Modal
+//              windows don't adjustResize like the activity window).
+// 2026-07-15a: same keyboard fix for the sign-in and compose screens — with
+//              edge-to-edge Android never resizes the window, so every
+//              KeyboardAvoidingView needs behavior="padding", not ios-only.
+export const BUILD_TAG = "2026-07-15a";

@@ -247,7 +247,9 @@ export function ComposeScreen({ route, navigation }: Props) {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    // "padding" on Android too — with edge-to-edge the window doesn't shrink for
+    // the keyboard (same fix as LoginScreen/MailboxSwitcher).
+    <KeyboardAvoidingView style={styles.flex} behavior="padding">
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
         <TouchableOpacity onPress={cancel} disabled={busy} style={styles.iconBtn} hitSlop={8} accessibilityLabel="Close">
