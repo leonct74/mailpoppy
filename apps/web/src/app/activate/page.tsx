@@ -1,10 +1,11 @@
 "use client";
 
-// The activation funnel the desktop app links to ("See the pricing"). It carries a domain + its
-// PUBLIC backend config in the URL. Here the admin sees the price, what the service is, and the
-// terms; signs in or signs up (email/password or Google); and subscribes. On sign-in we register
-// the domain with the Hub so it's bound + resolvable; on checkout success we confirm it's live and
-// point at the apps.
+// The "Update mobile settings" page the desktop app opens for a domain. MailPoppy's paywall now
+// lives IN THE APP (the AgentsPoppy in-app purchase), so this page NO LONGER sells a subscription.
+// Its only jobs: sign the admin in, RE-REGISTER the domain's live backend config with the Hub (which
+// fixes a stale config after a redeploy so mobile/web sign-in keeps working), and show whether mobile
+// access is on — using the authoritative resolve gate (which honours AgentsPoppy purchases, admin
+// comps, the seed, and legacy access). Purchases happen in the desktop app, never here.
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import {
   signInWithEmailAndPassword,
@@ -28,12 +29,6 @@ import {
   ArrowRightIcon,
 } from "@/components/webmail/icons";
 
-interface PriceInfo {
-  amount: number | null;
-  currency: string;
-  interval: string | null;
-  intervalCount: number;
-}
 interface Deployment {
   region: string;
   userPoolId: string;
@@ -44,7 +39,6 @@ interface Deployment {
 function friendlyAuthError(e: unknown): string {
   const code = (e as { code?: string })?.code ?? "";
   switch (code) {
-    // The user dismissed the Google popup — not an error worth shouting about.
     case "auth/popup-closed-by-user":
     case "auth/cancelled-popup-request":
     case "auth/user-cancelled":
@@ -68,33 +62,6 @@ function friendlyAuthError(e: unknown): string {
   }
 }
 
-function formatPrice(p: PriceInfo | null): string | null {
-  if (!p || p.amount == null) return null;
-  const money = new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: (p.currency || "usd").toUpperCase(),
-  }).format(p.amount / 100);
-  if (!p.interval) return money;
-  const every = p.intervalCount > 1 ? `${p.intervalCount} ${p.interval}s` : p.interval;
-  return `${money} / ${every}`;
-}
-
-// Plain words for the billing cycle, derived from the real Stripe price so the terms can't drift.
-function billingCadence(p: PriceInfo | null): string {
-  if (!p?.interval) return "";
-  if (p.intervalCount > 1) return `every ${p.intervalCount} ${p.interval}s`;
-  return p.interval === "year" ? "yearly" : p.interval === "month" ? "monthly" : `per ${p.interval}`;
-}
-function periodNoun(p: PriceInfo | null): string {
-  if (!p?.interval) return "period";
-  return p.intervalCount > 1 ? `${p.intervalCount} ${p.interval}s` : p.interval; // "year" | "month"
-}
-function renewWord(p: PriceInfo | null): string {
-  if (!p?.interval) return "each period";
-  if (p.intervalCount > 1) return `every ${p.intervalCount} ${p.interval}s`;
-  return p.interval === "year" ? "each year" : p.interval === "month" ? "each month" : `each ${p.interval}`;
-}
-
 export default function ActivatePage() {
   const auth = getClientAuth();
   const [user, setUser] = useState<User | null>(null);
@@ -102,16 +69,10 @@ export default function ActivatePage() {
 
   const [domain, setDomain] = useState<string | null>(null);
   const [deployment, setDeployment] = useState<Deployment | null>(null);
-  const [activated, setActivated] = useState<string | null>(null);
-  const [activeDomains, setActiveDomains] = useState<string[]>([]);
-  // True once we've confirmed THIS domain is already on for the signed-in account (paid or comped) —
-  // so a config refresh (re-registering after a redeploy) shows a "you're set" confirmation instead
-  // of a "Subscribe" button that reads like paying again.
-  const [alreadyActive, setAlreadyActive] = useState(false);
-
-  const [price, setPrice] = useState<PriceInfo | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Entitlement of THIS domain, from the authoritative resolve gate (200 = on by any means:
+  // AgentsPoppy purchase, admin comp, the seed, or legacy). Drives the confirmation vs. "set up in
+  // the app" copy — never a subscribe button.
+  const [status, setStatus] = useState<"checking" | "active" | "inactive">("checking");
 
   const [mode, setMode] = useState<"signin" | "signup">("signup");
   const [email, setEmail] = useState("");
@@ -120,11 +81,10 @@ export default function ActivatePage() {
   const [submitting, setSubmitting] = useState(false);
   const registeredRef = useRef(false);
 
-  // Parse the URL (domain + base64 deployment + post-checkout flag).
+  // Parse the URL (domain + base64 deployment).
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
     setDomain(q.get("domain"));
-    setActivated(q.get("activated"));
     const dep = q.get("dep");
     if (dep) {
       try {
@@ -133,13 +93,6 @@ export default function ActivatePage() {
         /* ignore malformed */
       }
     }
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/price")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((p) => p && setPrice(p as PriceInfo))
-      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -153,9 +106,7 @@ export default function ActivatePage() {
     });
   }, [auth]);
 
-  // If Google sign-in fell back to a full-page redirect, the success lands via
-  // onAuthStateChanged above; here we only surface a redirect *error* (e.g. the
-  // provider isn't enabled, or the domain isn't authorised) so it isn't swallowed.
+  // Surface a Google redirect-sign-in error (the success lands via onAuthStateChanged).
   useEffect(() => {
     if (!auth) return;
     getRedirectResult(auth).catch((err) => {
@@ -164,8 +115,8 @@ export default function ActivatePage() {
     });
   }, [auth]);
 
-  // Once signed in with a domain to bind, register it (idempotent) so it's resolvable + appears
-  // on the dashboard even before checkout.
+  // Re-register the domain's LIVE backend config (idempotent) so it's resolvable + fresh after a
+  // redeploy. Needs the signed-in admin's token (a domain is owned by one account).
   const ensureRegistered = useCallback(async () => {
     const u = auth?.currentUser;
     if (!u || !domain || !deployment || registeredRef.current) return;
@@ -178,50 +129,25 @@ export default function ActivatePage() {
       });
       if (res.ok) registeredRef.current = true;
     } catch {
-      /* best-effort; subscribe re-tries */
+      /* best-effort */
     }
   }, [auth, domain, deployment]);
 
+  // Once signed in: re-register the live config, then read the domain's entitlement from the
+  // authoritative resolve gate (covers AgentsPoppy purchase / comp / seed / legacy).
   useEffect(() => {
-    if (user) void ensureRegistered();
-  }, [user, ensureRegistered]);
-
-  // Pre-checkout: if this domain is ALREADY active for the signed-in account (a config refresh after
-  // a redeploy, or a repeat visit), detect it so we don't offer a redundant "Subscribe". Sign-in has
-  // already re-registered the live config via ensureRegistered, so this really is a done deal.
-  useEffect(() => {
-    if (!user || !domain || activated) return;
+    if (!user || !domain) return;
+    setStatus("checking");
     void (async () => {
+      await ensureRegistered();
       try {
-        const token = await user.getIdToken();
-        const res = await fetch("/api/account", { headers: { Authorization: `Bearer ${token}` } });
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          domains?: { domain: string; mobileActive?: boolean; manualEntitlement?: boolean }[];
-        };
-        const d = (data.domains ?? []).find((x) => x.domain.toLowerCase() === domain.toLowerCase());
-        setAlreadyActive(!!d && (!!d.mobileActive || !!d.manualEntitlement));
+        const res = await fetch(`/api/resolve?domain=${encodeURIComponent(domain)}`, { cache: "no-store" });
+        setStatus(res.ok ? "active" : "inactive");
       } catch {
-        /* best-effort — fall back to the normal subscribe path */
+        setStatus("inactive");
       }
     })();
-  }, [user, domain, activated]);
-
-  // On the post-checkout screen, list the account's active domains for the confirmation copy.
-  useEffect(() => {
-    if (!activated || !user) return;
-    void (async () => {
-      try {
-        const token = await user.getIdToken();
-        const res = await fetch("/api/account", { headers: { Authorization: `Bearer ${token}` } });
-        if (!res.ok) return;
-        const data = (await res.json()) as { domains?: { domain: string; mobileActive?: boolean }[] };
-        setActiveDomains((data.domains ?? []).filter((d) => d.mobileActive).map((d) => d.domain));
-      } catch {
-        /* ignore */
-      }
-    })();
-  }, [activated, user]);
+  }, [user, domain, ensureRegistered]);
 
   async function submitLogin(e: FormEvent) {
     e.preventDefault();
@@ -247,9 +173,6 @@ export default function ActivatePage() {
       await signInWithPopup(auth, provider);
     } catch (err) {
       const code = (err as { code?: string })?.code ?? "";
-      // Some browsers block the popup (or don't support it — e.g. an in-app webview).
-      // Fall back to a full-page redirect, which always works; we navigate away, so the
-      // spinner stays on and the result comes back via getRedirectResult/onAuthStateChanged.
       if (code === "auth/popup-blocked" || code === "auth/operation-not-supported-in-this-environment") {
         try {
           await signInWithRedirect(auth, provider);
@@ -265,98 +188,16 @@ export default function ActivatePage() {
     }
   }
 
-  async function subscribe() {
-    const u = auth?.currentUser;
-    if (!u || !domain) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await ensureRegistered();
-      const token = await u.getIdToken();
-      const res = await fetch("/api/account/checkout", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ domain, returnTo: "/activate" }),
-      });
-      const j = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
-      if (!res.ok) throw new Error(j.error ?? `HTTP ${res.status}`);
-      if (j.url) {
-        window.location.href = j.url;
-        return;
-      }
-      window.location.href = `/activate?activated=${encodeURIComponent(domain)}`;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't start checkout.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const priceLabel = formatPrice(price);
-
-  // --- success screen (post-checkout) -------------------------------------
-  if (activated) {
-    const others = activeDomains.filter((d) => d !== activated);
-    return (
-      <Shell>
-        <Glow />
-        <div className="relative mx-auto max-w-xl text-center">
-          <Logo size="lg" className="mx-auto" />
-          <div className="border-hairline bg-surface-container mt-8 rounded-3xl border p-8 sm:p-10">
-            <div className="text-4xl">🎉</div>
-            <h1 className="text-heading mt-3 text-3xl font-bold tracking-tight">You&apos;re all set</h1>
-            <p className="text-text mt-4 leading-relaxed">
-              The MailPoppy app is now switched on for{" "}
-              <b className="text-heading">{activated}</b>
-              {others.length > 0 && (
-                <>
-                  {" "}
-                  and <b className="text-heading">{others.join(", ")}</b>
-                </>
-              )}
-              . Everyone with a mailbox there can sign in on iPhone, Android and the web.
-            </p>
-            {others.length > 0 && (
-              <p className="text-muted mt-3 text-sm leading-relaxed">
-                All {others.length + 1} of your domains live in the same app — anyone with mailboxes across them
-                switches between them in a tap.
-              </p>
-            )}
-            <div className="border-hairline bg-bg-elevated mt-7 rounded-2xl border p-5 text-left">
-              <div className="text-heading flex items-center gap-2 text-sm font-bold">
-                <span className="text-primary">
-                  <DevicesIcon size={16} />
-                </span>
-                Get the app
-              </div>
-              <p className="text-muted mt-1.5 text-sm leading-relaxed">
-                Sign in with your mailbox email and password. The MailPoppy app is{" "}
-                <b className="text-text">coming soon</b> to the App Store and Google Play.
-              </p>
-            </div>
-            <a
-              href="/account"
-              className="text-primary mt-6 inline-flex items-center gap-1.5 text-sm font-semibold hover:underline"
-            >
-              Manage your domains
-              <ArrowRightIcon size={14} />
-            </a>
-          </div>
-        </div>
-      </Shell>
-    );
-  }
-
   const benefits: { icon: typeof DevicesIcon; title: string; body: string }[] = [
     {
       icon: DevicesIcon,
       title: domain ? `One app for everyone on ${domain}` : "One app for everyone on your domain",
-      body: "Every mailbox on the domain signs in to the MailPoppy app for iPhone, Android and the web — one price covers them all, with no per-person fee.",
+      body: "Every mailbox on the domain signs in to the MailPoppy app for iPhone, Android and the web — no per-person fee.",
     },
     {
       icon: GlobeIcon,
       title: "Run several domains? One app holds them all",
-      body: "Activate each domain you run and they live side by side in the same app. Anyone with mailboxes across them switches in a tap — made for people shipping multiple products, each on its own domain.",
+      body: "Each domain you run lives side by side in the same app. Anyone with mailboxes across them switches in a tap.",
     },
     {
       icon: BoltIcon,
@@ -366,7 +207,7 @@ export default function ActivatePage() {
     {
       icon: LockIcon,
       title: "Your mail never leaves your AWS",
-      body: "The app only connects to the backend in your own account. We never see, store or route your email — activation just unlocks the apps.",
+      body: "The app only connects to the backend in your own account. We never see, store or route your email.",
     },
   ];
 
@@ -378,61 +219,32 @@ export default function ActivatePage() {
 
         {/* Hero */}
         <div className="mt-10 max-w-2xl">
-          <span className="text-primary text-sm font-semibold tracking-wide uppercase">Activate the mobile app</span>
+          <span className="text-primary text-sm font-semibold tracking-wide uppercase">Mobile app settings</span>
           <h1 className="text-heading mt-3 text-4xl font-bold tracking-tight sm:text-5xl">
             Take {domain ? <span className="text-primary">{domain}</span> : "your email"} everywhere.
           </h1>
           {domain ? (
             <p className="text-muted mt-4 text-lg leading-relaxed">
-              Switch on the MailPoppy app for <b className="text-text">{domain}</b> — so everyone with a mailbox here
-              reads, replies and gets push notifications from their phone.
+              Sign in to refresh the mobile &amp; web app settings for <b className="text-text">{domain}</b> — so
+              everyone with a mailbox here can keep signing in from their phone.
             </p>
           ) : (
             <p className="text-muted mt-4 text-lg leading-relaxed">
-              Open this page from the <b className="text-text">MailPoppy desktop app</b> — one tap on “Take it mobile”
-              brings your domain here, ready to activate.
+              Open this page from the <b className="text-text">MailPoppy desktop app</b> to bring your domain here.
             </p>
           )}
         </div>
 
-        {/* Benefits (left) + pricing & auth card (right) */}
+        {/* Benefits (left) + sign-in / status card (right) */}
         <div className="mt-10 grid gap-8 lg:grid-cols-5 lg:items-start">
-          {/* Pricing + auth — first on mobile so the action is reachable, right column on desktop. */}
           <div className="order-1 lg:order-2 lg:col-span-2 lg:sticky lg:top-8">
             <div className="border-primary/30 bg-surface-high rounded-3xl border p-7 shadow-2xl">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-primary text-xs font-semibold tracking-wide uppercase">Mobile &amp; web apps</span>
-                <span className="border-hairline bg-surface text-muted rounded-full border px-2.5 py-1 text-[11px] font-semibold">
-                  per domain
-                </span>
-              </div>
-              <div className="mt-3 flex items-baseline gap-2">
-                <span className="text-heading text-4xl font-bold">{priceLabel ?? "Coming soon"}</span>
-              </div>
-              <p className="text-muted mt-2 text-sm leading-relaxed">
-                {billingCadence(price) ? `Billed ${billingCadence(price)}, ` : ""}per domain, paid by you — the people
-                with mailboxes never see a bill.
+              <span className="text-primary text-xs font-semibold tracking-wide uppercase">Mobile &amp; web apps</span>
+              <p className="text-muted mt-3 text-sm leading-relaxed">
+                Sign in as the person who manages {domain ? <b className="text-text">{domain}</b> : "your domain"} to
+                refresh its app settings. Buying mobile access is done in the desktop app — not here.
               </p>
 
-              <ul className="mt-5 space-y-2.5">
-                {[
-                  "Everyone on this domain gets the mobile & web apps",
-                  `Renews automatically ${renewWord(price)} — cancel anytime`,
-                  `Keep access to the end of the ${periodNoun(price)} you've paid for`,
-                  "Your mail keeps running in your own AWS",
-                ].map((t) => (
-                  <li key={t} className="text-text flex items-start gap-2.5 text-sm leading-relaxed">
-                    <span className="text-primary mt-0.5 shrink-0">
-                      <CheckCircleIcon size={16} />
-                    </span>
-                    {t}
-                  </li>
-                ))}
-              </ul>
-
-              {error && <p className="text-danger mt-5 text-sm">{error}</p>}
-
-              {/* Auth + subscribe */}
               <div className="mt-6">
                 {!authReady ? (
                   <p className="text-dim text-sm">Loading…</p>
@@ -497,15 +309,17 @@ export default function ActivatePage() {
                       {mode === "signup" ? "Already have an account? Sign in" : "Need an account? Create one"}
                     </button>
                   </div>
-                ) : alreadyActive ? (
+                ) : status === "checking" ? (
+                  <p className="text-dim text-sm">Refreshing {domain}…</p>
+                ) : status === "active" ? (
                   <div className="border-primary/30 bg-primary/[0.07] rounded-xl border p-4">
                     <div className="text-heading flex items-center gap-2 font-semibold">
                       <CheckCircleIcon size={18} />
-                      {domain} is already active
+                      {domain} is on
                     </div>
                     <p className="text-muted mt-1.5 text-sm leading-relaxed">
-                      Your mobile settings are up to date — everyone with a mailbox on {domain} can sign in on the
-                      app. No new charge.
+                      Mobile settings refreshed — everyone with a mailbox on {domain} can sign in on the app. No
+                      charge; this just updated the app to point at your current backend.
                     </p>
                     <a
                       href="/account"
@@ -515,17 +329,14 @@ export default function ActivatePage() {
                     </a>
                   </div>
                 ) : (
-                  <div>
-                    <button
-                      onClick={() => void subscribe()}
-                      disabled={busy || !domain}
-                      className="bg-primary text-primary-text flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-bold tracking-wide transition-opacity hover:opacity-90 disabled:opacity-60"
-                    >
-                      {busy ? "Starting checkout…" : priceLabel ? `Subscribe — ${priceLabel}` : "Subscribe"}
-                      {!busy && <ArrowRightIcon size={16} />}
-                    </button>
-                    <p className="text-dim mt-2.5 text-center text-xs">
-                      Signed in as {user.email ?? "your account"}. Secure checkout via Stripe.
+                  <div className="border-hairline bg-surface rounded-xl border p-4">
+                    <div className="text-heading flex items-center gap-2 font-semibold">
+                      <DevicesIcon size={18} /> Set it up in the app
+                    </div>
+                    <p className="text-muted mt-1.5 text-sm leading-relaxed">
+                      Mobile access for {domain} isn&apos;t on yet. Set it up right inside the{" "}
+                      <b className="text-text">MailPoppy desktop app</b> — open this domain and choose{" "}
+                      <b className="text-text">Set up mobile access</b>. No separate signup here.
                     </p>
                   </div>
                 )}
@@ -536,7 +347,7 @@ export default function ActivatePage() {
               <span className="text-primary">
                 <ShieldIcon size={12} />
               </span>
-              We never see your mail — activation only unlocks the apps.
+              We never see your mail — this only refreshes the app settings.
             </p>
           </div>
 
