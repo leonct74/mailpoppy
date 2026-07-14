@@ -11,18 +11,15 @@ import { isDomainEntitled } from "./entitlement";
 import { fetchAgentsPoppyDomainEntitled } from "./agentspoppy";
 import type { AccountRecord, DeploymentConfig, DomainRecord, ResolveResult } from "./types";
 
-// Zero-infra quickstart: add your launch domain(s) here to resolve without Firestore.
-// These are PUBLIC client identifiers (same values the clients used to hard-code).
-const SEED: Record<string, DeploymentConfig> = {
-  // Launch domain — the first backend, served without Firestore. Same PUBLIC
-  // identifiers the clients used to hard-code, so this can't break the fallback path.
-  "mailpoppy.com": {
-    region: "eu-west-1",
-    userPoolId: "eu-west-1_yV09AF6Ja",
-    clientId: "361bkf3ja4ukgmqtgf17mbc37",
-    apiBaseUrl: "https://017dtrbes1.execute-api.eu-west-1.amazonaws.com",
-  },
-};
+// OPTIONAL in-code fallback so a domain can resolve before Firestore is seeded. Deliberately EMPTY:
+// mailpoppy.com used to be hard-seeded here, but a hard-coded deployment is a trap — resolveDomain
+// returns the seed BEFORE reading Firestore, so a real registration can never override it, and the
+// pinned backend goes stale/dead the moment that stack is redeployed or torn down (exactly what
+// happened: it pinned a Cognito pool + API that no longer exist, leaving mailpoppy.com permanently
+// "stale" with no way to fix it from the app). Every domain — mailpoppy.com included — now resolves
+// from its Firestore registration + the entitlement gate. Only re-add an entry for a PERMANENT backend
+// you will never rebuild.
+const SEED: Record<string, DeploymentConfig> = {};
 
 const DOMAIN_RE = /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/;
 
