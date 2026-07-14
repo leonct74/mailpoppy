@@ -44,6 +44,9 @@ export async function GET(req: NextRequest) {
         domain: d.id,
         mobileActive: !!r.mobileActive,
         manualEntitlement: !!r.manualEntitlement,
+        // Paid through AgentsPoppy's in-app purchase (the current model) — surface it so the
+        // dashboard shows the domain as on and never offers the legacy Stripe charge button.
+        agentspoppyEntitled: !!r.agentspoppyEntitled,
         verified: !!r.verified,
       };
     });

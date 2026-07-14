@@ -27,7 +27,6 @@ import {
   GlobeIcon,
   CheckCircleIcon,
   ShieldIcon,
-  ArrowRightIcon,
   ClockIcon,
 } from "@/components/webmail/icons";
 
@@ -36,6 +35,9 @@ interface DomainRow {
   mobileActive: boolean;
   /** Admin comp — entitled with no Stripe seat; shown as active, not offered a charge button. */
   manualEntitlement?: boolean;
+  /** Paid through AgentsPoppy's in-app purchase (the current model) — shown as active; billing is
+   *  managed in the app, so no legacy charge/turn-off here. */
+  agentspoppyEntitled?: boolean;
   verified: boolean;
 }
 interface AccountData {
@@ -99,9 +101,9 @@ function planSummary(d: AccountData | null): { tone: "on" | "warn" | "off"; titl
     case "past_due":
       return { tone: "warn", title: "Payment past due", sub: "Update your card in “Manage billing” to keep access." };
     case "canceled":
-      return { tone: "off", title: "Subscription ended", sub: "Activate a domain below to start again." };
+      return { tone: "off", title: "Subscription ended", sub: "Set up mobile access from the MailPoppy desktop app." };
     default:
-      return { tone: "off", title: "No active plan yet", sub: "Activate a domain below to switch on the apps." };
+      return { tone: "off", title: "No legacy plan", sub: "Mobile access is set up in the MailPoppy desktop app now." };
   }
 }
 
@@ -458,7 +460,7 @@ export default function AccountPage() {
           </div>
         )}
         {data?.domains.map((d) => {
-          const on = d.mobileActive || d.manualEntitlement;
+          const on = d.mobileActive || d.manualEntitlement || d.agentspoppyEntitled;
           return (
             <div
               key={d.domain}
@@ -478,15 +480,23 @@ export default function AccountPage() {
                 </div>
               </div>
               {d.manualEntitlement ? (
-                // Admin comp: entitled with no Stripe seat — show it as on, but no charge/turn-off
-                // (billing for a comp isn't the admin's to manage here).
+                // Admin comp: entitled with no Stripe seat — show it as on, but no charge/turn-off.
                 <span
                   className="bg-primary/15 text-primary inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold"
                   title="Complimentary access granted by MailPoppy — no charge"
                 >
                   <CheckCircleIcon size={13} /> Active · complimentary
                 </span>
+              ) : d.agentspoppyEntitled ? (
+                // Paid through the app's in-app purchase — billing is managed there, not here.
+                <span
+                  className="bg-primary/15 text-primary inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold"
+                  title="Paid through the MailPoppy app — manage billing in the app"
+                >
+                  <CheckCircleIcon size={13} /> Active
+                </span>
               ) : d.mobileActive ? (
+                // Legacy Stripe subscription (pre-migration) — kept working; manage it in the portal.
                 <div className="flex items-center gap-3">
                   <span className="bg-primary/15 text-primary inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold">
                     <CheckCircleIcon size={13} /> Active
@@ -500,14 +510,10 @@ export default function AccountPage() {
                   </button>
                 </div>
               ) : (
-                <button
-                  onClick={() => act("/api/account/checkout", d.domain)}
-                  disabled={busy === d.domain}
-                  className="bg-primary text-primary-text inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold tracking-wide transition-opacity hover:opacity-90 disabled:opacity-60"
-                >
-                  {busy === d.domain ? "…" : "Activate"}
-                  {busy !== d.domain && <ArrowRightIcon size={15} />}
-                </button>
+                // Off — set up mobile access in the DESKTOP APP (AgentsPoppy in-app purchase). No
+                // charge button here: the old Stripe checkout is retired, and reviving it would risk
+                // paying twice for a domain already bought in the app.
+                <span className="text-dim text-sm">Set it up in the app</span>
               )}
             </div>
           );
