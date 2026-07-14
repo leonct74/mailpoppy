@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "683917367399",
+    "project_id": "mailpoppy-c33f0",
+    "storage_bucket": "mailpoppy-c33f0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:683917367399:android:b5293d5b4db99cabeb5cc2",
+        "android_client_info": {
+          "package_name": "com.mailpoppy.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "683917367399-b691vpmvpff1u4fdutfrphpkve94lnme.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAkx7UfjsFlZsN-8xQshmjJfNbYqvzXE1w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "683917367399-b691vpmvpff1u4fdutfrphpkve94lnme.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

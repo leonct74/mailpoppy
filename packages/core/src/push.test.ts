@@ -126,6 +126,7 @@ describe("buildExpoPushMessages", () => {
       title: "Marco Rossi",
       body: "Invoice for June",
       sound: "default",
+      priority: "high",
       data: { messageId: "m1", folder: "inbox" },
     });
   });

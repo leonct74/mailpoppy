@@ -24,4 +24,9 @@
 //              to the unlock screen — "this mailbox's key has changed, enter the current
 //              password" — instead of dead-ending on "crypto_box_seal_open failed". Mail
 //              sealed to a permanently-lost older key gets an honest plain-language message.
-export const BUILD_TAG = "2026-07-14a";
+// 2026-07-14b: Android push made real. Firebase/FCM wired in (google-services.json + gms
+//              plugin — the release build previously had no push transport at all), and the
+//              "mail" notification channel bumped DEFAULT → HIGH so new-mail notifications
+//              show a heads-up banner instead of sound-only. Pairs with the backend sending
+//              pushes at priority "high" (Samsung-style app freezers defer normal priority).
+export const BUILD_TAG = "2026-07-14b";

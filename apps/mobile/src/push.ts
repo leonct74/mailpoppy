@@ -76,7 +76,10 @@ async function ensureAndroidChannel(): Promise<void> {
   if (Platform.OS !== "android") return;
   await Notifications.setNotificationChannelAsync(MAIL_CHANNEL_ID, {
     name: "New mail",
-    importance: Notifications.AndroidImportance.DEFAULT,
+    // HIGH is the heads-up threshold on Android: DEFAULT plays a sound but never
+    // shows a banner. NB: the OS snapshots a channel's importance at first
+    // creation — existing installs keep DEFAULT until reinstalled.
+    importance: Notifications.AndroidImportance.HIGH,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
     sound: "default",
   });

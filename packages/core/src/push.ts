@@ -111,6 +111,10 @@ export interface ExpoPushMessage {
   sound?: "default" | null;
   data?: Record<string, unknown>;
   badge?: number;
+  /** Delivery priority. "high" wakes Android apps that the OS has frozen or
+   *  put in Doze (Samsung and friends freeze backgrounded apps within minutes);
+   *  without it, new-mail pushes are deferred until the user reopens the app. */
+  priority?: "default" | "normal" | "high";
   /** Android channel id (created on the device). */
   channelId?: string;
   /** Notification category — must match a category the app registered with the
@@ -159,6 +163,9 @@ export function buildExpoPushMessages(
       ...(title ? { title } : {}),
       ...(body ? { body } : {}),
       sound: "default",
+      // New mail is time-sensitive: high priority is what lets FCM wake a
+      // frozen/dozing Android app so the notification shows immediately.
+      priority: "high",
       ...(opts.data ? { data: opts.data } : {}),
       ...(typeof opts.badge === "number" ? { badge: opts.badge } : {}),
       ...(opts.channelId ? { channelId: opts.channelId } : {}),
