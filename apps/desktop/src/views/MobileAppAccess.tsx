@@ -181,9 +181,19 @@ export function MobileAppAccess({
               for. Link the domain so the apps can find your backend — a quick one-time sign-in.
             </span>
           </div>
-          <Button className="mt-3" disabled={!deployment || busy} onClick={() => void linkDomain()}>
-            {busy ? "Opening…" : "Finish setup →"}
-          </Button>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button disabled={!deployment || busy} onClick={() => void linkDomain()}>
+              {busy ? "Opening…" : "Finish setup →"}
+            </Button>
+            <button
+              type="button"
+              onClick={() => void manage()}
+              disabled={busy}
+              className="text-sm text-on-surface-variant underline hover:text-on-surface disabled:opacity-60"
+            >
+              Manage billing
+            </button>
+          </div>
           <p className="mt-2 text-xs text-on-surface-variant">Updates here automatically when you come back.</p>
           {feedback}
         </>
