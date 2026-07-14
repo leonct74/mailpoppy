@@ -132,6 +132,29 @@ export function clearMailboxKeySession(): void {
   clearAllMailboxKeys();
 }
 
+/**
+ * Has the ACTIVE mailbox been re-keyed on the server since this device cached its key?
+ *
+ * That happens when an ADMIN PASSWORD RESET makes the stored wrapping unopenable, so the
+ * next login generates a fresh keypair — while this device (whose Cognito session survives
+ * the reset) keeps decrypting with the OLD private key. New mail is sealed to the NEW public
+ * key, so every open fails with a cryptic "crypto_box_seal_open failed". Comparing the
+ * server record's public key against the cached session detects exactly that, letting the
+ * reader route to the unlock screen (re-sign-in re-establishes the key) instead of a dead end.
+ *
+ * Conservative: any doubt (no local key, no server record, fetch error) → false, so callers
+ * never mask an unrelated failure behind a password prompt.
+ */
+export async function isKeySessionStale(store: MailboxKeyStore): Promise<boolean> {
+  if (!active) return false; // no local key — that's "locked", not stale
+  try {
+    const { record } = await store.getMailboxKeys();
+    return !!record && record.publicKey !== active.publicKey;
+  } catch {
+    return false;
+  }
+}
+
 export interface EstablishOutcome {
   /** A keypair was generated this login (first login or a re-key). */
   created: boolean;

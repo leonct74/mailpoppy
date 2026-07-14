@@ -33,7 +33,7 @@ import {
   bustCachedFile,
   explainUnreadableFile,
 } from "../attachments";
-import { decryptEml, MailboxLockedError } from "../mailboxKeys";
+import { decryptEml, isKeySessionStale, MailboxLockedError } from "../mailboxKeys";
 import { loadCachedMessage, saveCachedMessage, removeCachedMessage } from "../messageCache";
 import { MessageBody } from "../components/MessageBody";
 import { ZoomableImage } from "../components/ZoomableImage";
@@ -62,7 +62,10 @@ export function MessageScreen({ route, navigation }: Props) {
   const [moving, setMoving] = useState(false);
   // The mailbox's encryption key isn't on this device (e.g. first read after an
   // app update) → offer an in-place unlock instead of a dead-end error.
+  // "keyChanged" = this device HOLDS a key, but the mailbox was re-keyed on the
+  // server (an admin password reset) — same unlock flow, different explanation.
   const [locked, setLocked] = useState(false);
+  const [lockedReason, setLockedReason] = useState<"locked" | "keyChanged">("locked");
   const [pw, setPw] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
@@ -156,7 +159,34 @@ export function MessageScreen({ route, navigation }: Props) {
       } catch (e) {
         if (!alive) return;
         if (e instanceof MailboxLockedError) {
+          setLockedReason("locked");
           setLocked(true);
+          return;
+        }
+        // A decrypt failure while this device HOLDS a key usually means the mailbox
+        // was RE-KEYED on the server: an admin password reset makes the old wrapping
+        // unopenable, the next login generates a fresh keypair — but this device's
+        // Cognito session survives the reset, so it keeps decrypting new mail (sealed
+        // to the NEW key) with the OLD one and dies with "crypto_box_seal_open failed".
+        // Detect it by comparing the server key record with the cached session, and
+        // route to the unlock screen (re-sign-in re-establishes the key) instead of
+        // dead-ending on a cryptic error.
+        if (await isKeySessionStale(mail)) {
+          if (!alive) return;
+          setLockedReason("keyChanged");
+          setLocked(true);
+          return;
+        }
+        // A seal failure with keys that DO match the server means this message was
+        // sealed to an OLDER keypair the mailbox no longer has (lost in a past
+        // password reset without its recovery key). Permanent by design — say so
+        // plainly instead of blaming the network.
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/seal_open|crypto_box/i.test(msg)) {
+          if (!alive) return;
+          setError(
+            "This message was encrypted to an older key this mailbox no longer has (usually one replaced by a password reset). It can't be opened on any device.",
+          );
           return;
         }
         // A rebuilt backend (teardown+redeploy → new Cognito pool/API) leaves this
@@ -419,10 +449,17 @@ export function MessageScreen({ route, navigation }: Props) {
           <View style={styles.lockBadge}>
             <Ionicons name="lock-closed" size={26} color={colors.primary} />
           </View>
-          <Text style={styles.errorTitle}>This message is encrypted</Text>
+          <Text style={styles.errorTitle}>
+            {lockedReason === "keyChanged" ? "This mailbox's key has changed" : "This message is encrypted"}
+          </Text>
           <Text style={styles.errorText}>
-            Enter the password for {activeEmail ?? "this mailbox"} to unlock it on this device. You'll
-            only need to do this once.
+            {lockedReason === "keyChanged"
+              ? `This usually happens after a password reset. Enter the current password for ${
+                  activeEmail ?? "this mailbox"
+                } to update this device — then your mail will open again.`
+              : `Enter the password for ${
+                  activeEmail ?? "this mailbox"
+                } to unlock it on this device. You'll only need to do this once.`}
           </Text>
           <View style={styles.unlockWrap}>
             <TextInput

@@ -19,4 +19,9 @@
 //              session (even on the background refresh), auto-heals what it can, and — if the
 //              token is truly dead — surfaces a "lost its connection" banner with an inline
 //              password reconnect, instead of a silent empty inbox needing a remove + re-add.
-export const BUILD_TAG = "2026-07-10b";
+// 2026-07-14a: a message that fails to decrypt because the mailbox was RE-KEYED (an admin
+//              password reset → fresh keypair, while this device kept the old one) now routes
+//              to the unlock screen — "this mailbox's key has changed, enter the current
+//              password" — instead of dead-ending on "crypto_box_seal_open failed". Mail
+//              sealed to a permanently-lost older key gets an honest plain-language message.
+export const BUILD_TAG = "2026-07-14a";
