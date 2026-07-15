@@ -41,7 +41,7 @@ export function accountInGoodStanding(
 /** Is THIS domain's client access entitled right now? In precedence:
  *  1. `manualEntitlement` — admin comp, bypasses everything (testing/partners).
  *  2. `agentspoppyEntitled` — the domain was purchased through AgentsPoppy's in-app checkout
- *     (the current model — a one-time-per-domain `domain-access` buy). This mirror is set by the
+ *     (the current model — a per-domain `domain-access` subscription). This mirror is set by the
  *     AgentsPoppy purchase webhook / a live entitlement check (see agentspoppy.ts); AgentsPoppy is
  *     the source of truth, so it needs no local Stripe account/standing.
  *  3. LEGACY per-domain Stripe: activated (`mobileActive`) AND the owning account in good standing.

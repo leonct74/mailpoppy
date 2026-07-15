@@ -578,7 +578,9 @@ solo admin needs zero config.
 ## Terminology / positioning (keep consistent)
 
 - Sell **per domain, unlimited mailboxes** — never frame as "per seat / per user."
-- "**Pay once**" (perpetual) + optional **≤ $15/yr** updates. No "subscription"-led messaging.
+- **Subscription per domain** (the AgentsPoppy first-party `domain-access` product,
+  `kind=subscription`, cancellable via the built-in billing portal). The old "pay once +
+  paid updates" framing is retired (2026-07-15) — don't reintroduce it in copy or docs.
 - Lead with **ownership / your-own-AWS / no lock-in**.
 
 ## Cross-references
