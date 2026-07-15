@@ -47,10 +47,12 @@ const VERSION = "0.1.9";
 /**
  * The host-spawned backend binary name. The sidecar is built per Rust target triple
  * (see node-sidecar/scripts/build-sidecar.mjs) and laid out under the installed
- * extension root as backend/<binary>. For the current dev/build host that's the
- * aarch64 macOS slice; cross-arch packaging is handled at install-layout time.
+ * extension root as backend/<binary>. The triple is overridable at manifest-build
+ * time (MAILPOPPY_BACKEND_TRIPLE) so cross-target packages (e.g. win32-x64) carry
+ * a manifest naming THEIR binary; Windows packages ship it with .exe, which the
+ * host appends at spawn — the manifest entry stays extension-less.
  */
-const BACKEND_BINARY = "mailpoppy-sidecar-aarch64-apple-darwin";
+const BACKEND_BINARY = `mailpoppy-sidecar-${process.env.MAILPOPPY_BACKEND_TRIPLE ?? "aarch64-apple-darwin"}`;
 
 /**
  * Build MailPoppy's extension manifest from its real declared scope.
