@@ -22,6 +22,39 @@ export function activationUrl(domain: string, deployment: DeploymentForHub): str
   return `${HUB_URL}/activate?${new URLSearchParams({ domain, dep }).toString()}`;
 }
 
+/**
+ * Are the MailPoppy native apps actually downloadable yet? Server-driven (env `MOBILE_APPS_LIVE` on
+ * the Hub) so it flips for every installed desktop at once the day the apps ship — the desktop can't
+ * push a release to every copy. Defaults to FALSE on any error: we'd rather show "coming soon" than
+ * sell a download that doesn't exist.
+ */
+export async function mobileAppsLive(): Promise<boolean> {
+  try {
+    const res = await fetch(`${HUB_URL}/api/mobile-status`, { cache: "no-store" });
+    if (!res.ok) return false;
+    const j = (await res.json()) as { live?: boolean };
+    return j.live === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Record "notify me when the mobile app is out" for a domain's admin. Best-effort; never throws. */
+export async function notifyMobileInterest(email: string, domain: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${HUB_URL}/api/mobile-notify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, domain }),
+    });
+    if (!res.ok) return false;
+    const j = (await res.json()) as { ok?: boolean };
+    return j.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 /** What the Hub currently knows about a domain, relative to the LIVE backend it should point at. */
 export type HubDomainStatus =
   | "current" // registered, entitled, and its stored config MATCHES the live backend

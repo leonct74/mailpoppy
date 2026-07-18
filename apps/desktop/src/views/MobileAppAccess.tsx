@@ -3,7 +3,14 @@ import { Smartphone, AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react
 import { Card, Button } from "../ui";
 import { openExternal } from "../lib/openExternal";
 import { startDomainCheckout, openBillingPortal, isDomainPurchased } from "../lib/commerce";
-import { activationUrl, checkHubDomain, type DeploymentForHub, type HubDomainStatus } from "../lib/hubAccount";
+import {
+  activationUrl,
+  checkHubDomain,
+  mobileAppsLive,
+  notifyMobileInterest,
+  type DeploymentForHub,
+  type HubDomainStatus,
+} from "../lib/hubAccount";
 
 // Per-domain "mobile app" panel. Access is bought through AgentsPoppy's in-app checkout (the
 // `domain-access` product, scoped to this domain). This panel reflects TWO facts:
@@ -44,36 +51,45 @@ export function MobileAppAccess({
 }) {
   const [status, setStatus] = useState<HubDomainStatus | "loading">("loading");
   const [purchased, setPurchased] = useState(false);
+  // Are the native apps downloadable yet? Until they are, the unpurchased state shows "coming soon +
+  // notify me" instead of a purchase button — we never sell a download that doesn't exist. Defaults
+  // to false (coming soon) so a failed/slow check can't reveal a buy button prematurely.
+  const [appsLive, setAppsLive] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [fallbackUrl, setFallbackUrl] = useState<string | null>(null); // shown if the OS hand-off failed
 
-  // Read both truths: the AgentsPoppy purchase state (target = domain) and the Hub's registration
-  // status for the live backend. Both are best-effort — a failure leaves the safe default.
+  // Read the three truths: the AgentsPoppy purchase state (target = domain), the Hub's registration
+  // status for the live backend, and whether the mobile apps are live yet. All best-effort — a
+  // failure leaves the safe default.
   const refresh = useCallback(async () => {
-    const [p, s] = await Promise.all([
+    const [p, s, l] = await Promise.all([
       isDomainPurchased(domain).catch(() => false),
       deployment
         ? checkHubDomain(domain, deployment).catch((): HubDomainStatus => "unknown")
         : Promise.resolve<HubDomainStatus>("unknown"),
+      mobileAppsLive().catch(() => false),
     ]);
     setPurchased(p);
     setStatus(s);
+    setAppsLive(l);
   }, [domain, deployment]);
 
   useEffect(() => {
     let cancelled = false;
     setStatus("loading");
     void (async () => {
-      const [p, s] = await Promise.all([
+      const [p, s, l] = await Promise.all([
         isDomainPurchased(domain).catch(() => false),
         deployment
           ? checkHubDomain(domain, deployment).catch((): HubDomainStatus => "unknown")
           : Promise.resolve<HubDomainStatus>("unknown"),
+        mobileAppsLive().catch(() => false),
       ]);
       if (!cancelled) {
         setPurchased(p);
         setStatus(s);
+        setAppsLive(l);
       }
     })();
     return () => {
@@ -88,6 +104,21 @@ export function MobileAppAccess({
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
+
+  // "Notify me" capture shown while the apps aren't live yet.
+  const [notifyEmail, setNotifyEmail] = useState("");
+  const [notified, setNotified] = useState(false);
+  const emailLooksValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(notifyEmail.trim());
+  const notifyMe = async () => {
+    if (!emailLooksValid) return;
+    setBusy(true);
+    setErr(null);
+    // Best-effort: the endpoint never hard-fails, so we thank the user regardless (a storage blip
+    // shouldn't read as "your interest was rejected").
+    await notifyMobileInterest(notifyEmail.trim(), domain);
+    setBusy(false);
+    setNotified(true);
+  };
 
   // Buy this domain's access through AgentsPoppy's in-app checkout.
   const buy = async () => {
@@ -210,8 +241,44 @@ export function MobileAppAccess({
           <p className="mt-2 text-xs text-on-surface-variant">Updates here automatically when you come back.</p>
           {feedback}
         </>
+      ) : !appsLive ? (
+        // Apps aren't downloadable yet → honest "coming soon", no purchase. We never take money for a
+        // download that doesn't exist; the buy button returns on its own once the Hub flips the flag.
+        <>
+          <p className="mt-1 max-w-2xl text-sm text-on-surface-variant">
+            The <b className="text-on-surface">MailPoppy</b> mobile app (iPhone &amp; Android, with push
+            notifications) is <b className="text-on-surface">coming soon</b> to the App Store &amp; Google Play.
+            Everyone with a mailbox on <b className="text-on-surface">{domain}</b> already has free{" "}
+            <b className="text-on-surface">webmail in the browser</b> today.
+          </p>
+          {notified ? (
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-secondary/30 bg-secondary/10 p-3 text-sm">
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-secondary" />
+              <span className="text-on-surface-variant">
+                Thanks — we’ll email you when the mobile app is available.
+              </span>
+            </div>
+          ) : (
+            <div className="mt-3 flex max-w-md flex-wrap items-center gap-2">
+              <input
+                type="email"
+                value={notifyEmail}
+                onChange={(e) => setNotifyEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="min-w-0 flex-1 rounded-lg border border-outline/40 bg-surface-container px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/60 focus:border-primary focus:outline-none"
+              />
+              <Button disabled={busy || !emailLooksValid} onClick={() => void notifyMe()}>
+                {busy ? "Saving…" : "Notify me"}
+              </Button>
+            </div>
+          )}
+          <p className="mt-2 text-xs text-on-surface-variant">
+            No charge now — you can set up paid mobile access once the app is live.
+          </p>
+          {feedback}
+        </>
       ) : (
-        // Not purchased → the in-app purchase.
+        // Apps are live → the in-app purchase.
         <>
           <p className="mt-1 max-w-2xl text-sm text-on-surface-variant">
             Activate the MailPoppy mobile app for <b className="text-on-surface">{domain}</b>, so the people with
