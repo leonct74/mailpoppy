@@ -47,6 +47,7 @@ To wrap the desktop frontend as a native **Tauri v2** app, see `apps/desktop/REA
 
 ## License
 
-MailPoppy is source-available under the [Functional Source License (FSL-1.1-Apache-2.0)](./LICENSE):
-read it, run it, build on it — just don't ship a competing product with it. Each release becomes
-Apache-2.0 two years on. The MailPoppy name and brand are not licensed with the code.
+MailPoppy is licensed under the [MIT License](./LICENSE) — read it, run it, build on it, ship it
+however you like. MailPoppy is a *poppy*: permissively licensed to grow the AgentsPoppy ecosystem.
+(Only the AgentsPoppy host it runs on is source-available under a non-compete license.) The
+MailPoppy name and brand are not licensed with the code.
