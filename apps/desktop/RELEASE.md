@@ -44,6 +44,15 @@ by hand; they audit and install inside AgentsPoppy.
 
 ## Steps
 
+### 0. Pre-flight — click-test every action before you package (don't skip)
+Before the version bump, run the app and **click every button/action on a throttled network** —
+compose/send, deploy, mailbox create, save policy/quota/retention, teardown, purchase, every control.
+Each must, within a blink, either show it's working (spinner + disabled so it can't double-fire) or
+show a result — and never sit there looking pressed-but-dead. This is the AgentsPoppy contract
+(AGENTS.md §9 *"Every button must respond"*) and the #1 recurring poppy defect: a dead/unresponsive
+button is exactly the kind of bug a code read misses and a click catches. **Reading the code is not
+the test — clicking it is.**
+
 ### 1. Bump the version — in THREE files, and they MUST match
 `extensionManifest.ts` literally comments "must match src-tauri/tauri.conf.json". Bump all three:
 
@@ -92,7 +101,7 @@ The release tag must point at the committed source so the audit's compare link w
 ```bash
 cd <repo root>
 git add -A
-git commit -m "release: v<v> — <summary>"   # end with the Co-Authored-By trailer
+git commit -m "release: v<v> — <summary>"   # NO Co-Authored-By trailer (founder IP/legal policy)
 git push origin main                          # this repo ships from main (no PRs)
 git tag v<v>
 git push origin v<v>
