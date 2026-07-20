@@ -50,7 +50,7 @@ export const FAQS: { q: string; a: string }[] = [
   },
   {
     q: "Is MailPoppy open source?",
-    a: "The engine is. The parts that matter most for trust — the mail backend that runs inside your AWS, the infrastructure definition with its least-privilege IAM policies, and the local component that handles your AWS credentials — are published as source-available code under the Functional Source License (which becomes Apache-2.0 two years after each release). The polished desktop app and any Pro features are proprietary, but the security-critical code is open for anyone to read.",
+    a: "Yes — all of it. MailPoppy is open under the MIT license: the desktop app, the mail backend that runs inside your AWS, the infrastructure definition with its least-privilege IAM policies, and the local component that handles your AWS credentials. Read it, run it, build on it — nothing is a proprietary black box. MailPoppy funds itself through an optional paid mobile app (priced per domain), never by keeping the code secret.",
   },
   {
     q: "How do I know my mail and credentials are really private?",

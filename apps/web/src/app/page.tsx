@@ -699,8 +699,8 @@ function OpenSource() {
     },
     {
       icon: CodeIcon,
-      title: "Source-available under the FSL",
-      body: "Free to read, run and build on under the Functional Source License — and every release becomes Apache-2.0 two years later. No black box, no lock-in.",
+      title: "Open source, under MIT",
+      body: "The whole of MailPoppy — desktop, backend and infrastructure — is free to read, run and build on under the MIT license. No black box, no lock-in.",
     },
   ];
   return (
