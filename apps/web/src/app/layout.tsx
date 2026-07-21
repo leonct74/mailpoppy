@@ -29,6 +29,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${hanken.variable} h-full antialiased`}>
+      <head>
+        {/* TrafficPoppy analytics — served from our own AWS (eu-west-1 Lambda URL). */}
+        <script
+          defer
+          src="https://cxmoxlb5izqlu33g6tbwjnwbau0ovgus.lambda-url.eu-west-1.on.aws/t.js"
+          data-site="mO8ZDEOdoI4x"
+        />
+      </head>
       <body className="bg-bg text-text flex min-h-full flex-col">{children}</body>
     </html>
   );
